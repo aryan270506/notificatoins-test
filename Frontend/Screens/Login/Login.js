@@ -15,10 +15,11 @@ import {
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { NavigationContainer } from '@react-navigation/native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 const { width, height } = Dimensions.get('window');
 const isWeb = Platform.OS === 'web';
 const isMobile = width < 768;
+import { connectSocket } from "../../utils/socket";
+import axiosInstance from "../../Src/Axios";
 
 const LoginScreen = ({navigation}) => {
   const [email, setEmail] = useState('');
@@ -31,40 +32,38 @@ const LoginScreen = ({navigation}) => {
 
   const handleLogin = async () => {
   try {
-    const response = await fetch("http://localhost:5001/api/auth/login", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-     body: JSON.stringify({
-  email,
-  password,
-  role   // add this
-})
+    const response = await axiosInstance.post("/auth/login", {
+      email,
+      password,
+      role,
     });
 
-    const data = await response.json();
-
-    if (!response.ok) {
-      alert(data.message || "Login failed");
-      return;
-    }
+    const data = response.data;
 
     switch (data.role) {
+
       case "admin":
-        navigation.navigate("AdminMain", { user: data.user });
+        console.log("✅ Admin Logged In:", data.user.name);
+        connectSocket({ ...data.user, role: data.role });
+        navigation.navigate("AdminMain");
         break;
 
       case "teacher":
-  await AsyncStorage.setItem('teacherId', data.user._id); // ✅ Save ID here
-  navigation.navigate("TeacherStack", { user: data.user });
-  break;
+        console.log("✅ Teacher Logged In:", data.user.name);
+        connectSocket({ ...data.user, role: data.role });
+        navigation.navigate("TeacherDashboard");
+        break;
+
       case "student":
+        console.log("✅ Student Logged In:", data.user.name);
+        connectSocket({ ...data.user, role: data.role });
         navigation.navigate("StudentMain", { user: data.user });
         break;
 
       case "parent":
-        navigation.navigate("Parentmaindashboard", { user: data.user });
+        console.log("✅ Parent Logged In:", data.user.name);
+        connectSocket({ ...data.user, role: data.role });
+        navigation.navigate("Parentmaindashboard");
         break;
 
       default:
@@ -72,8 +71,8 @@ const LoginScreen = ({navigation}) => {
     }
 
   } catch (error) {
-    console.log(error);
-    alert("Server error");
+    console.log("Login error:", error.response?.data || error.message);
+    alert(error.response?.data?.message || "Login failed");
   }
 };
 

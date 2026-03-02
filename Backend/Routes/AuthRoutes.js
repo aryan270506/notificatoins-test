@@ -16,7 +16,7 @@ router.post("/login", async (req, res) => {
 
     // ================= DUMMY ADMIN (remove after seeding DB) =================
     if (email === "1" && password === "123") {
-      return res.json({ role: "admin", user: { email, name: "Super Admin" } });
+      return res.json({ role: "admin", user: { _id: "dummy_admin_001", id: "1", email, name: "Super Admin" } });
     }
 
     // ================= CHECK STUDENT =================
