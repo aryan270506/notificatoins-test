@@ -1,18 +1,20 @@
 // QuizBuilderScreen.js
-// Full React Native Quiz Builder — Campus360
+// Full React Native Quiz Builder — UniVerse
 // First screen: Settings-style panel (Year, Division, Sub-Division optional)
 // Then: Quiz builder with MC/TF/SA, strip, points/time, duplicate/delete
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useContext } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   Modal, Switch, Platform, StatusBar,
-  StyleSheet, Animated, KeyboardAvoidingView,
+  StyleSheet, Animated, KeyboardAvoidingView, ActivityIndicator,
 } from 'react-native';
+import axiosInstance from '../../Src/Axios'; // adjust path as needed
+import { ThemeContext } from './TeacherStack';
 
 /* ─── Theme ── */
-const C = {
+const C_DARK = {
   bg:          '#0a0e1a',
   surface:     '#111827',
   card:        '#141d2e',
@@ -32,6 +34,26 @@ const C = {
   textMuted:   '#3d5a8a',
   white:       '#ffffff',
 };
+const C_LIGHT = {
+  bg:          '#F1F4FD',
+  surface:     '#FFFFFF',
+  card:        '#FFFFFF',
+  border:      '#DDE3F4',
+  borderLight: '#EAEEf9',
+  accent:      '#2563EB',
+  accentSoft:  'rgba(37,99,235,0.09)',
+  accentGlow:  'rgba(37,99,235,0.12)',
+  green:       '#059669',
+  greenSoft:   'rgba(5,150,105,0.09)',
+  red:         '#DC2626',
+  redSoft:     'rgba(220,38,38,0.08)',
+  amber:       '#D97706',
+  amberSoft:   'rgba(217,119,6,0.08)',
+  text:        '#0F172A',
+  textSec:     '#4B5563',
+  textMuted:   '#9CA3AF',
+  white:       '#ffffff',
+};
 
 /* ─── Data ── */
 const YEARS = [
@@ -47,6 +69,9 @@ const SUBJECTS = [
   'English', 'History', 'Geography', 'Computer Science',
   'Economics', 'Accountancy', 'Political Science', 'Physical Education',
 ];
+
+// ⚠️ Replace with actual logged-in teacher ID from your auth context/storage
+const TEACHER_ID = 'teacher_001';
 
 let _uid = 1;
 const uid = () => _uid++;
@@ -69,11 +94,14 @@ const makeQuestion = () => ({
 ══════════════════════════════════════════════════════════════════════ */
 function QuizSettingsSetup({ onProceed }) {
   const navigation = useNavigation();
+  const { isDark } = useContext(ThemeContext);
+  const C = isDark ? C_DARK : C_LIGHT;
+  const ss = makeSS(C);
 
   const [shuffle,     setShuffle]     = useState(true);
   const [autoGrade,   setAutoGrade]   = useState(true);
   const [lockBrowser, setLockBrowser] = useState(false);
-  const [quizTimeLimit, setQuizTimeLimit] = useState(30); // total quiz time in minutes
+  const [quizTimeLimit, setQuizTimeLimit] = useState(30);
 
   const [selYear,     setSelYear]     = useState(null);
   const [selDivision, setSelDivision] = useState(null);
@@ -94,9 +122,8 @@ function QuizSettingsSetup({ onProceed }) {
 
   return (
     <View style={ss.root}>
-      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={C.bg} />
 
-      {/* Top bar — matches screenshot */}
       <View style={ss.topbar}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={ss.closeBtn}>
           <Text style={ss.closeBtnText}>✕</Text>
@@ -125,7 +152,6 @@ function QuizSettingsSetup({ onProceed }) {
         <Text style={ss.sectionLabel}>CLASS &amp; DIVISION</Text>
         <View style={ss.card}>
 
-          {/* Year — required visually but not blocked */}
           <Text style={ss.fieldLabel}>Year</Text>
           <TouchableOpacity
             style={[ss.picker, yearOpen && ss.pickerOpen, selYear && ss.pickerSelected]}
@@ -160,7 +186,6 @@ function QuizSettingsSetup({ onProceed }) {
 
           <View style={ss.hr} />
 
-          {/* Division — optional */}
           <View style={ss.labelRow}>
             <Text style={ss.fieldLabel}>Division</Text>
             <View style={ss.optBadge}><Text style={ss.optBadgeText}>Optional</Text></View>
@@ -198,7 +223,6 @@ function QuizSettingsSetup({ onProceed }) {
 
           <View style={ss.hr} />
 
-          {/* Sub Division — optional */}
           <View style={ss.labelRow}>
             <Text style={ss.fieldLabel}>Sub Division</Text>
             <View style={ss.optBadge}><Text style={ss.optBadgeText}>Optional</Text></View>
@@ -234,7 +258,6 @@ function QuizSettingsSetup({ onProceed }) {
             </View>
           )}
 
-          {/* Summary badge */}
           {(selYear || selDivision || selSubDiv) && (
             <View style={ss.selBadge}>
               <View style={ss.selDot} />
@@ -295,24 +318,17 @@ function QuizSettingsSetup({ onProceed }) {
             <Text style={ss.fieldLabel}>Total Quiz Duration</Text>
           </View>
           <View style={ss.timeLimitRow}>
-            <TouchableOpacity
-              style={ss.timeLimitBtn}
-              onPress={() => setQuizTimeLimit(v => Math.max(5, v - 5))}
-              activeOpacity={0.7}>
+            <TouchableOpacity style={ss.timeLimitBtn} onPress={() => setQuizTimeLimit(v => Math.max(5, v - 5))} activeOpacity={0.7}>
               <Text style={ss.timeLimitBtnText}>−</Text>
             </TouchableOpacity>
             <View style={ss.timeLimitDisplay}>
               <Text style={ss.timeLimitValue}>{quizTimeLimit}</Text>
               <Text style={ss.timeLimitUnit}>min</Text>
             </View>
-            <TouchableOpacity
-              style={ss.timeLimitBtn}
-              onPress={() => setQuizTimeLimit(v => Math.min(180, v + 5))}
-              activeOpacity={0.7}>
+            <TouchableOpacity style={ss.timeLimitBtn} onPress={() => setQuizTimeLimit(v => Math.min(180, v + 5))} activeOpacity={0.7}>
               <Text style={ss.timeLimitBtnText}>+</Text>
             </TouchableOpacity>
           </View>
-          {/* Quick presets */}
           <View style={ss.presetRow}>
             {[15, 30, 45, 60, 90].map(preset => (
               <TouchableOpacity
@@ -328,7 +344,6 @@ function QuizSettingsSetup({ onProceed }) {
           </View>
         </View>
 
-        {/* CTA */}
         <TouchableOpacity
           style={ss.proceedBtn}
           onPress={() => onProceed({ selYear, selDivision, selSubDiv, selSubject, shuffle, autoGrade, lockBrowser, quizTimeLimit })}
@@ -351,8 +366,12 @@ function QuizSettingsSetup({ onProceed }) {
 ══════════════════════════════════════════════════════════════════════ */
 export default function QuizBuilderScreen() {
   const navigation = useNavigation();
+  const { isDark } = useContext(ThemeContext);
+  const C = isDark ? C_DARK : C_LIGHT;
+  const b = makeB(C);
 
   const [setupDone, setSetupDone] = useState(false);
+  const [publishing, setPublishing] = useState(false);
 
   const [questions, setQuestions] = useState([makeQuestion()]);
   const [activeId,  setActiveId]  = useState(() => questions[0].id);
@@ -372,7 +391,6 @@ export default function QuizBuilderScreen() {
   const toastAnim = useRef(new Animated.Value(0)).current;
   const stripRef  = useRef(null);
 
-  /* ── ALL hooks must be declared before any early return ── */
   const showToast = useCallback((msg, type = 'green') => {
     setToast({ msg, type });
     Animated.sequence([
@@ -386,7 +404,6 @@ export default function QuizBuilderScreen() {
     setQuestions(qs => qs.map(q => q.id === id ? { ...q, ...patch } : q));
   }, []);
 
-  /* ── Setup proceed (plain function, not a hook) ── */
   const handleSetupProceed = (data) => {
     setSelYear(data.selYear);
     setSelDivision(data.selDivision);
@@ -399,7 +416,6 @@ export default function QuizBuilderScreen() {
     setSetupDone(true);
   };
 
-  /* ── Early return AFTER all hooks ── */
   if (!setupDone) {
     return <QuizSettingsSetup onProceed={handleSetupProceed} />;
   }
@@ -442,31 +458,67 @@ export default function QuizBuilderScreen() {
     showToast('📋 Question duplicated');
   };
 
-  const publishQuiz = () => {
+  /* ── POST /api/quizzes ── */
+  const publishQuiz = async () => {
     const noText = questions.filter(q => !q.text.trim());
     if (noText.length) { showToast(`⚠️ ${noText.length} question(s) missing text`, 'amber'); return; }
     const noAns  = questions.filter(q => q.type === 'mc' && !q.options.some(o => o.correct));
     if (noAns.length) { showToast(`⚠️ ${noAns.length} MC question(s) need a correct answer`, 'amber'); return; }
 
-    const yearLabel    = selYear ? YEARS.find(y => y.value === selYear)?.label : null;
-    const classDisplay = [yearLabel, selDivision && `Div ${selDivision}`, selSubDiv && `Sub ${selSubDiv}`].filter(Boolean).join(' · ');
+    setPublishing(true);
+    try {
+      // Strip local-only `id` field from each question/option
+      // (backend uses its own _id via mongoose)
+      const sanitisedQuestions = questions.map(({ id: _localId, ...q }) => ({
+        ...q,
+        options: (q.options || []).map(({ id: _optLocalId, ...opt }) => opt),
+      }));
 
-    const newQuiz = {
-      title:       selSubject ? `${selSubject} Quiz` : 'New Quiz',
-      class:       classDisplay || null,
-      subject:     selSubject,
-      questions:   questions.length,
-      duration:    `${totalTime} min`,
-      status:      'SCHEDULED',
-      statusColor: '#F59E0B',
-      submissions: 0,
-      total:       0,
-    };
+      const payload = {
+        title:       selSubject ? `${selSubject} Quiz` : 'New Quiz',
+        teacherId:   TEACHER_ID,
+        subject:     selSubject || null,
+        year:        selYear    || null,
+        division:    selDivision || null,
+        subDiv:      selSubDiv  || null,
+        questions:   sanitisedQuestions,
+        duration:    quizTimeLimit,
+        shuffle,
+        autoGrade,
+        lockBrowser,
+        total:       0,
+      };
 
-    showToast('🚀 Quiz published!', 'green');
-    setTimeout(() => {
-      navigation.navigate('QuizzSessionScreen', { newQuiz, publishedAt: Date.now() });
-    }, 1800);
+      const { data } = await axiosInstance.post('/quizzes', payload);
+
+      if (!data.success) throw new Error(data.message || 'Publish failed');
+
+      const savedQuiz = data.data;
+
+      // Build UI-friendly object to pass to QuizzSessionScreen
+      const newQuiz = {
+        _id:         savedQuiz._id,
+        title:       savedQuiz.title,
+        class:       savedQuiz.class,
+        subject:     savedQuiz.subject,
+        questions:   savedQuiz.questions.length,
+        duration:    `${savedQuiz.duration} min`,
+        status:      'SCHEDULED',
+        statusColor: '#F59E0B',
+        submissions: 0,
+        total:       savedQuiz.total || 0,
+      };
+
+      showToast('🚀 Quiz published!', 'green');
+      setTimeout(() => {
+        navigation.navigate('QuizzSessionScreen', { newQuiz, publishedAt: Date.now() });
+      }, 1800);
+    } catch (err) {
+      console.error('Publish error:', err);
+      showToast(`❌ ${err?.response?.data?.message || err.message || 'Publish failed'}`, 'red');
+    } finally {
+      setPublishing(false);
+    }
   };
 
   const metaParts = [
@@ -479,7 +531,7 @@ export default function QuizBuilderScreen() {
 
   return (
     <View style={b.root}>
-      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={C.bg} />
 
       {/* ── TOPBAR ── */}
       <View style={b.topbar}>
@@ -489,7 +541,7 @@ export default function QuizBuilderScreen() {
           </TouchableOpacity>
           <View style={b.logoIcon}><Text style={{ fontSize: 14 }}>🎓</Text></View>
           <View style={{ flex: 1 }}>
-            <Text style={b.logoText}>Campus360</Text>
+            <Text style={b.logoText}>UniVerse</Text>
             <Text style={b.quizMeta} numberOfLines={1}>{metaParts.join(' · ')}</Text>
           </View>
         </View>
@@ -500,8 +552,15 @@ export default function QuizBuilderScreen() {
           <TouchableOpacity style={b.btnGhost} onPress={() => showToast('💾 Draft saved!')}>
             <Text style={b.btnGhostText}>Save</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={b.btnPrimary} onPress={publishQuiz}>
-            <Text style={b.btnPrimaryText}>Publish</Text>
+          <TouchableOpacity
+            style={[b.btnPrimary, publishing && { opacity: 0.6 }]}
+            onPress={publishQuiz}
+            disabled={publishing}
+            activeOpacity={0.8}>
+            {publishing
+              ? <ActivityIndicator size="small" color={C.white} />
+              : <Text style={b.btnPrimaryText}>Publish</Text>
+            }
           </TouchableOpacity>
           <TouchableOpacity style={b.settingsBtn} onPress={() => setSettingsOpen(true)}>
             <Text style={{ fontSize: 18 }}>⚙️</Text>
@@ -661,6 +720,9 @@ function InBuilderSettingsModal({
   selSubDiv, setSelSubDiv, selSubject, setSelSubject,
   questions, totalPoints, totalTime, showToast,
 }) {
+  const { isDark } = useContext(ThemeContext);
+  const C = isDark ? C_DARK : C_LIGHT;
+  const b = makeB(C);
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={b.modalOverlay}>
@@ -774,6 +836,9 @@ function InBuilderSettingsModal({
    ANSWERS MC
 ══════════════════════════════════════════════════════════════════════ */
 function AnswersMC({ question, onUpdateQuestion, showToast }) {
+  const { isDark } = useContext(ThemeContext);
+  const C = isDark ? C_DARK : C_LIGHT;
+  const b = makeB(C);
   const addOption = () => {
     if (question.options.length >= 6) { showToast('Max 6 options', 'amber'); return; }
     onUpdateQuestion(question.id, { options: [...question.options, { id: uid(), text: '', correct: false }] });
@@ -818,6 +883,9 @@ function AnswersMC({ question, onUpdateQuestion, showToast }) {
    STEPPER
 ══════════════════════════════════════════════════════════════════════ */
 function Stepper({ label, value, min, max, onChange }) {
+  const { isDark } = useContext(ThemeContext);
+  const C = isDark ? C_DARK : C_LIGHT;
+  const b = makeB(C);
   return (
     <View>
       <Text style={b.stepperLabel}>{label}</Text>
@@ -838,6 +906,8 @@ function Stepper({ label, value, min, max, onChange }) {
    TOGGLE ROW
 ══════════════════════════════════════════════════════════════════════ */
 function ToggleRow({ label, sub, value, onToggle }) {
+  const { isDark } = useContext(ThemeContext);
+  const C = isDark ? C_DARK : C_LIGHT;
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
       <View style={{ flex: 1 }}>
@@ -852,28 +922,21 @@ function ToggleRow({ label, sub, value, onToggle }) {
 /* ══════════════════════════════════════════════════════════════════════
    STYLES — SETUP SCREEN
 ══════════════════════════════════════════════════════════════════════ */
-const ss = StyleSheet.create({
+const makeSS = (C) => StyleSheet.create({
   root:        { flex: 1, backgroundColor: C.bg },
   topbar:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: Platform.OS === 'ios' ? 54 : 20, paddingBottom: 14, backgroundColor: C.surface, borderBottomWidth: 1, borderBottomColor: C.border },
   closeBtn:    { width: 36, height: 36, borderRadius: 18, backgroundColor: C.card, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' },
   closeBtnText:{ fontSize: 14, color: C.textSec, fontWeight: '700' },
   topbarTitle: { fontSize: 17, fontWeight: '800', color: C.text },
   scroll:      { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 20 },
-
   sectionLabel: { fontSize: 10, fontWeight: '800', color: C.textMuted, letterSpacing: 1.2, marginBottom: 8, marginTop: 20 },
   card:         { backgroundColor: C.card, borderRadius: 14, borderWidth: 1, borderColor: C.border, paddingHorizontal: 16, paddingVertical: 14, gap: 12 },
   hr:           { height: 1, backgroundColor: C.border },
-
   labelRow:    { flexDirection: 'row', alignItems: 'center', gap: 8 },
   fieldLabel:  { fontSize: 12, fontWeight: '700', color: C.textSec },
   optBadge:    { backgroundColor: C.borderLight, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
   optBadgeText:{ fontSize: 9, fontWeight: '700', color: C.textMuted, letterSpacing: 0.5 },
-
-  picker: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: C.surface, borderWidth: 1, borderColor: C.border,
-    borderRadius: 10, paddingHorizontal: 14, paddingVertical: 13,
-  },
+  picker: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 13 },
   pickerOpen:     { borderColor: C.accent + '70', backgroundColor: C.accentSoft },
   pickerSelected: { borderColor: C.accent + '60' },
   pickerText:     { fontSize: 14, fontWeight: '600', color: C.text, flex: 1 },
@@ -881,20 +944,16 @@ const ss = StyleSheet.create({
   pickerRight:    { flexDirection: 'row', alignItems: 'center', gap: 10 },
   clearX:         { fontSize: 12, color: C.textMuted, fontWeight: '700' },
   arrow:          { fontSize: 20, color: C.textSec },
-
   dropdown:       { backgroundColor: C.surface, borderRadius: 10, borderWidth: 1, borderColor: C.border, overflow: 'hidden' },
   dropItem:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 13, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: C.border },
   dropItemActive: { backgroundColor: C.accentSoft },
   dropText:       { fontSize: 14, fontWeight: '600', color: C.text },
-
   selBadge:     { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderRadius: 8, backgroundColor: C.accentSoft, borderWidth: 1, borderColor: C.accent + '50' },
   selDot:       { width: 6, height: 6, borderRadius: 3, backgroundColor: C.accent },
   selBadgeText: { fontSize: 12, fontWeight: '600', color: C.accent, flex: 1 },
-
   proceedBtn:     { marginTop: 26, paddingVertical: 16, borderRadius: 13, backgroundColor: C.accent, alignItems: 'center', shadowColor: C.accent, shadowOpacity: 0.35, shadowRadius: 14, shadowOffset: { width: 0, height: 5 }, elevation: 8 },
   proceedBtnText: { fontSize: 16, fontWeight: '800', color: C.white },
   skipNote:       { fontSize: 11, color: C.textMuted, textAlign: 'center', marginTop: 12, lineHeight: 17 },
-
   timeLimitRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 20 },
   timeLimitBtn:    { width: 44, height: 44, borderRadius: 22, backgroundColor: C.borderLight, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' },
   timeLimitBtnText:{ fontSize: 22, color: C.text, fontWeight: '700', lineHeight: 28 },
@@ -910,9 +969,8 @@ const ss = StyleSheet.create({
 /* ══════════════════════════════════════════════════════════════════════
    STYLES — BUILDER
 ══════════════════════════════════════════════════════════════════════ */
-const b = StyleSheet.create({
+const makeB = (C) => StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
-
   topbar:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: Platform.OS === 'ios' ? 52 : 16, paddingBottom: 12, backgroundColor: C.surface, borderBottomWidth: 1, borderBottomColor: C.border },
   topbarLeft:  { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
   topbarRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -923,10 +981,9 @@ const b = StyleSheet.create({
   quizMeta:    { fontSize: 10, color: C.textSec, marginTop: 1, maxWidth: 200 },
   btnGhost:    { paddingHorizontal: 11, paddingVertical: 6, borderRadius: 7, borderWidth: 1, borderColor: C.border },
   btnGhostText:{ fontSize: 11, fontWeight: '700', color: C.textSec },
-  btnPrimary:  { paddingHorizontal: 13, paddingVertical: 7, borderRadius: 7, backgroundColor: C.accent },
+  btnPrimary:  { paddingHorizontal: 13, paddingVertical: 7, borderRadius: 7, backgroundColor: C.accent, minWidth: 60, alignItems: 'center' },
   btnPrimaryText: { fontSize: 11, fontWeight: '700', color: C.white },
   settingsBtn: { paddingHorizontal: 8, paddingVertical: 6 },
-
   strip:       { flexDirection: 'row', alignItems: 'center', backgroundColor: C.surface, borderBottomWidth: 1, borderBottomColor: C.border, paddingLeft: 14, paddingVertical: 10 },
   stripLabel:  { fontSize: 9, fontWeight: '800', color: C.textMuted, letterSpacing: 1.2, flexShrink: 0 },
   stripDivider:{ width: 1, height: 26, backgroundColor: C.border, marginHorizontal: 10, flexShrink: 0 },
@@ -941,7 +998,6 @@ const b = StyleSheet.create({
   pillDot:     { width: 5, height: 5, borderRadius: 3, position: 'absolute', top: 5, right: 5 },
   addPill:     { paddingHorizontal: 13, paddingVertical: 8, borderRadius: 9, borderWidth: 1.5, borderStyle: 'dashed', borderColor: C.borderLight },
   addPillText: { fontSize: 12, fontWeight: '700', color: C.textSec },
-
   editor:        { flex: 1 },
   editorContent: { padding: 16, gap: 14 },
   card:          { backgroundColor: C.card, borderRadius: 14, borderWidth: 1, borderColor: C.border, overflow: 'hidden' },
@@ -963,7 +1019,6 @@ const b = StyleSheet.create({
   mediaBtnText:  { fontSize: 11, fontWeight: '600', color: C.textSec },
   divider:       { borderTopWidth: 1, borderTopColor: C.border, marginVertical: 14 },
   answersLabel:  { fontSize: 10, fontWeight: '700', color: C.textMuted, letterSpacing: 1, marginBottom: 10 },
-
   answerItem:        { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, borderRadius: 10, padding: 10, marginBottom: 8 },
   answerItemCorrect: { borderColor: C.green, backgroundColor: C.greenSoft },
   radio:             { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: C.borderLight, alignItems: 'center', justifyContent: 'center' },
@@ -976,18 +1031,15 @@ const b = StyleSheet.create({
   deleteOptText:     { fontSize: 12, color: C.red },
   addOptionBtn:      { flexDirection: 'row', alignItems: 'center', padding: 10, borderRadius: 10, borderWidth: 1.5, borderStyle: 'dashed', borderColor: C.borderLight, marginTop: 4 },
   addOptionText:     { fontSize: 13, fontWeight: '600', color: C.textSec },
-
   tfRow:     { flexDirection: 'row', gap: 12 },
   tfCard:    { flex: 1, padding: 18, borderRadius: 10, borderWidth: 2, borderColor: C.border, backgroundColor: C.surface, alignItems: 'center' },
   tfCardTrue:{ borderColor: C.green, backgroundColor: C.greenSoft },
   tfCardFalse:{ borderColor: C.red, backgroundColor: C.redSoft },
   tfIcon:    { fontSize: 24, marginBottom: 6 },
   tfLabel:   { fontSize: 14, fontWeight: '700', color: C.text },
-
   saBox:     { padding: 12, borderWidth: 1, borderColor: C.border, borderRadius: 10, backgroundColor: C.surface },
   saBoxText: { fontSize: 13, color: C.textMuted },
   saHint:    { fontSize: 11, color: C.textMuted, marginTop: 8, fontStyle: 'italic' },
-
   cardFooter:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 14, borderTopWidth: 1, borderTopColor: C.border, backgroundColor: C.surface, gap: 10 },
   footerLeft:   { flexDirection: 'row', gap: 20, alignItems: 'flex-end' },
   footerActions:{ flexDirection: 'row', gap: 8 },
@@ -998,12 +1050,10 @@ const b = StyleSheet.create({
   stepperVal:   { paddingHorizontal: 12, lineHeight: 32, height: 32, backgroundColor: C.surface, color: C.text, fontSize: 14, fontWeight: '700' },
   iconBtn:      { width: 32, height: 32, borderRadius: 7, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center', backgroundColor: C.surface },
   iconBtnDanger:{ borderColor: C.redSoft },
-
   navBar:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 },
   navBtn:    { paddingVertical: 8, paddingHorizontal: 4 },
   navBtnText:{ fontSize: 13, fontWeight: '700', color: C.textSec },
   navCount:  { fontSize: 11, fontWeight: '600', color: C.textMuted },
-
   modalOverlay:   { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' },
   modalSheet:     { backgroundColor: C.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 18, paddingTop: 12, paddingBottom: Platform.OS === 'ios' ? 36 : 20, borderTopWidth: 1, borderTopColor: C.border, maxHeight: '92%' },
   modalHandle:    { width: 36, height: 4, borderRadius: 2, backgroundColor: C.border, alignSelf: 'center', marginBottom: 16 },
@@ -1011,7 +1061,6 @@ const b = StyleSheet.create({
   modalTitle:     { fontSize: 17, fontWeight: '800', color: C.text },
   modalCloseBtn:  { width: 30, height: 30, borderRadius: 15, backgroundColor: C.card, alignItems: 'center', justifyContent: 'center' },
   modalCloseTxt:  { fontSize: 13, color: C.textSec, fontWeight: '700' },
-
   sectionLabel:       { fontSize: 10, fontWeight: '800', color: C.textMuted, letterSpacing: 1.2, marginBottom: 8, marginTop: 16 },
   settingsCard:       { backgroundColor: C.card, borderRadius: 12, borderWidth: 1, borderColor: C.border, padding: 14, gap: 4 },
   settingsCardDivider:{ height: 1, backgroundColor: C.border, marginVertical: 8 },
@@ -1021,11 +1070,6 @@ const b = StyleSheet.create({
   chip:               { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: C.surface, borderWidth: 1, borderColor: C.border },
   chipActive:         { backgroundColor: C.accentSoft, borderColor: C.accent },
   chipText:           { fontSize: 13, fontWeight: '600', color: C.textSec },
-
-  dueDateRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 2 },
-  dueDateText: { fontSize: 13, fontWeight: '600', color: C.text },
-  dueDateArrow:{ fontSize: 18, color: C.textSec },
-
   timeLimitRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 20, paddingVertical: 8 },
   timeLimitBtn:    { width: 40, height: 40, borderRadius: 20, backgroundColor: C.borderLight, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' },
   timeLimitBtnText:{ fontSize: 20, color: C.text, fontWeight: '700', lineHeight: 26 },
@@ -1033,17 +1077,14 @@ const b = StyleSheet.create({
   timeLimitValue:  { fontSize: 34, fontWeight: '900', color: C.accent, lineHeight: 40 },
   timeLimitUnit:   { fontSize: 11, fontWeight: '700', color: C.textSec, marginTop: -2 },
   presetRow:       { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginTop: 4 },
-
   summaryCard:      { backgroundColor: C.card, borderRadius: 12, borderWidth: 1, borderColor: C.border, padding: 14 },
   summaryGrid:      { flexDirection: 'row', gap: 16, marginBottom: 10 },
   summaryStat:      { flex: 1 },
   summaryStatLabel: { fontSize: 10, fontWeight: '700', color: C.textMuted, letterSpacing: 0.8 },
   summaryStatVal:   { fontSize: 24, fontWeight: '900', color: C.text, marginTop: 2 },
   summaryDivider:   { height: 1, backgroundColor: C.border, marginBottom: 10 },
-
   printBtn:     { marginTop: 12, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: C.border, alignItems: 'center' },
   printBtnText: { fontSize: 13, fontWeight: '600', color: C.textSec },
-
   toast:     { position: 'absolute', bottom: 32, alignSelf: 'center', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 9, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
   toastText: { fontSize: 13, fontWeight: '700', color: C.white },
 });

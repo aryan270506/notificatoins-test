@@ -180,15 +180,13 @@ const handleTeacherUpload = async () => {
   });
 
   try {
-    const response = await fetch("http://192.168.137.121:5001/api/teachers/upload", {
-      method: "POST",
-      body: formData,
+    const response = await axiosInstance.post("/teachers/upload", formData, {
       headers: {
         "Content-Type": "multipart/form-data",
       },
     });
 
-    const data = await response.json();
+    const data = response.data;
     alert(data.message);
   } catch (error) {
     console.log(error);
@@ -898,7 +896,7 @@ export default function DataImportCenter() {
             style={[s.navIconBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
             onPress={() => setNotifVisible(true)}
             activeOpacity={0.7}>
-          
+            <Text style={s.navIconTxt}>🔔</Text>
             {unreadCount > 0 && (
               <View style={[s.notifDot, { borderColor: colors.bg }]}>
                 <Text style={s.notifDotTxt}>{unreadCount}</Text>
@@ -935,7 +933,9 @@ export default function DataImportCenter() {
         <View style={[s.sectionHeader, !isTablet && s.sectionHeaderMobile]}>
           <Text style={[s.sectionTitle, { color: colors.textPrim }]}>Import Data Sources</Text>
           <View style={[s.sectionActions, !isTablet && s.sectionActionsMobile]}>
-           
+            <TouchableOpacity style={s.actionBtn} onPress={() => Alert.alert('Process Queue', '3 files queued for processing.')} activeOpacity={0.8}>
+              <Text style={s.actionBtnTxt}>▶  Process Queue</Text>
+            </TouchableOpacity>
             <TouchableOpacity style={[s.actionBtn, s.actionBtnOutline, { borderColor: colors.border }]} onPress={() => Alert.alert('Export Logs', 'Activity logs exported.')} activeOpacity={0.8}>
               <Text style={[s.actionBtnTxt, { color: colors.textPrim }]}>📄  Export Logs</Text>
             </TouchableOpacity>

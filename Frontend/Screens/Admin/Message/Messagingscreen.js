@@ -1,5 +1,5 @@
 // ============================================================
-//  MessagingScreen.js  —  Campus360
+//  MessagingScreen.js  —  UniVerse
 //  Theme comes from AdminDashboard's ThemeContext
 // ============================================================
 import React, { useState, useRef, useEffect, useContext } from 'react';
@@ -7,11 +7,33 @@ import {
   View, Text, TouchableOpacity, ScrollView, TextInput,
   StyleSheet, SafeAreaView, StatusBar, Dimensions,
   Platform, Animated, KeyboardAvoidingView,
-  Modal, Pressable, Image, Alert,
+  Modal, Pressable, Image, Alert, Linking,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import axiosInstance from '../../../Src/Axios';
 import { ThemeContext, DARK_COLORS, LIGHT_COLORS } from '../dashboard/AdminDashboard';
+
+// ─── API CONFIG ──────────────────────────────────────────────
+const API_BASE_URL = axiosInstance.defaults.baseURL.replace(/\/api$/, "");
+
+// ─── FILE UPLOAD HELPER ──────────────────────────────────────
+async function uploadFile(uri, fileName, mimeType) {
+  const formData = new FormData();
+  if (Platform.OS === 'web') {
+    const resp = await fetch(uri);
+    const blob = await resp.blob();
+    formData.append('file', blob, fileName);
+  } else {
+    formData.append('file', { uri, type: mimeType || 'application/octet-stream', name: fileName });
+  }
+  const response = await axiosInstance.post('/messages/upload-attachment', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  const data = response.data;
+  if (!data.success) throw new Error(data.message || 'Upload failed');
+  return data.data;
+}
 
 // ─── RESPONSIVE ──────────────────────────────────────────────
 const { width: SW } = Dimensions.get('window');
@@ -53,6 +75,12 @@ const SEED_MESSAGES = [
 
 function Tick({ status, C }) {
   if (!status) return null;
+  if (status === 'sending') {
+    return <Text style={{ color: C.sub, fontSize: 11, lineHeight: 14 }}>⏳</Text>;
+  }
+  if (status === 'failed') {
+    return <Text style={{ color: C.red, fontSize: 11, lineHeight: 14 }}>!</Text>;
+  }
   const color = status === 'read' ? '#53BDEB' : C.sub;
   const mark  = status === 'sent' ? '✓' : '✓✓';
   return <Text style={{ color, fontSize: 11, lineHeight: 14 }}>{mark}</Text>;
@@ -61,18 +89,19 @@ function Tick({ status, C }) {
 function DateSep({ label, C }) {
   return (
     <View style={{ alignItems: 'center', marginVertical: 12 }}>
-      <View style={{ backgroundColor: '#182533', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 5 }}>
+      <View style={{ backgroundColor: '#b4b4bb', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 5 }}>
         <Text style={{ fontSize: 12, color: C.sub, fontWeight: '600' }}>{label}</Text>
       </View>
     </View>
   );
 }
 
-function Bubble({ msg, onLongPress, C }) {
+function Bubble({ msg, onLongPress, C, highlighted }) {
   const isMe     = msg.from === 'me';
   const isSystem = msg.from === 'system';
   const appear   = useRef(new Animated.Value(0)).current;
   const slideY   = useRef(new Animated.Value(10)).current;
+  const flashAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.parallel([
@@ -81,10 +110,26 @@ function Bubble({ msg, onLongPress, C }) {
     ]).start();
   }, []);
 
+  useEffect(() => {
+    if (highlighted) {
+      Animated.sequence([
+        Animated.timing(flashAnim, { toValue: 1, duration: 300, useNativeDriver: false }),
+        Animated.timing(flashAnim, { toValue: 0, duration: 300, useNativeDriver: false }),
+        Animated.timing(flashAnim, { toValue: 1, duration: 300, useNativeDriver: false }),
+        Animated.timing(flashAnim, { toValue: 0, duration: 800, useNativeDriver: false }),
+      ]).start();
+    }
+  }, [highlighted]);
+
+  const highlightBg = flashAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['transparent', 'rgba(59,130,246,0.18)'],
+  });
+
   if (isSystem) {
     return (
       <Animated.View style={{ opacity: appear, transform: [{ translateY: slideY }], alignItems: 'center', marginVertical: 6 }}>
-        <View style={{ backgroundColor: '#182533', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 8, maxWidth: IS_LARGE ? 500 : SW * 0.85 }}>
+        <View style={{ backgroundColor: '#b9c3cc', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 8, maxWidth: IS_LARGE ? 500 : SW * 0.85 }}>
           <Text style={{ fontSize: 12.5, color: C.sub, textAlign: 'center', lineHeight: 18 }}>{msg.text}</Text>
         </View>
       </Animated.View>
@@ -100,10 +145,12 @@ function Bubble({ msg, onLongPress, C }) {
   if (msg.type === 'image') {
     return (
       <Animated.View style={[{ marginHorizontal: IS_LARGE ? 16 : 8, marginBottom: 4, maxWidth: BUBBLE_MAX }, isMe ? { alignSelf: 'flex-end' } : { alignSelf: 'flex-start' }, { opacity: appear, transform: [{ translateY: slideY }] }]}>
-        <TouchableOpacity activeOpacity={0.92} onLongPress={handleLP} delayLongPress={380}>
+        <TouchableOpacity activeOpacity={0.92} onLongPress={handleLP} delayLongPress={380}
+          onPress={() => msg.uri && msg.onImagePress && msg.onImagePress(msg.uri, msg.fileName)}>
           <View style={[{ borderRadius: 10, position: 'relative', padding: 4, paddingBottom: 6 }, isMe ? outBg : inBg]}>
-            {msg.uri ? <Image source={{ uri: msg.uri }} style={[{ height: IS_LARGE ? 200 : Math.round(SW * 0.45), borderRadius: 8 }, { width: Math.min(BUBBLE_MAX - 10, IS_LARGE ? 280 : SW * 0.6) }]} resizeMode="cover" />
-              : <View style={[{ alignItems: 'center', justifyContent: 'center', backgroundColor: '#1a2a35', height: IS_LARGE ? 200 : Math.round(SW * 0.45), borderRadius: 8 }, { width: IS_LARGE ? 280 : SW * 0.6 }]}><Text style={{ fontSize: 40 }}>🖼️</Text></View>
+            {msg.uri ? (
+              <Image source={{ uri: msg.uri }} style={[{ height: IS_LARGE ? 200 : Math.round(SW * 0.45), borderRadius: 8 }, { width: Math.min(BUBBLE_MAX - 10, IS_LARGE ? 280 : SW * 0.6) }]} resizeMode="cover" />
+            ) : <View style={[{ alignItems: 'center', justifyContent: 'center', backgroundColor: '#1a2a35', height: IS_LARGE ? 200 : Math.round(SW * 0.45), borderRadius: 8 }, { width: IS_LARGE ? 280 : SW * 0.6 }]}><Text style={{ fontSize: 40 }}>🖼️</Text></View>
             }
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4, paddingHorizontal: 6, paddingTop: 4 }}>
               <Text style={{ fontSize: 11, color: C.sub }}>{msg.time}</Text>
@@ -117,9 +164,10 @@ function Bubble({ msg, onLongPress, C }) {
   }
 
   if (msg.type === 'document') {
+    const handleDocPress = () => msg.uri && msg.onDocPress && msg.onDocPress(msg.uri, msg.fileName);
     return (
       <Animated.View style={[{ marginHorizontal: IS_LARGE ? 16 : 8, marginBottom: 4, maxWidth: BUBBLE_MAX }, isMe ? { alignSelf: 'flex-end' } : { alignSelf: 'flex-start' }, { opacity: appear, transform: [{ translateY: slideY }] }]}>
-        <TouchableOpacity activeOpacity={0.92} onLongPress={handleLP} delayLongPress={380}>
+        <TouchableOpacity activeOpacity={0.92} onLongPress={handleLP} delayLongPress={380} onPress={handleDocPress}>
           <View style={[{ borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, position: 'relative', minWidth: IS_LARGE ? 240 : 200 }, isMe ? outBg : inBg]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 }}>
               <View style={{ width: 46, height: 46, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Text style={{ fontSize: 26 }}>📄</Text></View>
@@ -140,9 +188,13 @@ function Bubble({ msg, onLongPress, C }) {
   }
 
   return (
-    <Animated.View style={[{ marginHorizontal: IS_LARGE ? 16 : 8, marginBottom: 4, maxWidth: BUBBLE_MAX }, isMe ? { alignSelf: 'flex-end' } : { alignSelf: 'flex-start' }, { opacity: appear, transform: [{ translateY: slideY }] }]}>
+    <Animated.View style={[{ marginHorizontal: IS_LARGE ? 16 : 8, marginBottom: 4, maxWidth: BUBBLE_MAX, backgroundColor: highlightBg, borderRadius: 14, padding: 2 }, isMe ? { alignSelf: 'flex-end' } : { alignSelf: 'flex-start' }, { opacity: appear, transform: [{ translateY: slideY }] }]}>
       <TouchableOpacity activeOpacity={0.92} onLongPress={handleLP} delayLongPress={380}>
         <View style={[{ borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, position: 'relative' }, isMe ? outBg : inBg]}>
+          {/* Show sender name for incoming messages */}
+          {!isMe && msg.senderName && (
+            <Text style={{ fontSize: 11, fontWeight: '700', color: '#3b82f6', marginBottom: 3 }}>{msg.senderName}</Text>
+          )}
           <Text style={{ fontSize: IS_LARGE ? 15 : 14.5, color: C.light, lineHeight: IS_LARGE ? 22 : 21 }}>{msg.text}</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 4 }}>
             <Text style={{ fontSize: 11, color: C.sub }}>{msg.time}</Text>
@@ -187,6 +239,107 @@ function AttachSheet({ visible, onClose, onImage, onDoc, C }) {
   );
 }
 
+function FullScreenImage({ visible, uri, fileName, onClose }) {
+  if (!visible) return null;
+  const handleDownload = () => {
+    if (!uri) return;
+    if (Platform.OS === 'web') {
+      const a = document.createElement('a'); a.href = uri; a.download = fileName || 'image'; a.target = '_blank'; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    } else {
+      Linking.openURL(uri).catch(err => console.error('Download error:', err));
+    }
+  };
+  return (
+    <Modal transparent animationType="fade" visible={visible} onRequestClose={onClose} statusBarTranslucent>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' }}>
+        {/* Top bar */}
+        <SafeAreaView style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: IS_LARGE ? 24 : 16, paddingVertical: IS_LARGE ? 16 : 12 }}>
+            <TouchableOpacity onPress={onClose} activeOpacity={0.7} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ color: '#fff', fontSize: 22, fontWeight: '700', marginTop: -2 }}>✕</Text>
+            </TouchableOpacity>
+            <Text style={{ color: '#fff', fontSize: IS_LARGE ? 15 : 13, fontWeight: '600', flex: 1, textAlign: 'center', marginHorizontal: 12 }} numberOfLines={1}>{fileName || 'Image'}</Text>
+            <TouchableOpacity onPress={handleDownload} activeOpacity={0.7} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8 }}>
+              <Text style={{ color: '#fff', fontSize: 16 }}>⬇</Text>
+              <Text style={{ color: '#fff', fontSize: IS_LARGE ? 14 : 13, fontWeight: '600' }}>Download</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+        {/* Image */}
+        <Image source={{ uri }} style={{ width: IS_LARGE ? '80%' : '95%', height: '70%', borderRadius: IS_LARGE ? 8 : 0 }} resizeMode="contain" />
+      </View>
+    </Modal>
+  );
+}
+
+function FullScreenDocument({ visible, uri, fileName, onClose }) {
+  if (!visible) return null;
+  const isPdf = (fileName || '').toLowerCase().endsWith('.pdf');
+  const handleDownload = () => {
+    if (!uri) return;
+    if (Platform.OS === 'web') {
+      const a = document.createElement('a'); a.href = uri; a.download = fileName || 'document'; a.target = '_blank'; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    } else {
+      Linking.openURL(uri).catch(err => console.error('Download error:', err));
+    }
+  };
+  const handleOpen = () => {
+    if (!uri) return;
+    if (Platform.OS === 'web') window.open(uri, '_blank');
+    else Linking.openURL(uri).catch(err => console.error('Open error:', err));
+  };
+  return (
+    <Modal transparent animationType="fade" visible={visible} onRequestClose={onClose} statusBarTranslucent>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.95)' }}>
+        {/* Top bar */}
+        <SafeAreaView style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: IS_LARGE ? 24 : 16, paddingVertical: IS_LARGE ? 16 : 12 }}>
+            <TouchableOpacity onPress={onClose} activeOpacity={0.7} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ color: '#fff', fontSize: 22, fontWeight: '700', marginTop: -2 }}>✕</Text>
+            </TouchableOpacity>
+            <Text style={{ color: '#fff', fontSize: IS_LARGE ? 15 : 13, fontWeight: '600', flex: 1, textAlign: 'center', marginHorizontal: 12 }} numberOfLines={1}>{fileName || 'Document'}</Text>
+            <TouchableOpacity onPress={handleDownload} activeOpacity={0.7} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8 }}>
+              <Text style={{ color: '#fff', fontSize: 16 }}>⬇</Text>
+              <Text style={{ color: '#fff', fontSize: IS_LARGE ? 14 : 13, fontWeight: '600' }}>Download</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+
+        {/* Document Preview */}
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: IS_LARGE ? 80 : 70, paddingBottom: 20, paddingHorizontal: IS_LARGE ? 40 : 16 }}>
+          {IS_WEB && isPdf ? (
+            <View style={{ flex: 1, width: '100%', maxWidth: 800, borderRadius: 12, overflow: 'hidden', backgroundColor: '#fff' }}>
+              <iframe
+                src={uri}
+                style={{ width: '100%', height: '100%', border: 'none' }}
+                title={fileName || 'Document'}
+              />
+            </View>
+          ) : (
+            <View style={{ alignItems: 'center', gap: 20 }}>
+              <View style={{ width: 120, height: 120, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ fontSize: 56 }}>{isPdf ? '📑' : '📄'}</Text>
+              </View>
+              <Text style={{ color: '#fff', fontSize: IS_LARGE ? 18 : 16, fontWeight: '700', textAlign: 'center' }} numberOfLines={2}>{fileName || 'Document'}</Text>
+              <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, textAlign: 'center' }}>
+                {isPdf ? 'PDF Document' : 'File'}
+              </Text>
+              <TouchableOpacity onPress={handleOpen} activeOpacity={0.7} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#3b82f6', borderRadius: 16, paddingHorizontal: 28, paddingVertical: 14, marginTop: 8 }}>
+                <Text style={{ fontSize: 18 }}>📂</Text>
+                <Text style={{ color: '#fff', fontSize: IS_LARGE ? 16 : 15, fontWeight: '700' }}>Open File</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleDownload} activeOpacity={0.7} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 16, paddingHorizontal: 28, paddingVertical: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' }}>
+                <Text style={{ fontSize: 18 }}>⬇</Text>
+                <Text style={{ color: '#fff', fontSize: IS_LARGE ? 16 : 15, fontWeight: '600' }}>Download</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 function DeleteMenu({ visible, onClose, onDelete, C }) {
   return (
     <Modal transparent animationType="fade" visible={visible} onRequestClose={onClose}>
@@ -222,19 +375,117 @@ export default function MessagingScreen({ context, onBack }) {
   const [input,      setInput]      = useState('');
   const [showAttach, setShowAttach] = useState(false);
   const [targetMsg,  setTargetMsg]  = useState(null);
+  const [fullImg,    setFullImg]    = useState(null);
+  const [fullDoc,    setFullDoc]    = useState(null);
   const scrollRef = useRef(null);
   const ctx = context || {};
+  const highlightId = ctx.highlightMessageId || null;
+  const [activeHighlight, setActiveHighlight] = useState(null);
+  const highlightLayoutRef = useRef({});
+
+  // ── Fetch existing messages from backend on mount ──────────
+  useEffect(() => {
+    if (!ctx.role || !ctx.year) return;
+    (async () => {
+      try {
+        const params = {
+          recipientRole: ctx.role,
+          academicYear:  ctx.year,
+          ...(ctx.division ? { division: ctx.division } : {}),
+        };
+        const res = await axiosInstance.get('/messages/filter/by-recipient', { params });
+        const json = res.data;
+        if (json.success && json.data?.length) {
+          const fetched = json.data
+            .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+            .map(m => ({
+              id:   m.messageId,
+              from: m.senderRole === 'admin' ? 'me' : m.senderName || m.senderRole,
+              text: m.content,
+              time: new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              date: new Date(m.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' }),
+              status: m.status || 'delivered',
+              senderName: m.senderName,
+              senderRole: m.senderRole,
+              type: m.messageType || 'text',
+              uri: m.attachmentUrl ? `${API_BASE_URL}${m.attachmentUrl}` : undefined,
+              fileName: m.attachmentName || undefined,
+              fileSize: m.attachmentSize || undefined,
+            }));
+          setMessages([...SEED_MESSAGES, ...fetched]);
+        }
+      } catch (e) {
+        console.error('Failed to fetch messages:', e);
+      }
+    })();
+  }, [ctx.role, ctx.year, ctx.division]);
 
   useEffect(() => {
-    const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
+    const t = setTimeout(() => {
+      if (highlightId && highlightLayoutRef.current[highlightId] !== undefined) {
+        scrollRef.current?.scrollTo({ y: highlightLayoutRef.current[highlightId] - 80, animated: true });
+        setActiveHighlight(highlightId);
+        setTimeout(() => setActiveHighlight(null), 3000);
+      } else {
+        scrollRef.current?.scrollToEnd({ animated: true });
+      }
+    }, 300);
     return () => clearTimeout(t);
   }, [messages.length]);
 
-  const sendText = () => {
+  const sendText = async () => {
     const txt = input.trim();
     if (!txt) return;
-    setMessages(prev => [...prev, { id: `m${Date.now()}`, from: 'me', text: txt, time: nowTime(), date: 'Today', status: 'sent' }]);
+
+    const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const newMsg = {
+      id: messageId,
+      from: 'me',
+      text: txt,
+      time: nowTime(),
+      date: 'Today',
+      status: 'sent',
+    };
+
+    // Optimistically add to UI immediately
+    setMessages(prev => [...prev, newMsg]);
     setInput('');
+
+    // Save to database
+    try {
+      const response = await axiosInstance.post('/messages/save', {
+        messageId,
+        content:      txt,
+        messageType:  'text',
+        senderId:     ctx.senderId   || 'admin',
+        senderName:   ctx.senderName || 'Admin',
+        senderRole:   ctx.senderRole || 'admin',
+        recipientRole: ctx.role,
+        academicYear:  ctx.year,
+        division:      ctx.division  || 'all',
+      });
+
+      const data = response.data;
+
+      if (!data.success) {
+        console.warn('Message save failed:', data.message);
+        // Mark bubble as failed
+        setMessages(prev =>
+          prev.map(m => m.id === messageId ? { ...m, status: 'failed' } : m)
+        );
+      } else {
+        // Update bubble status to delivered
+        setMessages(prev =>
+          prev.map(m => m.id === messageId ? { ...m, status: 'delivered' } : m)
+        );
+      }
+    } catch (err) {
+      console.error('Network error saving message:', err);
+      setMessages(prev =>
+        prev.map(m => m.id === messageId ? { ...m, status: 'failed' } : m)
+      );
+      Alert.alert('Send Failed', 'Could not reach the server. Please try again.');
+    }
   };
 
   const pickImage = async () => {
@@ -246,7 +497,24 @@ export default function MessagingScreen({ context, onBack }) {
       const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.85 });
       if (!res.canceled && res.assets?.[0]) {
         const a = res.assets[0];
-        setMessages(prev => [...prev, { id: `m${Date.now()}`, from: 'me', type: 'image', uri: a.uri, fileName: a.fileName || 'photo.jpg', time: nowTime(), date: 'Today', status: 'sent' }]);
+        const fileName = a.fileName || `photo_${Date.now()}.jpg`;
+        const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        setMessages(prev => [...prev, { id: messageId, from: 'me', type: 'image', uri: a.uri, fileName, time: nowTime(), date: 'Today', status: 'sending' }]);
+        try {
+          const uploaded = await uploadFile(a.uri, fileName, a.mimeType || 'image/jpeg');
+          await axiosInstance.post('/messages/save', {
+            messageId, content: `📷 ${fileName}`, messageType: 'image',
+            senderId: ctx.senderId || 'admin', senderName: ctx.senderName || 'Admin', senderRole: ctx.senderRole || 'admin',
+            recipientRole: ctx.role, academicYear: ctx.year, division: ctx.division || 'all',
+            attachmentUrl: uploaded.url, attachmentName: uploaded.name,
+            attachmentSize: uploaded.size ? `${(uploaded.size / 1024).toFixed(1)} KB` : '',
+          });
+          setMessages(prev => prev.map(m => m.id === messageId ? { ...m, uri: `${API_BASE_URL}${uploaded.url}`, status: 'delivered' } : m));
+        } catch (err) {
+          console.error('Image upload error:', err);
+          setMessages(prev => prev.map(m => m.id === messageId ? { ...m, status: 'failed' } : m));
+          Alert.alert('Upload Failed', 'Could not upload the image.');
+        }
       }
     } catch { Alert.alert('Error', 'Could not open photo library.'); }
   };
@@ -256,15 +524,53 @@ export default function MessagingScreen({ context, onBack }) {
       const res = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
       const asset = res.assets?.[0] || (res.type !== 'cancel' ? res : null);
       if (asset?.name) {
-        setMessages(prev => [...prev, { id: `m${Date.now()}`, from: 'me', type: 'document', uri: asset.uri, fileName: asset.name, fileSize: asset.size ? `${(asset.size / 1024).toFixed(1)} KB` : null, time: nowTime(), date: 'Today', status: 'sent' }]);
+        const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const fileSize = asset.size ? `${(asset.size / 1024).toFixed(1)} KB` : null;
+        setMessages(prev => [...prev, { id: messageId, from: 'me', type: 'document', uri: asset.uri, fileName: asset.name, fileSize, time: nowTime(), date: 'Today', status: 'sending' }]);
+        try {
+          const uploaded = await uploadFile(asset.uri, asset.name, asset.mimeType || 'application/octet-stream');
+          await axiosInstance.post('/messages/save', {
+            messageId, content: `📄 ${asset.name}`, messageType: 'document',
+            senderId: ctx.senderId || 'admin', senderName: ctx.senderName || 'Admin', senderRole: ctx.senderRole || 'admin',
+            recipientRole: ctx.role, academicYear: ctx.year, division: ctx.division || 'all',
+            attachmentUrl: uploaded.url, attachmentName: uploaded.name,
+            attachmentSize: uploaded.size ? `${(uploaded.size / 1024).toFixed(1)} KB` : '',
+          });
+          setMessages(prev => prev.map(m => m.id === messageId ? { ...m, uri: `${API_BASE_URL}${uploaded.url}`, status: 'delivered' } : m));
+        } catch (err) {
+          console.error('Document upload error:', err);
+          setMessages(prev => prev.map(m => m.id === messageId ? { ...m, status: 'failed' } : m));
+          Alert.alert('Upload Failed', 'Could not upload the document.');
+        }
       }
     } catch { Alert.alert('Error', 'Could not open document picker.'); }
   };
 
-  const deleteMsg = () => {
+  const deleteMsg = async () => {
     if (!targetMsg) return;
+
+    // Remove from UI immediately
     setMessages(prev => prev.filter(m => m.id !== targetMsg.id));
+    const msgToDelete = targetMsg;
     setTargetMsg(null);
+
+    // Soft-delete in MongoDB
+    try {
+      const response = await axiosInstance.delete(`/messages/${msgToDelete.id}`);
+      const data = response.data;
+
+      if (!data.success) {
+        console.warn('Message delete failed:', data.message);
+        // Restore the message in UI if DB delete failed
+        setMessages(prev => [...prev, msgToDelete]);
+        Alert.alert('Delete Failed', 'Could not delete the message. Please try again.');
+      }
+    } catch (err) {
+      console.error('Network error deleting message:', err);
+      // Restore the message in UI on network error
+      setMessages(prev => [...prev, msgToDelete]);
+      Alert.alert('Delete Failed', 'Could not reach the server. Please try again.');
+    }
   };
 
   const grouped = [];
@@ -305,7 +611,9 @@ export default function MessagingScreen({ context, onBack }) {
           {grouped.map(item =>
             item._sep
               ? <DateSep key={item.key} label={item.label} C={C} />
-              : <Bubble key={item.id} msg={item} onLongPress={setTargetMsg} C={C} />
+              : <View key={item.id} onLayout={(e) => { highlightLayoutRef.current[item.id] = e.nativeEvent.layout.y; }}>
+                  <Bubble msg={{ ...item, onImagePress: (uri, name) => setFullImg({ uri, fileName: name }), onDocPress: (uri, name) => setFullDoc({ uri, fileName: name }) }} onLongPress={setTargetMsg} C={C} highlighted={activeHighlight === item.id} />
+                </View>
           )}
           <View style={{ height: 6 }} />
         </ScrollView>
@@ -332,6 +640,8 @@ export default function MessagingScreen({ context, onBack }) {
 
       <AttachSheet visible={showAttach} onClose={() => setShowAttach(false)} onImage={pickImage} onDoc={pickDocument} C={C} />
       <DeleteMenu visible={!!targetMsg} onClose={() => setTargetMsg(null)} onDelete={deleteMsg} C={C} />
+      <FullScreenImage visible={!!fullImg} uri={fullImg?.uri} fileName={fullImg?.fileName} onClose={() => setFullImg(null)} />
+      <FullScreenDocument visible={!!fullDoc} uri={fullDoc?.uri} fileName={fullDoc?.fileName} onClose={() => setFullDoc(null)} />
     </SafeAreaView>
   );
 }

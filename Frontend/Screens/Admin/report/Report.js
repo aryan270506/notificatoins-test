@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useContext } from 'react';
+import axiosInstance from '../../../Src/Axios';
 import {
   View,
   Text,
@@ -8,10 +9,12 @@ import {
   Dimensions,
   Animated,
   StatusBar,
+  ActivityIndicator,
 } from 'react-native';
-import StudentListScreen from '../Assignment/StudentListScreen';
 import AttendanceReportFlow from './AttendanceReportFlow';
 import { ThemeContext } from '../dashboard/AdminDashboard';
+
+const API_BASE_URL = axiosInstance.defaults.baseURL.replace(/\/api$/, "");
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -32,6 +35,55 @@ export default function ReportYearDivSelection({ onBack, onConfirm }) {
   const [selectedYear, setSelectedYear] = useState(null);
   const [selectedDiv, setSelectedDiv] = useState(null);
   const [showStudentList, setShowStudentList] = useState(false);
+
+  // ── Backend student count fetch ───────────────────────────────────────────
+  const [yearCounts, setYearCounts]   = useState({});  // { '1': 42, '2': 38, ... }
+  const [divCounts, setDivCounts]     = useState({});   // { 'A': 15, 'B': 13, 'C': 14 }
+  const [countsLoading, setCountsLoading] = useState(false);
+
+  // Fetch total student count for each year (across all divisions)
+  useEffect(() => {
+    (async () => {
+      const counts = {};
+      for (const yr of YEARS) {
+        const yearNum = yr.short.replace(/\D/g, '');
+        try {
+          let total = 0;
+          for (const div of DIVS) {
+            const res = await axiosInstance.get('/students/by-class', {
+              params: { year: yearNum, division: div }
+            });
+            const data = res.data;
+            total += Array.isArray(data) ? data.length : 0;
+          }
+          counts[yearNum] = total;
+        } catch (_) { /* keep undefined — UI falls back to '—' */ }
+      }
+      setYearCounts(counts);
+    })();
+  }, []);
+
+  // Fetch per-division counts when a year is selected
+  useEffect(() => {
+    if (!selectedYear) return;
+    (async () => {
+      setCountsLoading(true);
+      const yearNum = selectedYear.short.replace(/\D/g, '');
+      const counts = {};
+      for (const div of DIVS) {
+        try {
+          const res = await axiosInstance.get('/students/by-class', {
+            params: { year: yearNum, division: div }
+          });
+          const data = res.data;
+          counts[div] = Array.isArray(data) ? data.length : 0;
+        } catch (_) {}
+      }
+      setDivCounts(counts);
+      setCountsLoading(false);
+    })();
+  }, [selectedYear?.short]);
+  // ──────────────────────────────────────────────────────────────────────────
 
   const fadeAnim   = useRef(new Animated.Value(0)).current;
   const slideAnim  = useRef(new Animated.Value(30)).current;
@@ -148,10 +200,9 @@ export default function ReportYearDivSelection({ onBack, onConfirm }) {
                         {year.label}
                       </Text>
                       <Text style={[s.yearCardSub, { color: colors.textMuted }]}>
-                        {year.short === '1st' ? '~3,200 students'
-                          : year.short === '2nd' ? '~3,050 students'
-                          : year.short === '3rd' ? '~3,100 students'
-                          : '~3,130 students'}
+                        {yearCounts[year.short.replace(/\D/g, '')] != null
+                          ? `${yearCounts[year.short.replace(/\D/g, '')]} students`
+                          : 'Loading…'}
                       </Text>
                     </View>
                     <View style={[s.radioOuter, { borderColor: isActive ? year.color : colors.border }]}>
@@ -201,7 +252,9 @@ export default function ReportYearDivSelection({ onBack, onConfirm }) {
                       <Text style={[s.divLabel, { color: isActive ? accentColor + 'CC' : colors.textMuted }]}>
                         Division
                       </Text>
-                      <Text style={[s.divStudents, { color: colors.textMuted }]}>~1,050</Text>
+                      <Text style={[s.divStudents, { color: colors.textMuted }]}>
+                        {divCounts[div] != null ? `${divCounts[div]} students` : countsLoading ? '…' : '—'}
+                      </Text>
                       {isActive && (
                         <View style={[s.divCheck, { backgroundColor: accentColor }]}>
                           <Text style={s.divCheckText}>✓</Text>

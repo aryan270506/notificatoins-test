@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,8 +8,10 @@ import {
   StatusBar,
   SafeAreaView,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
-import SelectionScreen from './Selection-Screen'; // ← your separate file
+import SelectionScreen from './Selection-Screen';
+import axiosInstance from '../../../Src/Axios';
 
 const { width } = Dimensions.get('window');
 
@@ -126,14 +128,77 @@ function ClassRow({ icon, iconBg, subject, year, faculty, date, duration, attend
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 export default function AttendanceDashboard() {
   const [page, setPage] = useState(1);
-  const [showSelection, setShowSelection] = useState(false); // ← single state to show SelectionScreen
+  const [showSelection, setShowSelection] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({ totalClasses: 0, totalStudents: 0, avgAttended: 0, avgPercent: 0 });
+  const [yearData, setYearData] = useState([]);
+  const [recentClasses, setRecentClasses] = useState([]);
 
-  const recentClasses = [
-    { icon: '🗃️', iconBg: '#ff6b35', subject: 'DBMS', year: '2nd\nYear', faculty: 'Prof.\nSharma', date: '18 Feb,\n2024', duration: '1h 00m', attendance: 62, attColor: C.green },
-    { icon: '🖥️', iconBg: '#4f7cff', subject: 'Operating\nSystems', year: '3rd\nYear', faculty: 'Dr. Arnab\nK.', date: '18 Feb,\n2024', duration: '1h 30m', attendance: 58, attColor: C.green },
-    { icon: '⚙️', iconBg: '#8b6fff', subject: 'Data\nStructures', year: '1st\nYear', faculty: 'Prof. Neha\nGupta', date: '17 Feb,\n2024', duration: '2h 00m', attendance: 45, attColor: C.yellow },
-    { icon: '🤖', iconBg: '#e74c3c', subject: 'AI/ML Basics', year: '3rd\nYear', faculty: 'Dr. Vivek\nR.', date: '17 Feb,\n2024', duration: '1h 00m', attendance: 64, attColor: C.green },
-  ];
+  useEffect(() => { fetchDashboardData(); }, []);
+
+  const fetchDashboardData = async () => {
+    try {
+      setLoading(true);
+      const YEARS_LIST = ['1', '2', '3'];
+      const DIVS = ['A', 'B', 'C'];
+
+      const [studentsRes, ...sessionResults] = await Promise.all([
+        axiosInstance.get('/students/').catch(() => ({ data: { data: [] } })),
+        ...YEARS_LIST.flatMap(y => DIVS.map(d =>
+          axiosInstance.get(`/attendance/class?year=${y}&division=${d}`)
+            .then(r => ({ year: y, division: d, sessions: r.data?.sessions || [] }))
+            .catch(() => ({ year: y, division: d, sessions: [] }))
+        )),
+      ]);
+
+      const allStudents = studentsRes.data?.data || [];
+      const allSessions = sessionResults.flatMap(r => r.sessions);
+
+      let totalPresent = 0, totalEntries = 0;
+      allSessions.forEach(s => {
+        s.students?.forEach(st => { totalEntries++; if (st.status === 'Present') totalPresent++; });
+      });
+
+      const totalClasses = allSessions.length;
+      const totalStudents = allStudents.length;
+      const avgPercent = totalEntries > 0 ? Math.round((totalPresent / totalEntries) * 100) : 0;
+      const avgAttended = totalStudents > 0 ? Math.round(totalPresent / totalStudents) : 0;
+      setStats({ totalClasses, totalStudents, avgAttended, avgPercent });
+
+      const yearStats = YEARS_LIST.map(y => {
+        const ySessions = sessionResults.filter(r => r.year === y).flatMap(r => r.sessions);
+        const conducted = ySessions.length;
+        let pres = 0, ent = 0;
+        ySessions.forEach(s => { s.students?.forEach(st => { ent++; if (st.status === 'Present') pres++; }); });
+        const pct = ent > 0 ? Math.round((pres / ent) * 100) : 0;
+        const yStudents = allStudents.filter(s => s.year === y).length;
+        const attended = yStudents > 0 ? Math.round(pres / yStudents) : 0;
+        return { year: y, percent: pct, conducted, attended };
+      });
+      setYearData(yearStats);
+
+      const sorted = [...allSessions].sort((a, b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date));
+      const ICON_COLORS = ['#ff6b35', '#4f7cff', '#8b6fff', '#e74c3c', '#2ecc71', '#f0a500'];
+      setRecentClasses(sorted.slice(0, 10).map((s, i) => {
+        const presentCount = s.students?.filter(st => st.status === 'Present').length || 0;
+        const dt = new Date(s.date);
+        return {
+          icon: '📚', iconBg: ICON_COLORS[i % ICON_COLORS.length],
+          subject: s.subject,
+          year: `Year ${s.year}`,
+          faculty: s.teacherId?.name || 'N/A',
+          date: dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
+          duration: '-',
+          attendance: presentCount,
+          attColor: presentCount > 45 ? C.green : C.yellow,
+        };
+      }));
+    } catch (err) {
+      console.error('Error fetching dashboard data:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // ── Render SelectionScreen in place of dashboard (sidebar stays intact) ──
   if (showSelection) {
@@ -145,6 +210,18 @@ export default function AttendanceDashboard() {
           console.log('Selected:', year.label, 'Division', division.value);
         }}
       />
+    );
+  }
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={C.accent} />
+          <Text style={{ color: C.textMuted, marginTop: 12, fontSize: 13 }}>Loading attendance data...</Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
@@ -171,10 +248,10 @@ export default function AttendanceDashboard() {
 
         {/* ── Stat Cards ── */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statRow}>
-          <StatCard icon="📚" label="Total Classes Conducted" value="1,240" sub="↑ +12% from last month" />
-          <StatCard icon="👥" label="Total Students" value="2,450" sub="↑ +34 new enrollments" />
-          <StatCard icon="📊" label="Avg Classes Attended" value="1,105" sub="↑ +8% increase" />
-          <StatCard icon="🔄" label="Overall Avg Attendance" value="89%" sub="✅ Exceeding target (85%)" />
+          <StatCard icon="📚" label="Total Classes Conducted" value={String(stats.totalClasses)} sub="Across all years" />
+          <StatCard icon="👥" label="Total Students" value={String(stats.totalStudents)} sub="All enrolled students" />
+          <StatCard icon="📊" label="Avg Attended / Student" value={String(stats.avgAttended)} sub="Average classes attended" />
+          <StatCard icon="🔄" label="Overall Avg Attendance" value={`${stats.avgPercent}%`} sub={stats.avgPercent >= 85 ? '✅ Exceeding target (85%)' : '⚠️ Below target (85%)'} subColor={stats.avgPercent >= 85 ? C.green : C.yellow} />
         </ScrollView>
 
         {/* ── Year-wise Section ── */}
@@ -184,9 +261,14 @@ export default function AttendanceDashboard() {
             <TouchableOpacity><Text style={styles.viewReport}>View Detailed Report</Text></TouchableOpacity>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.yearRow}>
-            <YearCard year="1ST YEAR STUDENTS" percent={86} conducted={420} attended={360} color={C.ring1st} />
-            <YearCard year="2ND YEAR STUDENTS" percent={91} conducted={390} attended={355} color={C.ring2nd} />
-            <YearCard year="3RD YEAR STUDENTS" percent={90} conducted={430} attended={390} color={C.ring3rd} />
+            {[
+              { label: '1ST YEAR STUDENTS', color: C.ring1st },
+              { label: '2ND YEAR STUDENTS', color: C.ring2nd },
+              { label: '3RD YEAR STUDENTS', color: C.ring3rd },
+            ].map((item, idx) => {
+              const yd = yearData[idx] || { percent: 0, conducted: 0, attended: 0 };
+              return <YearCard key={idx} year={item.label} percent={yd.percent} conducted={yd.conducted} attended={yd.attended} color={item.color} />;
+            })}
           </ScrollView>
         </View>
 
@@ -227,7 +309,7 @@ export default function AttendanceDashboard() {
 
           {/* Pagination */}
           <View style={styles.pagination}>
-            <Text style={styles.paginationInfo}>Showing 4 of 48 recent classes</Text>
+            <Text style={styles.paginationInfo}>Showing {recentClasses.length} recent classes</Text>
             <View style={styles.pageButtons}>
               <TouchableOpacity style={styles.pageBtn}><Text style={styles.pageBtnText}>‹</Text></TouchableOpacity>
               <TouchableOpacity style={[styles.pageBtn, styles.pageBtnActive]}>

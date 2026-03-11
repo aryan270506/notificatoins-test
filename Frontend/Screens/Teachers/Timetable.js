@@ -1,20 +1,22 @@
 // Screens/Teacher/TimetableScreen.js
-// Full Weekly Timetable — Teacher View (admin-assigned schedule)
+// Full Weekly Timetable — Teacher View (fetched from DB, cancel/postpone synced)
 
-import React, { useRef, useEffect, useState, useMemo } from 'react';
+import React, { useRef, useEffect, useState, useMemo, useCallback, useContext } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   Animated, Dimensions, Platform, StatusBar, Modal,
-  useWindowDimensions,
+  useWindowDimensions, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import axiosInstance from "../../Src/Axios";
+import { ThemeContext } from './TeacherStack';
 
 /* ─── Colors ─────────────────────────────────────────────────────────────── */
-const C = {
+const C_DARK = {
   bg:           '#07090F',
   surface:      '#0D1120',
   surfaceEl:    '#111827',
@@ -46,84 +48,100 @@ const C = {
   breakBg:      'rgba(59,130,246,0.05)',
   white:        '#FFFFFF',
 };
-
-/* ─── Teacher data (simulating admin-assigned schedules) ─────────────────── */
-const TEACHERS = {
-  'T001': {
-    name: 'Dr. Arjun Mehta',
-    subject: 'Physics',
-    dept: 'Science Dept.',
-    avatar: 'AM',
-    avatarColor: C.accent,
-    schedule: {
-      MON: [
-        { id: 's1', subject: 'Classical Mechanics', code: 'PHY301', section: 'TY-A', room: 'Room 402', start: '09:00', end: '10:30', type: 'LECTURE', color: C.accent },
-        { id: 's2', subject: 'Thermodynamics Lab', code: 'PHY302L', section: 'TY-B', room: 'Lab 01', start: '13:00', end: '15:00', type: 'LAB', color: C.cyan },
-      ],
-      TUE: [
-        { id: 's3', subject: 'Quantum Physics', code: 'PHY401', section: 'SY-A', room: 'Room 303', start: '10:30', end: '12:00', type: 'LECTURE', color: C.accent },
-        { id: 's4', subject: 'Faculty Meeting', code: '—', section: 'All Faculty', room: 'Conf. Hall B', start: '14:00', end: '15:00', type: 'MEETING', color: C.orange },
-      ],
-      WED: [
-        { id: 's5', subject: 'Classical Mechanics', code: 'PHY301', section: 'TY-A', room: 'Room 402', start: '09:00', end: '10:30', type: 'LECTURE', color: C.accent },
-        { id: 's6', subject: 'Wave Optics', code: 'PHY205', section: 'FY-C', room: 'Room 105', start: '11:30', end: '13:00', type: 'LECTURE', color: C.purple },
-        { id: 's7', subject: 'Doubt Session', code: 'PHY301', section: 'TY-A', room: 'Room 402', start: '15:30', end: '16:30', type: 'DOUBT', color: C.green },
-      ],
-      THU: [
-        { id: 's8', subject: 'Quantum Physics Lab', code: 'PHY401L', section: 'SY-A', room: 'Lab 02', start: '10:30', end: '12:30', type: 'LAB', color: C.cyan },
-        { id: 's9', subject: 'Wave Optics', code: 'PHY205', section: 'FY-C', room: 'Room 105', start: '14:00', end: '15:30', type: 'LECTURE', color: C.purple },
-      ],
-      FRI: [
-        { id: 's10', subject: 'Thermodynamics', code: 'PHY302', section: 'TY-B', room: 'Room 210', start: '09:00', end: '10:30', type: 'LECTURE', color: C.accent },
-        { id: 's11', subject: 'Research Lab', code: 'PHY500R', section: 'PG-A', room: 'Research Wing 3', start: '13:00', end: '17:00', type: 'LAB', color: C.cyan },
-      ],
-    },
-  },
-  'T002': {
-    name: 'Prof. Sneha Kapoor',
-    subject: 'Mathematics',
-    dept: 'Math Dept.',
-    avatar: 'SK',
-    avatarColor: C.purple,
-    schedule: {
-      MON: [
-        { id: 'm1', subject: 'Linear Algebra', code: 'MAT201', section: 'SY-B', room: 'Room 201', start: '10:30', end: '12:00', type: 'LECTURE', color: C.purple },
-        { id: 'm2', subject: 'Calculus II', code: 'MAT102', section: 'FY-A', room: 'Room 305', start: '14:00', end: '15:30', type: 'LECTURE', color: C.orange },
-      ],
-      TUE: [
-        { id: 'm3', subject: 'Differential Equations', code: 'MAT301', section: 'TY-A', room: 'Room 402', start: '09:00', end: '10:30', type: 'LECTURE', color: C.purple },
-        { id: 'm4', subject: 'Linear Algebra', code: 'MAT201', section: 'SY-B', room: 'Room 201', start: '13:00', end: '14:30', type: 'LECTURE', color: C.purple },
-      ],
-      WED: [
-        { id: 'm5', subject: 'Calculus II', code: 'MAT102', section: 'FY-A', room: 'Room 305', start: '11:30', end: '13:00', type: 'LECTURE', color: C.orange },
-      ],
-      THU: [
-        { id: 'm6', subject: 'Differential Equations', code: 'MAT301', section: 'TY-A', room: 'Room 402', start: '09:00', end: '10:30', type: 'LECTURE', color: C.purple },
-        { id: 'm7', subject: 'Math Doubt Session', code: 'MAT201', section: 'SY-B', room: 'Room 201', start: '15:00', end: '16:00', type: 'DOUBT', color: C.green },
-      ],
-      FRI: [
-        { id: 'm8', subject: 'Linear Algebra', code: 'MAT201', section: 'SY-B', room: 'Room 201', start: '10:30', end: '12:00', type: 'LECTURE', color: C.purple },
-      ],
-    },
-  },
+const C_LIGHT = {
+  bg:           '#F1F4FD',
+  surface:      '#FFFFFF',
+  surfaceEl:    '#EAEEf9',
+  card:         '#FFFFFF',
+  border:       '#DDE3F4',
+  borderLight:  '#CBD5E1',
+  accent:       '#2563EB',
+  accentSoft:   'rgba(37,99,235,0.09)',
+  accentGlow:   'rgba(37,99,235,0.06)',
+  cyan:         '#0891B2',
+  cyanSoft:     'rgba(8,145,178,0.10)',
+  green:        '#059669',
+  greenSoft:    'rgba(5,150,105,0.10)',
+  purple:       '#7C3AED',
+  purpleSoft:   'rgba(124,58,237,0.10)',
+  orange:       '#D97706',
+  orangeSoft:   'rgba(217,119,6,0.10)',
+  red:          '#DC2626',
+  redSoft:      'rgba(220,38,38,0.10)',
+  textPrimary:  '#0F172A',
+  textSec:      '#4B5563',
+  textMuted:    '#9CA3AF',
+  cancelled:    '#DC2626',
+  cancelledSoft:'rgba(220,38,38,0.10)',
+  postponed:    '#D97706',
+  postponedSoft:'rgba(217,119,6,0.10)',
+  nowLine:      '#059669',
+  lunchBg:      'rgba(217,119,6,0.06)',
+  breakBg:      'rgba(37,99,235,0.05)',
+  white:        '#FFFFFF',
 };
 
-const DAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI'];
-const DAY_LABELS = { MON: 'Monday', TUE: 'Tuesday', WED: 'Wednesday', THU: 'Thursday', FRI: 'Friday' };
-const DAY_DATES  = { MON: 'Oct 23', TUE: 'Oct 24', WED: 'Oct 25', THU: 'Oct 26', FRI: 'Oct 27' };
+/* ─── Color map: Timetable schema enum → hex ────────────────────────────── */
+// These must match the `color` enum in the Timetable model exactly:
+// ["teal", "blue", "purple", "orange", "green", "pink"]
+const COLOR_MAP = {
+  teal:   '#06B6D4',
+  blue:   '#3B82F6',
+  purple: '#8B5CF6',
+  orange: '#F59E0B',
+  green:  '#10B981',
+  pink:   '#EC4899',
+};
 
-const TYPE_LABELS = {
+const DAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+
+const DAY_LABELS = {
+  MON: 'Monday', TUE: 'Tuesday', WED: 'Wednesday',
+  THU: 'Thursday', FRI: 'Friday', SAT: 'Saturday',
+};
+
+// Map full day names (as stored in Timetable model) to short codes used in UI
+const DAY_TO_SHORT = {
+  Monday: 'MON', Tuesday: 'TUE', Wednesday: 'WED',
+  Thursday: 'THU', Friday: 'FRI', Saturday: 'SAT',
+};
+
+// Slot times — must match SLOT_TIMES in the backend /timetable/teacher route
+const SLOT_TIMES = {
+  t1: { start: '10:30', end: '11:30' },
+  t2: { start: '11:30', end: '12:30' },
+  t3: { start: '13:15', end: '14:15' },
+  t4: { start: '14:15', end: '15:15' },
+  t5: { start: '15:30', end: '16:30' },
+  t6: { start: '16:30', end: '17:30' },
+};
+
+const TYPE_LABELS_FN = (C) => ({
   LECTURE: { label: 'Lecture', icon: 'book-outline',        bg: C.accentSoft,  color: C.accent  },
   LAB:     { label: 'Lab',     icon: 'flask-outline',       bg: C.cyanSoft,    color: C.cyan    },
   MEETING: { label: 'Meeting', icon: 'people-outline',      bg: C.orangeSoft,  color: C.orange  },
   DOUBT:   { label: 'Doubt',   icon: 'help-circle-outline', bg: C.greenSoft,   color: C.green   },
-};
+});
+
+const BREAKS = [
+  { start: '12:30', end: '13:15', label: '🍽  LUNCH BREAK  (12:30 – 1:15 PM)', type: 'lunch' },
+  { start: '15:15', end: '15:30', label: 'SHORT BREAK  (3:15 – 3:30)', type: 'short' },
+];
+
+const GRID_START  = 10 * 60 + 30;  // 10:30 AM
+const GRID_END    = 18 * 60;       // 6:00 PM
+const PX_PER_MIN  = 1.8;
+
+const TIME_SLOTS = [];
+for (let h = 10; h <= 18; h++) {
+  TIME_SLOTS.push(`${h.toString().padStart(2, '0')}:00`);
+}
+
+const POSTPONE_DATE_OPTIONS = ['Mon, Oct 30', 'Tue, Oct 31', 'Wed, Nov 1', 'Thu, Nov 2', 'Fri, Nov 3'];
+const POSTPONE_TIME_OPTIONS = ['08:00 AM', '09:00 AM', '10:30 AM', '12:00 PM', '02:00 PM', '04:00 PM'];
 
 /* ─── Helpers ─────────────────────────────────────────────────────────────── */
-const toMinutes = (t) => {
-  const [h, m] = t.split(':').map(Number);
-  return h * 60 + m;
-};
+const toMinutes = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
 const formatTime = (t) => {
   const [h, m] = t.split(':').map(Number);
   const ap = h >= 12 ? 'PM' : 'AM';
@@ -131,49 +149,177 @@ const formatTime = (t) => {
   return `${hh}:${m.toString().padStart(2, '0')} ${ap}`;
 };
 
-const GRID_START = 8 * 60;   // 8:00 AM
-const GRID_END   = 18 * 60;  // 6:00 PM
-const PX_PER_MIN = 1.6;      // pixels per minute
+// Get current ISO week start (Monday)
+function getWeekStart() {
+  const d = new Date();
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(d.setDate(diff));
+  return monday.toISOString().split('T')[0];
+}
 
-const BREAKS = [
-  { start: '12:30', end: '13:00', label: '🍽  LUNCH BREAK  (12:30 – 1:00 PM)', type: 'lunch' },
-  { start: '15:15', end: '15:30', label: 'SHORT BREAK  (3:15 – 3:30)', type: 'short' },
-];
+/**
+ * Transform the flat array returned by GET /api/timetable/teacher/:teacherId
+ * into the grouped schedule shape: { MON: [cls, ...], TUE: [...], ... }
+ *
+ * Each item from the API looks like:
+ * {
+ *   id, timetableId, year, division, batch,
+ *   day,      // "Monday" | "Tuesday" | ...  (full name from Timetable model)
+ *   slotId,   // "t1" | "t2" | ... | "t6"
+ *   subject,  // uppercase string from Timetable schema
+ *   room,     // string | null
+ *   color,    // "teal" | "blue" | "purple" | "orange" | "green" | "pink"
+ *   teacherName,
+ *   start,    // "10:30"  (added by backend from SLOT_TIMES)
+ *   end,      // "11:30"
+ * }
+ */
+function transformSchedule(apiData) {
+  const grouped = {};
+  DAYS.forEach((d) => { grouped[d] = []; });
 
-const TIME_SLOTS = [];
-for (let h = 8; h <= 18; h++) {
-  TIME_SLOTS.push(`${h.toString().padStart(2, '0')}:00`);
+  apiData.forEach((item) => {
+    const short = DAY_TO_SHORT[item.day];
+    if (!short) return; // skip unknown days
+
+    // Resolve hex color from the Timetable model enum value
+    const cardColor = COLOR_MAP[item.color] || C_DARK.accent;
+
+    // Detect LAB by subject name convention (subject contains "LAB")
+    // This mirrors how the admin assigns subjects vs labs from the Student collection
+    const isLab = item.subject.toUpperCase().includes('LAB');
+    const type  = isLab ? 'LAB' : 'LECTURE';
+
+    // Use start/end provided by the backend (which come from its own SLOT_TIMES),
+    // falling back to our local SLOT_TIMES as a safety net.
+    const times = SLOT_TIMES[item.slotId] || { start: '09:00', end: '10:00' };
+
+    grouped[short].push({
+      id:          item.id,          // composite key: "<timetableId>-<day>-<slotId>"
+      timetableId: item.timetableId,
+      year:        item.year,
+      division:    item.division,
+      batch:       item.batch,
+      day:         item.day,         // full name, e.g. "Monday" — used by lecture-status API
+      slotId:      item.slotId,      // e.g. "t1"
+      subject:     item.subject,
+      code:        `${item.division}-${item.batch}`,
+      section:     `${item.division}${item.batch}`,
+      room:        item.room || '—',
+      start:       item.start || times.start,
+      end:         item.end   || times.end,
+      type,
+      color: cardColor,
+    });
+  });
+
+  return grouped;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
-export default function TimetableScreen({ navigation, route }) {
-  // In a real app: const teacherId = route?.params?.teacherId || 'T001';
-  const teacherId = 'T001';
-  const teacher   = TEACHERS[teacherId];
+export default function TimetableScreen({ navigation, route, user }) {
+  const { isDark } = useContext(ThemeContext);
+  const C = isDark ? C_DARK : C_LIGHT;
+  const styles = makeStyles(C);
+  const TYPE_LABELS = TYPE_LABELS_FN(C);
+  const teacherId   = user?._id || route?.params?.teacherId || route?.params?.user?._id;
+  const teacherName = user?.name || route?.params?.user?.name || 'Teacher';
 
   const { width }  = useWindowDimensions();
   const isDesktop  = width >= 768;
 
-  const [view, setView]           = useState('weekly'); // 'weekly' | 'daily' | 'list'
-  const [activeDay, setActiveDay] = useState('TUE');
+  const [view, setView]                 = useState('weekly');
+  const [activeDay, setActiveDay]       = useState('MON');
   const [selectedClass, setSelectedClass] = useState(null);
   const [modalVisible, setModalVisible]   = useState(false);
-  const [uploadState, setUploadState]     = useState('idle'); // 'idle' | 'picking' | 'uploading' | 'success' | 'error'
+  const [uploadState, setUploadState]     = useState('idle');
   const [uploadedFile, setUploadedFile]   = useState(null);
-  const [exportState, setExportState]     = useState('idle'); // 'idle' | 'generating' | 'done'
+  const [exportState, setExportState]     = useState('idle');
   const uploadProgressAnim = useRef(new Animated.Value(0)).current;
 
-  // Cancel / Postpone state
-  const [cancelledIds, setCancelledIds]     = useState(new Set());
-  const [postponedMap, setPostponedMap]     = useState({}); // { classId: { newDate, newTime } }
+  // DB-sourced data
+  const [schedule, setSchedule]   = useState({});   // { MON: [cls, ...], TUE: [...] }
+  const [statusMap, setStatusMap] = useState({});   // { "day-slotId": { status, postponedTo } }
+  const [loading, setLoading]     = useState(true); // starts true — fixed bug where it was set false before fetch
+
+  // Postpone modal state
   const [postponeModalVisible, setPostponeModalVisible] = useState(false);
-  const [postponeDate, setPostponeDate]     = useState('');
-  const [postponeTime, setPostponeTime]     = useState('');
-  const POSTPONE_DATE_OPTIONS = ['Mon, Oct 30', 'Tue, Oct 31', 'Wed, Nov 1', 'Thu, Nov 2', 'Fri, Nov 3'];
-  const POSTPONE_TIME_OPTIONS = ['08:00 AM', '09:00 AM', '10:30 AM', '12:00 PM', '02:00 PM', '04:00 PM'];
+  const [postponeDate, setPostponeDate] = useState(POSTPONE_DATE_OPTIONS[0]);
+  const [postponeTime, setPostponeTime] = useState(POSTPONE_TIME_OPTIONS[0]);
 
   const fadeAnim  = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(16)).current;
+  const weekStart = getWeekStart();
+
+  /* ── Fetch teacher's assigned classes from the Timetable collection ────────
+   *
+   * Route: GET /api/timetable/teacher/:teacherId
+   *
+   * This backend route scans every Timetable document (year/division/batch)
+   * and collects every slot whose `teacherId` matches, returning a flat array.
+   * The Timetable model is the single source of truth — nothing is fetched
+   * from a separate teacher-specific collection.
+   * ────────────────────────────────────────────────────────────────────────── */
+  const fetchSchedule = useCallback(async () => {
+    if (!teacherId) {
+      console.warn('⚠️ TimetableScreen: teacherId is undefined, cannot fetch schedule');
+      setLoading(false);
+      return;
+    }
+    try {
+      setLoading(true);
+      console.log(`📅 TimetableScreen: Fetching timetable for teacherId: ${teacherId}`);
+      const { data } = await axiosInstance.get(`/timetable/teacher/${teacherId}`);
+      console.log(`✅ TimetableScreen: Fetch successful, received ${data.data?.length || 0} classes`, data.data);
+      if (data.success) {
+        const transformed = transformSchedule(data.data);
+        console.log('🔄 Transformed schedule:', transformed);
+        setSchedule(transformed);
+      }
+    } catch (err) {
+      console.error('❌ fetchSchedule error:', err?.response?.data || err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [teacherId]);
+
+  /* ── Fetch cancel/postpone statuses for this teacher's week ── */
+  const fetchStatuses = useCallback(async () => {
+    if (!teacherId) {
+      console.warn('⚠️ TimetableScreen: teacherId is undefined, cannot fetch statuses');
+      return;
+    }
+    try {
+      console.log(`📊 Fetching lecture statuses for weekStart: ${weekStart}`);
+      const { data } = await axiosInstance.get(`/lecture-status/teacher/${teacherId}`, {
+        params: { weekStart },
+      });
+      if (data.success) {
+        console.log(`✅ Fetched ${data.data?.length || 0} lecture statuses`, data.data);
+        // Build lookup map: "<fullDayName>-<slotId>" → status doc
+        // e.g. "Monday-t1" → { status: "cancelled", postponedTo: {...} }
+        const map = {};
+        data.data.forEach((s) => {
+          map[`${s.day}-${s.slotId}`] = s;
+        });
+        console.log('🗺️ Status map:', map);
+        setStatusMap(map);
+      }
+    } catch (err) {
+      console.error('❌ fetchStatuses error:', err?.response?.data || err.message);
+    }
+  }, [teacherId, weekStart]);
+
+  // Debug: log when teacherId changes
+  useEffect(() => {
+    console.log('🎓 TimetableScreen mounted/updated - teacherId:', teacherId, 'teacherName:', teacherName);
+  }, [teacherId, teacherName]);
+
+  useEffect(() => {
+    fetchSchedule();
+    fetchStatuses();
+  }, [fetchSchedule, fetchStatuses]);
 
   useEffect(() => {
     Animated.parallel([
@@ -182,11 +328,19 @@ export default function TimetableScreen({ navigation, route }) {
     ]).start();
   }, []);
 
-  const totalClasses = useMemo(() =>
-    Object.values(teacher.schedule).reduce((acc, day) => acc + day.length, 0),
-  [teacher]);
+  /* ── Derived helpers ── */
+  // Status key: "<fullDayName>-<slotId>", e.g. "Monday-t1"
+  // cls.day is the full name from the Timetable model (e.g. "Monday")
+  const getStatusKey    = (cls) => `${cls.day}-${cls.slotId}`;
+  const isCancelled     = (cls) => statusMap[getStatusKey(cls)]?.status === 'cancelled';
+  const isPostponed     = (cls) => statusMap[getStatusKey(cls)]?.status === 'postponed';
+  const getPostponeInfo = (cls) => statusMap[getStatusKey(cls)]?.postponedTo;
 
-  const todayClasses = teacher.schedule[activeDay] || [];
+  const totalClasses = useMemo(() =>
+    Object.values(schedule).reduce((acc, day) => acc + day.length, 0),
+  [schedule]);
+
+  const todayClasses = schedule[activeDay] || [];
 
   /* ── Class card press ── */
   const handleClassPress = (cls) => {
@@ -194,371 +348,114 @@ export default function TimetableScreen({ navigation, route }) {
     setModalVisible(true);
   };
 
-  /* ── Cancel Lecture ── */
-  const handleCancelLecture = () => {
+  /* ── Cancel Lecture (toggle) ── */
+  const handleCancelLecture = async () => {
     if (!selectedClass) return;
-    setCancelledIds(prev => {
-      const next = new Set(prev);
-      if (next.has(selectedClass.id)) {
-        next.delete(selectedClass.id); // toggle off
+    const cls    = selectedClass;
+    const key    = getStatusKey(cls);
+    const cur    = statusMap[key];
+    const isNowCancelled = cur?.status === 'cancelled';
+
+    try {
+      if (isNowCancelled) {
+        // Revert to active
+        await axiosInstance.delete('/lecture-status', {
+          data: {
+            year:      cls.year,
+            division:  cls.division,
+            batch:     cls.batch,
+            day:       cls.day,   // full day name, e.g. "Monday"
+            slotId:    cls.slotId,
+            weekStart,
+          },
+        });
+        setStatusMap(prev => { const n = { ...prev }; delete n[key]; return n; });
       } else {
-        next.add(selectedClass.id);
-        // remove postpone if was postponed
-        setPostponedMap(pm => { const nm = { ...pm }; delete nm[selectedClass.id]; return nm; });
+        // Set cancelled
+        const { data } = await axiosInstance.put('/lecture-status', {
+          year:          cls.year,
+          division:      cls.division,
+          batch:         cls.batch,
+          day:           cls.day,
+          slotId:        cls.slotId,
+          weekStart,
+          teacherId,
+          subject:       cls.subject,
+          status:        'cancelled',
+          updatedByRole: 'Teacher',
+        });
+        if (data.success) {
+          setStatusMap(prev => ({ ...prev, [key]: data.data }));
+        }
       }
-      return next;
-    });
+    } catch (err) {
+      console.error('Cancel error:', err);
+    }
     setModalVisible(false);
   };
 
-  /* ── Postpone Lecture ── */
+  /* ── Open postpone picker ── */
   const openPostponeModal = () => {
     setPostponeDate(POSTPONE_DATE_OPTIONS[0]);
     setPostponeTime(POSTPONE_TIME_OPTIONS[0]);
     setPostponeModalVisible(true);
   };
 
-  const confirmPostpone = () => {
+  /* ── Confirm postpone ── */
+  const confirmPostpone = async () => {
     if (!selectedClass) return;
-    setPostponedMap(prev => ({ ...prev, [selectedClass.id]: { newDate: postponeDate, newTime: postponeTime } }));
-    // Remove from cancelled if was cancelled
-    setCancelledIds(prev => { const next = new Set(prev); next.delete(selectedClass.id); return next; });
+    const cls = selectedClass;
+    const key = getStatusKey(cls);
+    try {
+      const { data } = await axiosInstance.put('/lecture-status', {
+        year:          cls.year,
+        division:      cls.division,
+        batch:         cls.batch,
+        day:           cls.day,
+        slotId:        cls.slotId,
+        weekStart,
+        teacherId,
+        subject:       cls.subject,
+        status:        'postponed',
+        postponedTo:   { date: postponeDate, time: postponeTime },
+        updatedByRole: 'Teacher',
+      });
+      if (data.success) {
+        setStatusMap(prev => ({ ...prev, [key]: data.data }));
+      }
+    } catch (err) {
+      console.error('Postpone error:', err);
+    }
     setPostponeModalVisible(false);
     setModalVisible(false);
   };
 
-  /* ── Export Timetable as PDF ─────────────────────────────────────────── */
-  const handleExportPDF = async () => {
-    if (exportState === 'generating') return;
-    setExportState('generating');
-
-    try {
-      const days     = DAYS;
-      const schedule = teacher.schedule;
-
-      // ── Print-safe type colors ──────────────────────────────────────────
-      const TYPE_COLORS = {
-        LECTURE: { bg: '#EFF6FF', border: '#93C5FD', text: '#1E40AF', header: '#DBEAFE' },
-        LAB:     { bg: '#ECFEFF', border: '#67E8F9', text: '#0E7490', header: '#CFFAFE' },
-        MEETING: { bg: '#FFFBEB', border: '#FCD34D', text: '#92400E', header: '#FEF3C7' },
-        DOUBT:   { bg: '#ECFDF5', border: '#6EE7B7', text: '#065F46', header: '#D1FAE5' },
-      };
-
-      // ── Summary stats ───────────────────────────────────────────────────
-      const allClasses   = Object.values(schedule).flat();
-      const totalCount   = allClasses.length;
-      const lectureCount = allClasses.filter(c => c.type === 'LECTURE').length;
-      const labCount     = allClasses.filter(c => c.type === 'LAB').length;
-      const meetCount    = allClasses.filter(c => c.type === 'MEETING' || c.type === 'DOUBT').length;
-      const totalMinutes = allClasses.reduce((acc, c) => acc + (toMinutes(c.end) - toMinutes(c.start)), 0);
-      const totalHours   = (totalMinutes / 60).toFixed(1);
-      const genDate      = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
-
-      // ── Build all unique time slots across the schedule ─────────────────
-      const allTimes = new Set();
-      DAYS.forEach(day => {
-        (schedule[day] || []).forEach(cls => {
-          allTimes.add(cls.start);
-          allTimes.add(cls.end);
-        });
-      });
-      for (let h = 8; h <= 18; h++) {
-        allTimes.add(String(h).padStart(2,'0') + ':00');
-      }
-      const sortedTimes = Array.from(allTimes).sort((a,b) => toMinutes(a) - toMinutes(b));
-      const classStartMin = Math.min(...allClasses.map(c => toMinutes(c.start)));
-      const classEndMax   = Math.max(...allClasses.map(c => toMinutes(c.end)));
-      const timeSlots = sortedTimes.filter(t => {
-        const m = toMinutes(t);
-        return m >= classStartMin && m <= classEndMax;
-      });
-
-      // ── Find class occupying a slot in a given day ─────────────────────
-      const getClassAt = (day, timeStr) => {
-        const tMin = toMinutes(timeStr);
-        return (schedule[day] || []).find(cls =>
-          toMinutes(cls.start) <= tMin && tMin < toMinutes(cls.end)
-        ) || null;
-      };
-
-      const getRowspan = (cls) =>
-        timeSlots.filter(t => {
-          const m = toMinutes(t);
-          return m >= toMinutes(cls.start) && m < toMinutes(cls.end);
-        }).length;
-
-      // ── Build the grid rows HTML ────────────────────────────────────────
-      const buildGridRows = () => {
-        const consumed = {};
-        return timeSlots.map((slot, si) => {
-          const rowCells = DAYS.map((day) => {
-            const key = day + '-' + slot;
-            if (consumed[key]) return null;
-
-            const cls = getClassAt(day, slot);
-            if (!cls) {
-              return '<td style="background:#FAFAFA;border:1px solid #E5E7EB;padding:0;min-height:20px;"></td>';
-            }
-            if (cls.start !== slot) {
-              consumed[key] = true;
-              return null;
-            }
-
-            const span = getRowspan(cls);
-            timeSlots.slice(si + 1).forEach(futureSlot => {
-              if (toMinutes(futureSlot) < toMinutes(cls.end)) {
-                consumed[day + '-' + futureSlot] = true;
-              }
-            });
-
-            const tc  = TYPE_COLORS[cls.type] || TYPE_COLORS.LECTURE;
-            const dur = toMinutes(cls.end) - toMinutes(cls.start);
-            return '<td rowspan="' + span + '" style="background:' + tc.bg + ';border:1px solid ' + tc.border + ';border-left:3px solid ' + tc.border + ';padding:6px 8px;vertical-align:top;">'
-              + '<div style="font-size:7pt;font-weight:800;color:' + tc.text + ';letter-spacing:0.5px;margin-bottom:3px;text-transform:uppercase;">' + cls.type + '</div>'
-              + '<div style="font-size:9pt;font-weight:700;color:#111827;line-height:1.25;margin-bottom:2px;">' + cls.subject + '</div>'
-              + '<div style="font-size:7.5pt;color:#6B7280;font-family:monospace;margin-bottom:3px;">' + cls.code + '</div>'
-              + '<div style="font-size:7.5pt;color:#374151;margin-bottom:1px;">Sec: ' + cls.section + '</div>'
-              + '<div style="font-size:7.5pt;color:#374151;">Rm: ' + cls.room + '</div>'
-              + '<div style="font-size:7pt;color:#9CA3AF;margin-top:3px;">' + dur + ' min</div>'
-              + '</td>';
-          });
-
-          const validCells = rowCells.filter(c => c !== null).join('');
-          const isHour  = slot.endsWith(':00');
-          const timeBg  = isHour ? '#F1F5F9' : '#FAFAFA';
-          const timeFw  = isHour ? '700' : '400';
-          const timeClr = isHour ? '#111827' : '#9CA3AF';
-
-          return '<tr>'
-            + '<td style="background:' + timeBg + ';border:1px solid #E5E7EB;border-right:2px solid #CBD5E1;padding:5px 8px;text-align:right;white-space:nowrap;vertical-align:top;">'
-            + '<span style="font-size:8pt;font-weight:' + timeFw + ';color:' + timeClr + ';">' + formatTime(slot) + '</span>'
-            + '</td>'
-            + validCells
-            + '</tr>';
-        }).join('');
-      };
-
-      // ── Full A4 landscape HTML ──────────────────────────────────────────
-      const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<style>
-@page { size: A4 landscape; margin: 12mm 12mm 14mm 12mm; }
-* { margin:0; padding:0; box-sizing:border-box; }
-body { font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:9pt; color:#111827; background:#fff; line-height:1.3; }
-
-.lh { display:flex; justify-content:space-between; align-items:flex-end; padding-bottom:8px; border-bottom:3px solid #1E3A5F; margin-bottom:9px; }
-.org { font-size:16pt; font-weight:900; color:#1E3A5F; letter-spacing:-0.5px; line-height:1; }
-.org span { color:#3B82F6; }
-.org-tag { font-size:6.5pt; color:#9CA3AF; letter-spacing:1.5px; text-transform:uppercase; margin-top:2px; }
-.lh-c { text-align:center; }
-.doc-t { font-size:13pt; font-weight:800; color:#111827; }
-.doc-s { font-size:7.5pt; color:#6B7280; margin-top:2px; }
-.lh-r { text-align:right; font-size:8pt; color:#6B7280; line-height:1.7; }
-.lh-r strong { color:#111827; font-size:9pt; }
-
-.istrip { display:flex; border:1px solid #E5E7EB; border-radius:3px; overflow:hidden; margin-bottom:7px; }
-.ic { flex:1; padding:5px 10px; border-right:1px solid #E5E7EB; }
-.ic:last-child { border-right:none; }
-.il { font-size:6pt; font-weight:700; color:#9CA3AF; letter-spacing:1px; text-transform:uppercase; }
-.iv { font-size:8.5pt; font-weight:700; color:#111827; margin-top:1px; }
-
-.legend { display:flex; align-items:center; gap:14px; margin-bottom:7px; padding:4px 10px; border:1px solid #E5E7EB; border-radius:3px; background:#F9FAFB; }
-.ll { font-size:6.5pt; font-weight:700; color:#9CA3AF; letter-spacing:1px; text-transform:uppercase; margin-right:2px; }
-.li { display:flex; align-items:center; gap:4px; font-size:7pt; color:#374151; }
-.ls { width:10px; height:10px; border-radius:2px; }
-
-.gt { width:100%; border-collapse:collapse; table-layout:fixed; font-size:8pt; margin-bottom:7px; }
-.gt .tc { width:62px; }
-.gt .dc { width:calc((100% - 62px) / 5); }
-.dh { background:#1E3A5F; color:#fff; text-align:center; padding:6px 4px; border:1px solid #1E3A5F; font-size:8.5pt; font-weight:800; }
-.dh-d { font-size:6.5pt; font-weight:400; color:#93C5FD; margin-top:1px; }
-.th { background:#1E3A5F; border:1px solid #1E3A5F; padding:6px 4px; text-align:center; }
-.th span { font-size:6.5pt; font-weight:700; color:#93C5FD; letter-spacing:0.5px; text-transform:uppercase; }
-
-.sbar { display:flex; border:1px solid #E5E7EB; border-top:3px solid #3B82F6; border-radius:0 0 3px 3px; overflow:hidden; margin-bottom:10px; }
-.sc { flex:1; padding:5px 8px; text-align:center; border-right:1px solid #E5E7EB; background:#F8FAFC; }
-.sc:last-child { border-right:none; }
-.sn { font-size:13pt; font-weight:900; color:#1E3A5F; line-height:1; }
-.sl { font-size:6pt; font-weight:700; color:#9CA3AF; letter-spacing:0.8px; text-transform:uppercase; margin-top:1px; }
-
-.df { display:flex; justify-content:space-between; font-size:6.5pt; color:#9CA3AF; border-top:1px solid #E5E7EB; padding-top:5px; margin-top:6px; }
-.df strong { color:#6B7280; }
-</style>
-</head>
-<body>
-
-<div class="lh">
-  <div>
-    <div class="org">Campus<span>360</span></div>
-    <div class="org-tag">University Portal &middot; Academic Management System</div>
-  </div>
-  <div class="lh-c">
-    <div class="doc-t">Weekly Teaching Timetable</div>
-    <div class="doc-s">Academic Year 2024&ndash;25 &middot; Semester I &middot; Week 12: Oct 23&ndash;27, 2024</div>
-  </div>
-  <div class="lh-r">
-    <strong>${teacher.name}</strong><br/>
-    ${teacher.subject} Dept. &middot; ${teacher.dept}<br/>
-    Generated: ${genDate}
-  </div>
-</div>
-
-<div class="istrip">
-  <div class="ic"><div class="il">Faculty</div><div class="iv">${teacher.name}</div></div>
-  <div class="ic"><div class="il">Department</div><div class="iv">${teacher.subject}</div></div>
-  <div class="ic"><div class="il">Schedule Period</div><div class="iv">Oct 23 &ndash; Oct 27, 2024</div></div>
-  <div class="ic"><div class="il">Teaching Load</div><div class="iv">${totalHours} hrs &middot; ${totalCount} sessions</div></div>
-  <div class="ic"><div class="il">Reference No.</div><div class="iv">TT-2024-W12-${teacher.avatar}</div></div>
-</div>
-
-<div class="legend">
-  <span class="ll">Session Types</span>
-  <span class="li"><span class="ls" style="background:#BFDBFE;border:1px solid #93C5FD;"></span>Lecture</span>
-  <span class="li"><span class="ls" style="background:#A5F3FC;border:1px solid #67E8F9;"></span>Lab</span>
-  <span class="li"><span class="ls" style="background:#FDE68A;border:1px solid #FCD34D;"></span>Meeting</span>
-  <span class="li"><span class="ls" style="background:#A7F3D0;border:1px solid #6EE7B7;"></span>Doubt Session</span>
-  <span style="margin-left:auto;font-size:6.5pt;color:#9CA3AF;">Merged cells span the full session duration</span>
-</div>
-
-<table class="gt">
-  <colgroup><col class="tc"/>${DAYS.map(() => '<col class="dc"/>').join('')}</colgroup>
-  <thead>
-    <tr>
-      <th class="th"><span>TIME</span></th>
-      ${DAYS.map(day => '<th class="dh"><div>' + DAY_LABELS[day].toUpperCase() + '</div><div class="dh-d">' + DAY_DATES[day] + ', 2024</div></th>').join('')}
-    </tr>
-  </thead>
-  <tbody>${buildGridRows()}</tbody>
-</table>
-
-<div class="sbar">
-  <div class="sc"><div class="sn">${totalCount}</div><div class="sl">Total Sessions</div></div>
-  <div class="sc"><div class="sn">${lectureCount}</div><div class="sl">Lectures</div></div>
-  <div class="sc"><div class="sn">${labCount}</div><div class="sl">Lab Sessions</div></div>
-  <div class="sc"><div class="sn">${meetCount}</div><div class="sl">Meetings / Doubts</div></div>
-  <div class="sc"><div class="sn">${totalHours}</div><div class="sl">Total Hours</div></div>
-</div>
-
-<table style="width:100%;border-collapse:collapse;border-top:1px solid #E5E7EB;">
-  <tr>
-    <td style="width:33%;padding:16px 12px 0 0;vertical-align:bottom;">
-      <div style="border-top:1px solid #374151;padding-top:4px;font-size:8pt;font-weight:700;color:#374151;">${teacher.name}</div>
-      <div style="font-size:7pt;color:#9CA3AF;">Faculty Signature &amp; Date</div>
-    </td>
-    <td style="width:33%;padding:16px 12px 0;vertical-align:bottom;text-align:center;">
-      <div style="border-top:1px solid #374151;padding-top:4px;font-size:8pt;font-weight:700;color:#374151;">Head of Department &ndash; ${teacher.subject}</div>
-      <div style="font-size:7pt;color:#9CA3AF;">HOD Signature &amp; Date</div>
-    </td>
-    <td style="width:33%;padding:16px 0 0 12px;vertical-align:bottom;text-align:right;">
-      <div style="border-top:1px solid #374151;padding-top:4px;font-size:8pt;font-weight:700;color:#374151;">Principal / Dean of Faculty</div>
-      <div style="font-size:7pt;color:#9CA3AF;">Authorised Signatory &amp; Stamp</div>
-    </td>
-  </tr>
-</table>
-
-<div class="df">
-  <span><strong>Campus360</strong> &ndash; University Portal &nbsp;|&nbsp; System-generated document &middot; Confidential &middot; Do not alter.</span>
-  <span>Ref: TT-2024-W12-${teacher.avatar} &nbsp;|&nbsp; ${genDate}</span>
-</div>
-
-</body>
-</html>`;
-
-
-      // ── Generate PDF via expo-print ─────────────────────────────────────
-      const { uri } = await Print.printToFileAsync({
-        html,
-        base64: false,
-        margins: { top: 0, bottom: 0, left: 0, right: 0 },
-      });
-
-      // ── Rename to something meaningful ──────────────────────────────────
-      const fileName  = `Timetable_${teacher.name.replace(/\s+/g, '_')}_Week12.pdf`;
-      const destUri   = `${FileSystem.documentDirectory}${fileName}`;
-      await FileSystem.moveAsync({ from: uri, to: destUri });
-
-      setExportState('done');
-
-      // ── Share / Save dialog ─────────────────────────────────────────────
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) {
-        await Sharing.shareAsync(destUri, {
-          mimeType: 'application/pdf',
-          dialogTitle: `Save Timetable PDF`,
-          UTI: 'com.adobe.pdf',
-        });
-      }
-
-      setTimeout(() => setExportState('idle'), 2000);
-    } catch (err) {
-      console.error('PDF export error:', err);
-      setExportState('idle');
-    }
-  };
-
-  /* ── Upload Material — opens device file picker ── */
+  /* ── Upload Material ── */
   const handleUploadMaterial = async () => {
     try {
       setUploadState('picking');
       const result = await DocumentPicker.getDocumentAsync({
-        type: [
-          'application/pdf',
-          'application/msword',
-          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-          'application/vnd.ms-powerpoint',
-          'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-          'application/vnd.ms-excel',
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          'image/*',
-          'text/plain',
-        ],
+        type: ['application/pdf', 'application/msword',
+               'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+               'image/*', 'text/plain'],
         copyToCacheDirectory: true,
         multiple: false,
       });
-
-      if (result.canceled) {
-        setUploadState('idle');
-        return;
-      }
+      if (result.canceled) { setUploadState('idle'); return; }
 
       const file = result.assets[0];
       setUploadedFile(file);
       setUploadState('uploading');
-
-      // Animate progress bar
       uploadProgressAnim.setValue(0);
-      Animated.timing(uploadProgressAnim, {
-        toValue: 1,
-        duration: 1800,
-        useNativeDriver: false,
-      }).start();
+      Animated.timing(uploadProgressAnim, { toValue: 1, duration: 1800, useNativeDriver: false }).start();
 
-      // ── Replace this block with your actual API upload call ──────────────
-      // Example:
-      // const formData = new FormData();
-      // formData.append('file', { uri: file.uri, name: file.name, type: file.mimeType });
-      // formData.append('classCode', selectedClass.code);
-      // formData.append('section', selectedClass.section);
-      // await fetch('https://your-api.com/upload', { method: 'POST', body: formData });
-      // ─────────────────────────────────────────────────────────────────────
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-
+      // TODO: replace with real API call
+      await new Promise(r => setTimeout(r, 2000));
       setUploadState('success');
-      setTimeout(() => {
-        setUploadState('idle');
-        setUploadedFile(null);
-        uploadProgressAnim.setValue(0);
-      }, 3000);
-
+      setTimeout(() => { setUploadState('idle'); setUploadedFile(null); uploadProgressAnim.setValue(0); }, 3000);
     } catch (err) {
-      console.error('Upload error:', err);
       setUploadState('error');
-      setTimeout(() => {
-        setUploadState('idle');
-        setUploadedFile(null);
-      }, 2500);
+      setTimeout(() => { setUploadState('idle'); setUploadedFile(null); }, 2500);
     }
   };
 
@@ -568,26 +465,22 @@ body { font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:9pt; c
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
-
   const getFileIcon = (mimeType) => {
     if (!mimeType) return 'document-outline';
-    if (mimeType.includes('pdf'))         return 'document-text-outline';
-    if (mimeType.includes('image'))       return 'image-outline';
-    if (mimeType.includes('sheet') || mimeType.includes('excel'))    return 'grid-outline';
-    if (mimeType.includes('presentation') || mimeType.includes('powerpoint')) return 'easel-outline';
+    if (mimeType.includes('pdf'))   return 'document-text-outline';
+    if (mimeType.includes('image')) return 'image-outline';
     return 'document-outline';
   };
 
   /* ── Weekly grid ── */
   const renderWeeklyGrid = () => {
-    const COL_W = Math.max((width - (isDesktop ? 290 : 260)) / 5, 100);
+    const COL_W = Math.max((width - (isDesktop ? 290 : 260)) / DAYS.length, 100);
     const gridH  = (GRID_END - GRID_START) * PX_PER_MIN;
 
     return (
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-        <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
+        <ScrollView showsVerticalScrollIndicator={false}>
           <View style={{ flexDirection: 'row' }}>
-
             {/* Time column */}
             <View style={[styles.timeCol, { height: gridH + 40 }]}>
               {TIME_SLOTS.map((slot) => {
@@ -602,88 +495,60 @@ body { font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:9pt; c
 
             {/* Day columns */}
             {DAYS.map((day) => {
-              const isToday = day === activeDay;
+              const isActive = day === activeDay;
+              const dayCls   = schedule[day] || [];
               return (
                 <View key={day} style={[styles.dayCol, { width: COL_W }]}>
-                  {/* Day header */}
-                  <View style={[styles.dayHeader, isToday && styles.dayHeaderActive]}>
-                    <Text style={[styles.dayName, isToday && { color: C.accent }]}>{day}</Text>
-                    <Text style={[styles.dayDate, isToday && { color: C.accent }]}>{DAY_DATES[day]}</Text>
-                    {isToday && <View style={styles.todayUnderline} />}
+                  <View style={[styles.dayHeader, isActive && styles.dayHeaderActive]}>
+                    <Text style={[styles.dayName, isActive && { color: C.accent }]}>{day}</Text>
+                    {isActive && <View style={styles.todayUnderline} />}
                   </View>
-
-                  {/* Grid background */}
                   <View style={{ height: gridH, position: 'relative' }}>
-                    {/* Hour lines */}
                     {TIME_SLOTS.map((slot) => {
                       const top = (toMinutes(slot) - GRID_START) * PX_PER_MIN;
                       return <View key={slot} style={[styles.hourLine, { top }]} />;
                     })}
-
-                    {/* Breaks */}
                     {BREAKS.map((brk, bi) => {
                       const top = (toMinutes(brk.start) - GRID_START) * PX_PER_MIN;
                       const h   = (toMinutes(brk.end) - toMinutes(brk.start)) * PX_PER_MIN;
-                      return (
-                        <View key={bi} style={[
-                          styles.breakStripe,
-                          { top, height: h, backgroundColor: brk.type === 'lunch' ? C.lunchBg : C.breakBg }
-                        ]} />
-                      );
+                      return <View key={bi} style={[styles.breakStripe, { top, height: h, backgroundColor: brk.type === 'lunch' ? C.lunchBg : C.breakBg }]} />;
                     })}
-
-                    {/* Class cards */}
-                    {(teacher.schedule[day] || []).map((cls) => {
-                      const top = (toMinutes(cls.start) - GRID_START) * PX_PER_MIN;
-                      const h   = (toMinutes(cls.end) - toMinutes(cls.start)) * PX_PER_MIN;
-                      const typeMeta = TYPE_LABELS[cls.type];
-                      const isCancelled = cancelledIds.has(cls.id);
-                      const isPostponed = !!postponedMap[cls.id];
+                    {dayCls.map((cls) => {
+                      const top       = (toMinutes(cls.start) - GRID_START) * PX_PER_MIN;
+                      const h         = (toMinutes(cls.end)   - toMinutes(cls.start)) * PX_PER_MIN;
+                      const cancelled = isCancelled(cls);
+                      const postponed = isPostponed(cls);
+                      const pInfo     = getPostponeInfo(cls);
                       return (
                         <TouchableOpacity
                           key={cls.id}
-                          style={[
-                            styles.classCard,
-                            {
-                              top,
-                              height: h - 4,
-                              backgroundColor: isCancelled ? C.cancelledSoft : isPostponed ? C.postponedSoft : cls.color + '18',
-                              borderLeftColor: isCancelled ? C.cancelled : isPostponed ? C.postponed : cls.color,
-                              width: COL_W - 8,
-                              opacity: isCancelled ? 0.6 : 1,
-                            }
-                          ]}
+                          style={[styles.classCard, {
+                            top, height: h - 4,
+                            backgroundColor: cancelled ? C.cancelledSoft : postponed ? C.postponedSoft : cls.color + '18',
+                            borderLeftColor: cancelled ? C.cancelled     : postponed ? C.postponed     : cls.color,
+                            width: COL_W - 8,
+                            opacity: cancelled ? 0.6 : 1,
+                          }]}
                           onPress={() => handleClassPress(cls)}
                           activeOpacity={0.85}>
-                          <View style={[styles.classTypePill, { backgroundColor: (isCancelled ? C.cancelled : isPostponed ? C.postponed : cls.color) + '30' }]}>
-                            <Text style={[styles.classTypeText, { color: isCancelled ? C.cancelled : isPostponed ? C.postponed : cls.color }]}>
-                              {isCancelled ? 'CANCELLED' : isPostponed ? 'POSTPONED' : cls.type}
+                          <View style={[styles.classTypePill, { backgroundColor: (cancelled ? C.cancelled : postponed ? C.postponed : cls.color) + '30' }]}>
+                            <Text style={[styles.classTypeText, { color: cancelled ? C.cancelled : postponed ? C.postponed : cls.color }]}>
+                              {cancelled ? 'CANCELLED' : postponed ? 'POSTPONED' : cls.type}
                             </Text>
                           </View>
-                          <Text style={[styles.classSubject, isCancelled && { textDecorationLine: 'line-through', color: C.textMuted }]} numberOfLines={2}>{cls.subject}</Text>
+                          <Text style={[styles.classSubject, cancelled && { textDecorationLine: 'line-through', color: C.textMuted }]} numberOfLines={2}>{cls.subject}</Text>
+                          <Text style={[styles.classYear, { color: cancelled ? C.textMuted : C.textSec }]}>Year {cls.year} • {cls.division}-{cls.batch}</Text>
                           <Text style={styles.classTime}>{formatTime(cls.start)} – {formatTime(cls.end)}</Text>
                           {h > 80 && <Text style={styles.classRoom} numberOfLines={1}>📍 {cls.room}</Text>}
-                          {isPostponed && h > 60 && (
+                          {postponed && pInfo && h > 60 && (
                             <Text style={[styles.classRoom, { color: C.postponed, marginTop: 2 }]} numberOfLines={1}>
-                              ↪ {postponedMap[cls.id].newDate}
+                              ↪ {pInfo.date}
                             </Text>
                           )}
                         </TouchableOpacity>
                       );
                     })}
                   </View>
-                </View>
-              );
-            })}
-          </View>
-
-          {/* Floating break labels */}
-          <View style={[styles.breakLabelRow, { marginLeft: 64 }]}>
-            {BREAKS.map((brk, bi) => {
-              const top = (toMinutes(brk.start) - GRID_START) * PX_PER_MIN + 40;
-              return (
-                <View key={bi} style={[styles.breakLabel, { top, left: 4 }]}>
-                  <Text style={[styles.breakLabelText, brk.type === 'lunch' && { color: C.orange }]}>{brk.label}</Text>
                 </View>
               );
             })}
@@ -696,7 +561,6 @@ body { font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:9pt; c
   /* ── Daily view ── */
   const renderDailyView = () => (
     <ScrollView showsVerticalScrollIndicator={false}>
-      {/* Day selector */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
         <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 4 }}>
           {DAYS.map((day) => (
@@ -705,7 +569,6 @@ body { font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:9pt; c
               style={[styles.daySelectorPill, activeDay === day && styles.daySelectorPillActive]}
               onPress={() => setActiveDay(day)}>
               <Text style={[styles.daySelectorText, activeDay === day && { color: C.white }]}>{day}</Text>
-              <Text style={[styles.daySelectorDate, activeDay === day && { color: C.accent + 'CC' }]}>{DAY_DATES[day]}</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -719,16 +582,17 @@ body { font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:9pt; c
       ) : (
         todayClasses
           .sort((a, b) => toMinutes(a.start) - toMinutes(b.start))
-          .map((cls, i) => {
-            const typeMeta    = TYPE_LABELS[cls.type];
+          .map((cls) => {
+            const cancelled   = isCancelled(cls);
+            const postponed   = isPostponed(cls);
+            const pInfo       = getPostponeInfo(cls);
             const duration    = toMinutes(cls.end) - toMinutes(cls.start);
-            const isCancelled = cancelledIds.has(cls.id);
-            const isPostponed = !!postponedMap[cls.id];
-            const statusColor = isCancelled ? C.cancelled : isPostponed ? C.postponed : cls.color;
+            const statusColor = cancelled ? C.cancelled : postponed ? C.postponed : cls.color;
+            const typeMeta    = TYPE_LABELS[cls.type] || TYPE_LABELS.LECTURE;
             return (
               <TouchableOpacity
                 key={cls.id}
-                style={[styles.dailyCard, { borderLeftColor: statusColor, opacity: isCancelled ? 0.65 : 1 }]}
+                style={[styles.dailyCard, { borderLeftColor: statusColor, opacity: cancelled ? 0.65 : 1 }]}
                 onPress={() => handleClassPress(cls)}
                 activeOpacity={0.85}>
                 <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 14 }}>
@@ -740,18 +604,19 @@ body { font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:9pt; c
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                       <View style={[styles.typeChip, { backgroundColor: statusColor + '22' }]}>
-                        <Ionicons name={isCancelled ? 'close-circle-outline' : isPostponed ? 'arrow-forward-circle-outline' : typeMeta.icon} size={11} color={statusColor} />
+                        <Ionicons name={cancelled ? 'close-circle-outline' : postponed ? 'arrow-forward-circle-outline' : typeMeta.icon} size={11} color={statusColor} />
                         <Text style={[styles.typeChipText, { color: statusColor }]}>
-                          {isCancelled ? 'CANCELLED' : isPostponed ? 'POSTPONED' : typeMeta.label}
+                          {cancelled ? 'CANCELLED' : postponed ? 'POSTPONED' : typeMeta.label}
                         </Text>
                       </View>
                       <Text style={styles.durationText}>{duration} min</Text>
                     </View>
-                    <Text style={[styles.dailySubject, isCancelled && { textDecorationLine: 'line-through', color: C.textMuted }]}>{cls.subject}</Text>
-                    <Text style={styles.dailyCode}>{cls.code} · {cls.section}</Text>
-                    {isPostponed && (
+                    <Text style={[styles.dailySubject, cancelled && { textDecorationLine: 'line-through', color: C.textMuted }]}>{cls.subject}</Text>
+                    <Text style={[styles.dailyYear, { color: cancelled ? C.textMuted : C.textSec }]}>Year {cls.year} • {cls.division}-{cls.batch}</Text>
+                    <Text style={styles.dailyCode}>{cls.section}</Text>
+                    {postponed && pInfo && (
                       <Text style={{ fontSize: 11, color: C.postponed, marginTop: 4, fontWeight: '600' }}>
-                        ↪ Rescheduled to {postponedMap[cls.id].newDate} at {postponedMap[cls.id].newTime}
+                        ↪ Rescheduled to {pInfo.date} at {pInfo.time}
                       </Text>
                     )}
                     <View style={{ flexDirection: 'row', gap: 16, marginTop: 8 }}>
@@ -773,12 +638,11 @@ body { font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:9pt; c
   const renderListView = () => (
     <ScrollView showsVerticalScrollIndicator={false}>
       {DAYS.map((day) => {
-        const classes = teacher.schedule[day] || [];
+        const classes = schedule[day] || [];
         return (
           <View key={day} style={{ marginBottom: 20 }}>
             <View style={styles.listDayHeader}>
               <Text style={styles.listDayName}>{DAY_LABELS[day]}</Text>
-              <Text style={styles.listDayDate}>{DAY_DATES[day]}</Text>
               <View style={styles.listDayCount}>
                 <Text style={styles.listDayCountText}>{classes.length} classes</Text>
               </View>
@@ -788,22 +652,29 @@ body { font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:9pt; c
             ) : (
               classes
                 .sort((a, b) => toMinutes(a.start) - toMinutes(b.start))
-                .map((cls) => (
-                  <TouchableOpacity
-                    key={cls.id}
-                    style={styles.listCard}
-                    onPress={() => handleClassPress(cls)}
-                    activeOpacity={0.8}>
-                    <View style={[styles.listColorDot, { backgroundColor: cls.color }]} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.listSubject}>{cls.subject}</Text>
-                      <Text style={styles.listMeta}>{formatTime(cls.start)} – {formatTime(cls.end)}  ·  {cls.section}  ·  {cls.room}</Text>
-                    </View>
-                    <View style={[styles.listTypePill, { backgroundColor: cls.color + '22' }]}>
-                      <Text style={[styles.listTypeText, { color: cls.color }]}>{cls.type}</Text>
-                    </View>
-                  </TouchableOpacity>
-                ))
+                .map((cls) => {
+                  const cancelled = isCancelled(cls);
+                  const postponed = isPostponed(cls);
+                  const color = cancelled ? C.cancelled : postponed ? C.postponed : cls.color;
+                  return (
+                    <TouchableOpacity
+                      key={cls.id}
+                      style={styles.listCard}
+                      onPress={() => handleClassPress(cls)}
+                      activeOpacity={0.8}>
+                      <View style={[styles.listColorDot, { backgroundColor: color }]} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.listSubject, cancelled && { textDecorationLine: 'line-through', color: C.textMuted }]}>{cls.subject}</Text>
+                        <Text style={styles.listMeta}>Year {cls.year} • Div {cls.division} • Batch {cls.batch} • {formatTime(cls.start)} – {formatTime(cls.end)} • {cls.room}</Text>
+                      </View>
+                      <View style={[styles.listTypePill, { backgroundColor: color + '22' }]}>
+                        <Text style={[styles.listTypeText, { color }]}>
+                          {cancelled ? 'CANCELLED' : postponed ? 'POSTPONED' : cls.type}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })
             )}
           </View>
         );
@@ -814,40 +685,35 @@ body { font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:9pt; c
   /* ── Class detail modal ── */
   const renderModal = () => {
     if (!selectedClass) return null;
-    const cls       = selectedClass;
-    const typeMeta  = TYPE_LABELS[cls.type];
-    const duration  = toMinutes(cls.end) - toMinutes(cls.start);
-    const isCancelled = cancelledIds.has(cls.id);
-    const isPostponed = !!postponedMap[cls.id];
-    const statusColor = isCancelled ? C.cancelled : isPostponed ? C.postponed : cls.color;
+    const cls         = selectedClass;
+    const typeMeta    = TYPE_LABELS[cls.type] || TYPE_LABELS.LECTURE;
+    const duration    = toMinutes(cls.end) - toMinutes(cls.start);
+    const cancelled   = isCancelled(cls);
+    const postponed   = isPostponed(cls);
+    const pInfo       = getPostponeInfo(cls);
+    const statusColor = cancelled ? C.cancelled : postponed ? C.postponed : cls.color;
+
     return (
-      <Modal
-        visible={modalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setModalVisible(false)}>
+      <Modal visible={modalVisible} transparent animationType="slide" onRequestClose={() => setModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <TouchableOpacity style={{ flex: 1 }} onPress={() => setModalVisible(false)} />
           <View style={styles.modalSheet}>
-            {/* Handle */}
             <View style={styles.modalHandle} />
-
-            {/* Header */}
             <View style={[styles.modalHeader, { borderLeftColor: statusColor }]}>
               <View style={{ flex: 1 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                   <View style={[styles.typeChip, { backgroundColor: statusColor + '22' }]}>
-                    <Ionicons name={isCancelled ? 'close-circle-outline' : isPostponed ? 'arrow-forward-circle-outline' : typeMeta.icon} size={12} color={statusColor} />
+                    <Ionicons name={cancelled ? 'close-circle-outline' : postponed ? 'arrow-forward-circle-outline' : typeMeta.icon} size={12} color={statusColor} />
                     <Text style={[styles.typeChipText, { color: statusColor }]}>
-                      {isCancelled ? 'CANCELLED' : isPostponed ? 'POSTPONED' : typeMeta.label}
+                      {cancelled ? 'CANCELLED' : postponed ? 'POSTPONED' : typeMeta.label}
                     </Text>
                   </View>
                 </View>
-                <Text style={[styles.modalSubject, isCancelled && { textDecorationLine: 'line-through', color: C.textMuted }]}>{cls.subject}</Text>
-                <Text style={styles.modalCode}>{cls.code}</Text>
-                {isPostponed && (
+                <Text style={[styles.modalSubject, cancelled && { textDecorationLine: 'line-through', color: C.textMuted }]}>{cls.subject}</Text>
+                <Text style={styles.modalCode}>{cls.section}</Text>
+                {postponed && pInfo && (
                   <Text style={{ fontSize: 12, color: C.postponed, marginTop: 4, fontWeight: '600' }}>
-                    ↪ Rescheduled to {postponedMap[cls.id].newDate} at {postponedMap[cls.id].newTime}
+                    ↪ Rescheduled to {pInfo.date} at {pInfo.time}
                   </Text>
                 )}
               </View>
@@ -856,12 +722,13 @@ body { font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:9pt; c
               </TouchableOpacity>
             </View>
 
-            {/* Details grid */}
             <View style={styles.modalGrid}>
               {[
+                { icon: 'school-outline',   label: 'Year',     value: `Year ${cls.year}` },
+                { icon: 'business-outline', label: 'Division', value: `Division ${cls.division}` },
+                { icon: 'people-outline',   label: 'Batch',    value: `Batch ${cls.batch}` },
                 { icon: 'time-outline',     label: 'Time',     value: `${formatTime(cls.start)} – ${formatTime(cls.end)}` },
                 { icon: 'hourglass-outline',label: 'Duration', value: `${duration} minutes` },
-                { icon: 'people-outline',   label: 'Section',  value: cls.section },
                 { icon: 'location-outline', label: 'Room',     value: cls.room },
               ].map((item, i) => (
                 <View key={i} style={styles.modalDetailRow}>
@@ -876,111 +743,72 @@ body { font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:9pt; c
               ))}
             </View>
 
-            {/* Actions */}
             <View style={{ gap: 8, marginBottom: 10 }}>
-              {/* Cancel / Postpone row */}
               <View style={{ flexDirection: 'row', gap: 10 }}>
                 <TouchableOpacity
-                  style={[styles.modalBtn, { flex: 1, backgroundColor: isCancelled ? C.redSoft : C.surfaceEl, borderWidth: 1, borderColor: isCancelled ? C.cancelled : C.border }]}
+                  style={[styles.modalBtn, { flex: 1, backgroundColor: cancelled ? C.redSoft : C.surfaceEl, borderWidth: 1, borderColor: cancelled ? C.cancelled : C.border }]}
                   onPress={handleCancelLecture}>
-                  <Ionicons name={isCancelled ? 'refresh-outline' : 'close-circle-outline'} size={16} color={isCancelled ? C.cancelled : C.textSec} />
-                  <Text style={[styles.modalBtnText, { color: isCancelled ? C.cancelled : C.textSec }]}>
-                    {isCancelled ? 'Undo Cancel' : 'Cancel Lecture'}
+                  <Ionicons name={cancelled ? 'refresh-outline' : 'close-circle-outline'} size={16} color={cancelled ? C.cancelled : C.textSec} />
+                  <Text style={[styles.modalBtnText, { color: cancelled ? C.cancelled : C.textSec }]}>
+                    {cancelled ? 'Undo Cancel' : 'Cancel Lecture'}
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.modalBtn, { flex: 1, backgroundColor: isPostponed ? C.postponedSoft : C.surfaceEl, borderWidth: 1, borderColor: isPostponed ? C.postponed : C.border }]}
+                  style={[styles.modalBtn, { flex: 1, backgroundColor: postponed ? C.postponedSoft : C.surfaceEl, borderWidth: 1, borderColor: postponed ? C.postponed : C.border }]}
                   onPress={openPostponeModal}>
-                  <Ionicons name="arrow-forward-circle-outline" size={16} color={isPostponed ? C.postponed : C.textSec} />
-                  <Text style={[styles.modalBtnText, { color: isPostponed ? C.postponed : C.textSec }]}>
-                    {isPostponed ? 'Change Date' : 'Postpone'}
+                  <Ionicons name="arrow-forward-circle-outline" size={16} color={postponed ? C.postponed : C.textSec} />
+                  <Text style={[styles.modalBtnText, { color: postponed ? C.postponed : C.textSec }]}>
+                    {postponed ? 'Change Date' : 'Postpone'}
                   </Text>
                 </TouchableOpacity>
               </View>
 
-              {/* Message + Upload row */}
               <View style={styles.modalActions}>
-              <TouchableOpacity style={[styles.modalBtn, { backgroundColor: C.accentSoft }]} onPress={() => setModalVisible(false)}>
-                <Ionicons name="chatbubble-outline" size={16} color={C.accent} />
-                <Text style={[styles.modalBtnText, { color: C.accent }]}>Message Class</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.modalBtn,
-                  { flex: 1 },
-                  uploadState === 'idle'      && { backgroundColor: cls.color + '20' },
-                  uploadState === 'picking'   && { backgroundColor: cls.color + '15' },
-                  uploadState === 'uploading' && { backgroundColor: cls.color + '15' },
-                  uploadState === 'success'   && { backgroundColor: C.greenSoft },
-                  uploadState === 'error'     && { backgroundColor: C.redSoft },
-                ]}
-                onPress={handleUploadMaterial}
-                disabled={uploadState === 'uploading' || uploadState === 'picking'}>
-                <Ionicons
-                  name={
-                    uploadState === 'success' ? 'checkmark-circle' :
-                    uploadState === 'error'   ? 'alert-circle'     :
-                    uploadState === 'uploading' || uploadState === 'picking' ? 'cloud-upload-outline' :
-                    'cloud-upload-outline'
-                  }
-                  size={16}
-                  color={
-                    uploadState === 'success' ? C.green :
-                    uploadState === 'error'   ? C.red   : cls.color
-                  }
-                />
-                <Text style={[styles.modalBtnText, {
-                  color: uploadState === 'success' ? C.green :
-                         uploadState === 'error'   ? C.red   : cls.color
-                }]}>
-                  {uploadState === 'idle'      ? 'Upload Material' :
-                   uploadState === 'picking'   ? 'Opening Files…'  :
-                   uploadState === 'uploading' ? 'Uploading…'      :
-                   uploadState === 'success'   ? 'Uploaded!'        :
-                   'Upload Failed'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Upload progress / file info */}
-            {(uploadState === 'uploading' || uploadState === 'success') && uploadedFile && (
-              <View style={styles.uploadFeedback}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                  <View style={[styles.fileIconWrap, { backgroundColor: cls.color + '20' }]}>
-                    <Ionicons name={getFileIcon(uploadedFile.mimeType)} size={18} color={cls.color} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.fileName} numberOfLines={1}>{uploadedFile.name}</Text>
-                    <Text style={styles.fileSize}>{getFileSizeLabel(uploadedFile.size)}</Text>
-                  </View>
-                  {uploadState === 'success' && (
-                    <Ionicons name="checkmark-circle" size={20} color={C.green} />
-                  )}
-                </View>
-                {uploadState === 'uploading' && (
-                  <View style={styles.progressTrack}>
-                    <Animated.View style={[styles.progressBar, {
-                      width: uploadProgressAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
-                      backgroundColor: cls.color,
-                    }]} />
-                  </View>
-                )}
-                {uploadState === 'success' && (
-                  <Text style={styles.uploadSuccessText}>
-                    ✓ Material uploaded to {cls.code} · {cls.section}
+                <TouchableOpacity style={[styles.modalBtn, { backgroundColor: C.accentSoft }]} onPress={() => setModalVisible(false)}>
+                  <Ionicons name="chatbubble-outline" size={16} color={C.accent} />
+                  <Text style={[styles.modalBtnText, { color: C.accent }]}>Message Class</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalBtn, { flex: 1,
+                    backgroundColor: uploadState === 'success' ? C.greenSoft : uploadState === 'error' ? C.redSoft : cls.color + '20'
+                  }]}
+                  onPress={handleUploadMaterial}
+                  disabled={uploadState === 'uploading' || uploadState === 'picking'}>
+                  <Ionicons
+                    name={uploadState === 'success' ? 'checkmark-circle' : uploadState === 'error' ? 'alert-circle' : 'cloud-upload-outline'}
+                    size={16}
+                    color={uploadState === 'success' ? C.green : uploadState === 'error' ? C.red : cls.color}
+                  />
+                  <Text style={[styles.modalBtnText, { color: uploadState === 'success' ? C.green : uploadState === 'error' ? C.red : cls.color }]}>
+                    {uploadState === 'idle' ? 'Upload Material' : uploadState === 'picking' ? 'Opening…' : uploadState === 'uploading' ? 'Uploading…' : uploadState === 'success' ? 'Uploaded!' : 'Failed'}
                   </Text>
-                )}
+                </TouchableOpacity>
               </View>
-            )}
 
-            {uploadState === 'error' && (
-              <View style={[styles.uploadFeedback, { backgroundColor: C.redSoft, borderColor: C.red + '30' }]}>
-                <Text style={[styles.uploadSuccessText, { color: C.red }]}>
-                  ✕ Upload failed. Please try again.
-                </Text>
-              </View>
-            )}
-            </View>{/* end actions wrapper */}
+              {(uploadState === 'uploading' || uploadState === 'success') && uploadedFile && (
+                <View style={styles.uploadFeedback}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                    <View style={[styles.fileIconWrap, { backgroundColor: cls.color + '20' }]}>
+                      <Ionicons name={getFileIcon(uploadedFile.mimeType)} size={18} color={cls.color} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.fileName} numberOfLines={1}>{uploadedFile.name}</Text>
+                      <Text style={styles.fileSize}>{getFileSizeLabel(uploadedFile.size)}</Text>
+                    </View>
+                    {uploadState === 'success' && <Ionicons name="checkmark-circle" size={20} color={C.green} />}
+                  </View>
+                  {uploadState === 'uploading' && (
+                    <View style={styles.progressTrack}>
+                      <Animated.View style={[styles.progressBar, {
+                        width: uploadProgressAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
+                        backgroundColor: cls.color,
+                      }]} />
+                    </View>
+                  )}
+                  {uploadState === 'success' && <Text style={styles.uploadSuccessText}>✓ Material uploaded to {cls.section}</Text>}
+                </View>
+              )}
+            </View>
           </View>
         </View>
       </Modal>
@@ -989,11 +817,7 @@ body { font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:9pt; c
 
   /* ── Postpone picker modal ── */
   const renderPostponeModal = () => (
-    <Modal
-      visible={postponeModalVisible}
-      transparent
-      animationType="slide"
-      onRequestClose={() => setPostponeModalVisible(false)}>
+    <Modal visible={postponeModalVisible} transparent animationType="slide" onRequestClose={() => setPostponeModalVisible(false)}>
       <View style={styles.modalOverlay}>
         <TouchableOpacity style={{ flex: 1 }} onPress={() => setPostponeModalVisible(false)} />
         <View style={[styles.modalSheet, { paddingBottom: Platform.OS === 'ios' ? 40 : 28 }]}>
@@ -1005,18 +829,13 @@ body { font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:9pt; c
             </TouchableOpacity>
           </View>
 
-          {/* Date picker */}
           <Text style={{ fontSize: 11, fontWeight: '700', color: C.textMuted, letterSpacing: 1, marginBottom: 8 }}>SELECT DATE</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               {POSTPONE_DATE_OPTIONS.map((d) => (
                 <TouchableOpacity
                   key={d}
-                  style={{
-                    paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10,
-                    backgroundColor: postponeDate === d ? C.accentSoft : C.surfaceEl,
-                    borderWidth: 1, borderColor: postponeDate === d ? C.accent : C.border,
-                  }}
+                  style={{ paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, backgroundColor: postponeDate === d ? C.accentSoft : C.surfaceEl, borderWidth: 1, borderColor: postponeDate === d ? C.accent : C.border }}
                   onPress={() => setPostponeDate(d)}>
                   <Text style={{ fontSize: 13, fontWeight: '700', color: postponeDate === d ? C.accent : C.textSec }}>{d}</Text>
                 </TouchableOpacity>
@@ -1024,27 +843,19 @@ body { font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:9pt; c
             </View>
           </ScrollView>
 
-          {/* Time picker */}
           <Text style={{ fontSize: 11, fontWeight: '700', color: C.textMuted, letterSpacing: 1, marginBottom: 8 }}>SELECT TIME</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 24 }}>
             {POSTPONE_TIME_OPTIONS.map((t) => (
               <TouchableOpacity
                 key={t}
-                style={{
-                  paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10,
-                  backgroundColor: postponeTime === t ? C.accentSoft : C.surfaceEl,
-                  borderWidth: 1, borderColor: postponeTime === t ? C.accent : C.border,
-                }}
+                style={{ paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, backgroundColor: postponeTime === t ? C.accentSoft : C.surfaceEl, borderWidth: 1, borderColor: postponeTime === t ? C.accent : C.border }}
                 onPress={() => setPostponeTime(t)}>
                 <Text style={{ fontSize: 13, fontWeight: '700', color: postponeTime === t ? C.accent : C.textSec }}>{t}</Text>
               </TouchableOpacity>
             ))}
           </View>
 
-          {/* Confirm */}
-          <TouchableOpacity
-            style={[styles.modalBtn, { backgroundColor: C.accentSoft, justifyContent: 'center' }]}
-            onPress={confirmPostpone}>
+          <TouchableOpacity style={[styles.modalBtn, { backgroundColor: C.accentSoft, justifyContent: 'center' }]} onPress={confirmPostpone}>
             <Ionicons name="checkmark-circle-outline" size={18} color={C.accent} />
             <Text style={[styles.modalBtnText, { color: C.accent, fontSize: 15 }]}>Confirm Postpone</Text>
           </TouchableOpacity>
@@ -1053,38 +864,49 @@ body { font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:9pt; c
     </Modal>
   );
 
+  if (loading) {
+    return (
+      <View style={[styles.root, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={C.accent} />
+        <Text style={{ color: C.textSec, marginTop: 12 }}>Loading your timetable…</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.root}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
       <Animated.View style={[{ flex: 1 }, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
 
-        {/* ── Header ──────────────────────────────────────────────────── */}
+        {/* ── Header ── */}
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
             <Text style={styles.headerSub}>ACADEMIC YEAR 2024/25 · <Text style={{ color: C.accent }}>SEMESTER 1</Text></Text>
             <Text style={styles.headerTitle}>Weekly Timetable</Text>
-            <Text style={styles.headerWeek}>Week 12: Oct 23rd – Oct 27th</Text>
+            <Text style={styles.headerWeek}>Week of {weekStart}</Text>
           </View>
           <View style={styles.headerRight}>
-            <View style={[styles.teacherChip, { borderColor: teacher.avatarColor + '50' }]}>
-              <View style={[styles.teacherAvatar, { backgroundColor: teacher.avatarColor + '25' }]}>
-                <Text style={[styles.teacherAvatarText, { color: teacher.avatarColor }]}>{teacher.avatar}</Text>
+            <View style={[styles.teacherChip, { borderColor: C.accent + '50' }]}>
+              <View style={[styles.teacherAvatar, { backgroundColor: C.accent + '25' }]}>
+                <Text style={[styles.teacherAvatarText, { color: C.accent }]}>
+                  {teacherName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                </Text>
               </View>
               <View>
-                <Text style={styles.teacherName}>{teacher.name}</Text>
-                <Text style={styles.teacherDept}>{teacher.dept}</Text>
+                <Text style={styles.teacherName}>{teacherName}</Text>
+                <Text style={styles.teacherDept}>Faculty</Text>
               </View>
             </View>
           </View>
         </View>
 
-        {/* ── Stats row ────────────────────────────────────────────────── */}
+        {/* ── Stats row ── */}
         <View style={styles.statsRow}>
           {[
-            { label: 'Total Classes', value: totalClasses, icon: 'book-outline', color: C.accent },
-            { label: 'This Week',     value: `${totalClasses}`, icon: 'calendar-outline', color: C.cyan },
-            { label: 'Today',         value: `${todayClasses.length}`, icon: 'time-outline', color: C.green },
-            { label: 'Labs',          value: Object.values(teacher.schedule).flat().filter(c => c.type === 'LAB').length, icon: 'flask-outline', color: C.orange },
+            { label: 'Total Classes', value: totalClasses,                                                                             icon: 'book-outline',               color: C.accent  },
+            { label: 'Today',         value: `${todayClasses.length}`,                                                                 icon: 'time-outline',               color: C.green   },
+            { label: 'Cancelled',     value: Object.values(statusMap).filter(s => s.status === 'cancelled').length,                    icon: 'close-circle-outline',       color: C.red     },
+            { label: 'Postponed',     value: Object.values(statusMap).filter(s => s.status === 'postponed').length,                    icon: 'arrow-forward-circle-outline',color: C.orange  },
           ].map((stat, i) => (
             <View key={i} style={[styles.statCard, { borderColor: stat.color + '30' }]}>
               <View style={[styles.statIcon, { backgroundColor: stat.color + '18' }]}>
@@ -1096,37 +918,23 @@ body { font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:9pt; c
           ))}
         </View>
 
-        {/* ── View toggle + Download ─────────────────────────────────── */}
+        {/* ── View toggle ── */}
         <View style={styles.toolbar}>
           <View style={styles.viewToggle}>
             {['weekly', 'daily', 'list'].map((v) => (
-              <TouchableOpacity
-                key={v}
-                style={[styles.viewBtn, view === v && styles.viewBtnActive]}
-                onPress={() => setView(v)}>
+              <TouchableOpacity key={v} style={[styles.viewBtn, view === v && styles.viewBtnActive]} onPress={() => setView(v)}>
                 <Text style={[styles.viewBtnText, view === v && { color: C.white }]}>
                   {v.charAt(0).toUpperCase() + v.slice(1)}
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
-          <TouchableOpacity
-            style={[styles.downloadBtn, exportState === 'generating' && { opacity: 0.7 }, exportState === 'done' && { backgroundColor: C.greenSoft }]}
-            onPress={handleExportPDF}
-            disabled={exportState === 'generating'}
-            activeOpacity={0.8}>
-            <Ionicons
-              name={exportState === 'done' ? 'checkmark-circle' : exportState === 'generating' ? 'sync' : 'download-outline'}
-              size={16}
-              color={exportState === 'done' ? C.green : C.accent}
-            />
-            <Text style={[styles.downloadText, exportState === 'done' && { color: C.green }]}>
-              {exportState === 'generating' ? 'Generating…' : exportState === 'done' ? 'Saved!' : 'Export PDF'}
-            </Text>
+          <TouchableOpacity style={styles.downloadBtn} activeOpacity={0.8} onPress={() => { fetchSchedule(); fetchStatuses(); }}>
+            <Ionicons name="refresh-outline" size={16} color={C.accent} />
+            <Text style={styles.downloadText}>Refresh</Text>
           </TouchableOpacity>
         </View>
 
-        {/* ── Content ──────────────────────────────────────────────────── */}
         <View style={{ flex: 1, paddingHorizontal: 16 }}>
           {view === 'weekly' && renderWeeklyGrid()}
           {view === 'daily'  && renderDailyView()}
@@ -1141,8 +949,9 @@ body { font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:9pt; c
   );
 }
 
+
 /* ─── Styles ─────────────────────────────────────────────────────────────── */
-const styles = StyleSheet.create({
+const makeStyles = (C) => StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
 
   /* Header */
@@ -1199,7 +1008,6 @@ const styles = StyleSheet.create({
   },
   dayHeaderActive: { backgroundColor: C.accentGlow },
   dayName:         { fontSize: 12, fontWeight: '800', color: C.textSec, letterSpacing: 0.5 },
-  dayDate:         { fontSize: 10, color: C.textMuted },
   todayUnderline:  { position: 'absolute', bottom: 0, left: '20%', right: '20%', height: 2, backgroundColor: C.accent, borderRadius: 1 },
   hourLine:        { position: 'absolute', left: 0, right: 0, height: 1, backgroundColor: C.border + '80' },
   breakStripe:     { position: 'absolute', left: 0, right: 0 },
@@ -1210,13 +1018,9 @@ const styles = StyleSheet.create({
   classTypePill: { alignSelf: 'flex-start', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2, marginBottom: 4 },
   classTypeText: { fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
   classSubject:  { fontSize: 11, fontWeight: '700', color: C.textPrimary, lineHeight: 14, marginBottom: 2 },
+  classYear:     { fontSize: 9, fontWeight: '600', color: C.textSec, marginBottom: 1 },
   classTime:     { fontSize: 9, color: C.textSec },
   classRoom:     { fontSize: 9, color: C.textMuted, marginTop: 2 },
-
-  /* Break labels */
-  breakLabel:     { position: 'absolute', right: 8, left: 0 },
-  breakLabelText: { fontSize: 9, fontWeight: '700', color: C.textMuted, letterSpacing: 0.8, textAlign: 'center' },
-  breakLabelRow:  { position: 'absolute', top: 0, left: 0, right: 0, pointerEvents: 'none' },
 
   /* ── Daily view ── */
   daySelectorPill: {
@@ -1225,7 +1029,6 @@ const styles = StyleSheet.create({
   },
   daySelectorPillActive: { backgroundColor: C.accent, borderColor: C.accent },
   daySelectorText:       { fontSize: 13, fontWeight: '800', color: C.textSec },
-  daySelectorDate:       { fontSize: 10, color: C.textMuted, marginTop: 1 },
   emptyDay:  { alignItems: 'center', justifyContent: 'center', paddingVertical: 60, gap: 12 },
   emptyText: { fontSize: 14, color: C.textMuted },
   dailyCard: {
@@ -1237,6 +1040,7 @@ const styles = StyleSheet.create({
   dailyTimeLine:   { width: 2, flex: 1, marginVertical: 4, minHeight: 20, borderRadius: 1 },
   dailyTimeEnd:    { fontSize: 11, fontWeight: '600', color: C.textMuted },
   dailySubject:    { fontSize: 16, fontWeight: '800', color: C.textPrimary, marginBottom: 4 },
+  dailyYear:       { fontSize: 12, fontWeight: '600', color: C.textSec, marginBottom: 2 },
   dailyCode:       { fontSize: 12, color: C.textSec },
   dailyMeta:       { fontSize: 12, color: C.textMuted },
   typeChip:        { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3 },
@@ -1249,7 +1053,6 @@ const styles = StyleSheet.create({
     marginBottom: 8, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border,
   },
   listDayName:      { fontSize: 15, fontWeight: '800', color: C.textPrimary },
-  listDayDate:      { fontSize: 12, color: C.textMuted, flex: 1 },
   listDayCount:     { backgroundColor: C.accentSoft, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
   listDayCountText: { fontSize: 10, fontWeight: '700', color: C.accent },
   listEmpty:        { fontSize: 12, color: C.textMuted, paddingVertical: 8, paddingLeft: 4 },

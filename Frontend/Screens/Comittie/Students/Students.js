@@ -9,7 +9,9 @@ import {
   SafeAreaView,
   Animated,
   StatusBar,
+  ActivityIndicator,
 } from 'react-native';
+import axiosInstance from '../../../Src/Axios';
 
 // ─── Stat Card (full-width, stacked) ────────────────────────────────────────
 const StatCard = ({ title, value, subtitle, valueColor, iconEmoji, delay = 0 }) => {
@@ -109,23 +111,62 @@ const BarChart = ({ data }) => {
 // ─── Main ────────────────────────────────────────────────────────────────────
 export default function StudentManagementDashboard() {
   const [activeTab, setActiveTab] = useState('Weekly');
+  const [loading, setLoading] = useState(true);
+  const [totalStudents, setTotalStudents] = useState(0);
+  const [yearCounts, setYearCounts] = useState({ '1': 0, '2': 0, '3': 0 });
+  const [weeklyData, setWeeklyData] = useState([
+    { day: 'Mon', value: 0 }, { day: 'Tue', value: 0 }, { day: 'Wed', value: 0 },
+    { day: 'Thu', value: 0 }, { day: 'Fri', value: 0 }, { day: 'Sat', value: 0 }, { day: 'Sun', value: 0 },
+  ]);
 
-  const weeklyData = [
-    { day: 'Mon', value: 88 },
-    { day: 'Tue', value: 72 },
-    { day: 'Wed', value: 91 },
-    { day: 'Thu', value: 65 },
-    { day: 'Fri', value: 83 },
-    { day: 'Sat', value: 45 },
-    { day: 'Sun', value: 38 },
-  ];
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [studentsRes, attY1, attY2, attY3] = await Promise.all([
+          axiosInstance.get('/students/').catch(() => ({ data: { data: [] } })),
+          axiosInstance.get('/attendance/class?year=1&division=A').catch(() => ({ data: { sessions: [] } })),
+          axiosInstance.get('/attendance/class?year=2&division=A').catch(() => ({ data: { sessions: [] } })),
+          axiosInstance.get('/attendance/class?year=3&division=A').catch(() => ({ data: { sessions: [] } })),
+        ]);
 
-  const monthlyData = [
-    { day: 'W1', value: 82 },
-    { day: 'W2', value: 78 },
-    { day: 'W3', value: 85 },
-    { day: 'W4', value: 90 },
-  ];
+        const students = studentsRes.data?.data || [];
+        setTotalStudents(students.length);
+
+        const yc = { '1': 0, '2': 0, '3': 0 };
+        students.forEach(s => { if (yc[s.year] !== undefined) yc[s.year]++; });
+        setYearCounts(yc);
+
+        // Build weekly attendance from last 7 sessions
+        const allSessions = [
+          ...(attY1.data?.sessions || []),
+          ...(attY2.data?.sessions || []),
+          ...(attY3.data?.sessions || []),
+        ].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 7);
+
+        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const dayData = days.map(d => ({ day: d, value: 0, count: 0 }));
+        allSessions.forEach(ses => {
+          const dayIdx = new Date(ses.date).getDay();
+          const total = ses.students?.length || 1;
+          const present = ses.students?.filter(st => st.status === 'Present').length || 0;
+          dayData[dayIdx].value += Math.round((present / total) * 100);
+          dayData[dayIdx].count++;
+        });
+        setWeeklyData(dayData.slice(1).concat(dayData.slice(0, 1)).map(d => ({
+          day: d.day,
+          value: d.count > 0 ? Math.round(d.value / d.count) : 0,
+        })));
+      } catch (err) {
+        console.error('Students fetch error:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
+
+  const enrolled = totalStudents;
+  const inactive = 0;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -135,6 +176,13 @@ export default function StudentManagementDashboard() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {loading ? (
+          <View style={{ padding: 40, alignItems: 'center' }}>
+            <ActivityIndicator size="large" color="#3b82f6" />
+            <Text style={{ color: '#6b7280', marginTop: 12 }}>Loading students...</Text>
+          </View>
+        ) : (
+          <>
         {/* Breadcrumb */}
         <View style={styles.breadcrumbRow}>
           <Text style={styles.breadcrumbGray}>Dashboard {'>'} </Text>
@@ -162,23 +210,23 @@ export default function StudentManagementDashboard() {
         {/* Stat Cards — full width stacked */}
         <StatCard
           title="Total Students"
-          value="1,200"
-          subtitle={{ text: '↑ +4.2% from last term', color: '#4ade80' }}
+          value={String(totalStudents)}
+          subtitle={{ text: 'All enrolled students', color: '#4ade80' }}
           iconEmoji="👥"
           delay={0}
         />
         <StatCard
           title="Enrolled Students"
-          value="1,100"
-          subtitle={{ text: '✓  91.6% Retention rate', color: '#4ade80' }}
+          value={String(enrolled)}
+          subtitle={{ text: `✓  ${totalStudents > 0 ? Math.round((enrolled / totalStudents) * 100) : 0}% Retention rate`, color: '#4ade80' }}
           iconEmoji="✅"
           delay={100}
         />
         <StatCard
           title="Inactive Students"
-          value="100"
+          value={String(inactive)}
           valueColor="#f59e0b"
-          subtitle={{ text: '⚠  Action required', color: '#f59e0b' }}
+          subtitle={{ text: inactive > 0 ? '⚠  Action required' : '✅ All active', color: inactive > 0 ? '#f59e0b' : '#4ade80' }}
           iconEmoji="🚫"
           delay={200}
         />
@@ -186,10 +234,9 @@ export default function StudentManagementDashboard() {
         {/* Year-wise Distribution */}
         <Text style={styles.sectionTitle}>Year-wise Distribution</Text>
         <View style={styles.yearCard}>
-          <YearItem year="1ST YEAR" count="320" showDivider />
-          <YearItem year="2ND YEAR" count="290" showDivider />
-          <YearItem year="3RD YEAR" count="310" showDivider />
-          <YearItem year="4TH YEAR" count="280" showDivider={false} />
+          <YearItem year="1ST YEAR" count={String(yearCounts['1'])} showDivider />
+          <YearItem year="2ND YEAR" count={String(yearCounts['2'])} showDivider />
+          <YearItem year="3RD YEAR" count={String(yearCounts['3'])} showDivider={false} />
         </View>
 
         {/* Attendance Chart */}
@@ -205,10 +252,12 @@ export default function StudentManagementDashboard() {
             
           </View>
 
-          <BarChart data={activeTab === 'Weekly' ? weeklyData : monthlyData} />
+          <BarChart data={weeklyData} />
         </View>
 
         <View style={{ height: 32 }} />
+        </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );

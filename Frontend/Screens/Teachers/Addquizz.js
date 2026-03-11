@@ -1,52 +1,63 @@
 // QuizBuilderScreen.js
-// Full React Native Quiz Builder — Campus360
+// Full React Native Quiz Builder — UniVerse
 // First screen: Settings-style panel (Year, Division, Sub-Division optional)
 // Then: Quiz builder with MC/TF/SA, strip, points/time, duplicate/delete
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useContext } from 'react';
 import { useNavigation } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   Modal, Switch, Platform, StatusBar,
-  StyleSheet, Animated, KeyboardAvoidingView,
+  StyleSheet, Animated, KeyboardAvoidingView, ActivityIndicator, // ← added
 } from 'react-native';
+import axiosInstance from '../../Src/Axios'; // ← added (adjust path if needed)
+import { ThemeContext } from './TeacherStack';
 
 /* ─── Theme ── */
-const C = {
-  bg:          '#0a0e1a',
-  surface:     '#111827',
-  card:        '#141d2e',
-  border:      '#1e2d47',
-  borderLight: '#243352',
-  accent:      '#3b82f6',
-  accentSoft:  'rgba(59,130,246,0.14)',
-  accentGlow:  'rgba(59,130,246,0.18)',
-  green:       '#10b981',
-  greenSoft:   'rgba(16,185,129,0.14)',
-  red:         '#ef4444',
-  redSoft:     'rgba(239,68,68,0.12)',
-  amber:       '#f59e0b',
-  amberSoft:   'rgba(245,158,11,0.12)',
-  text:        '#e8f0fe',
-  textSec:     '#8ba3cc',
-  textMuted:   '#3d5a8a',
-  white:       '#ffffff',
+const C_DARK = {
+  bg:'#0a0e1a', surface:'#111827', card:'#141d2e',
+  border:'#1e2d47', borderLight:'#243352',
+  accent:'#3b82f6', accentSoft:'rgba(59,130,246,0.14)', accentGlow:'rgba(59,130,246,0.18)',
+  green:'#10b981', greenSoft:'rgba(16,185,129,0.14)',
+  red:'#ef4444', redSoft:'rgba(239,68,68,0.12)',
+  amber:'#f59e0b', amberSoft:'rgba(245,158,11,0.12)',
+  text:'#e8f0fe', textSec:'#8ba3cc', textMuted:'#3d5a8a', white:'#ffffff',
+};
+const C_LIGHT = {
+  bg:'#F1F4FD', surface:'#FFFFFF', card:'#FFFFFF',
+  border:'#DDE3F4', borderLight:'#CBD5E1',
+  accent:'#2563EB', accentSoft:'rgba(37,99,235,0.09)', accentGlow:'rgba(37,99,235,0.12)',
+  green:'#059669', greenSoft:'rgba(5,150,105,0.10)',
+  red:'#DC2626', redSoft:'rgba(220,38,38,0.10)',
+  amber:'#D97706', amberSoft:'rgba(217,119,6,0.10)',
+  text:'#0F172A', textSec:'#4B5563', textMuted:'#9CA3AF', white:'#ffffff',
 };
 
 /* ─── Data ── */
-const YEARS = [
+const FALLBACK_YEARS = [
   { value: '1', label: '1st Year' },
   { value: '2', label: '2nd Year' },
   { value: '3', label: '3rd Year' },
   { value: '4', label: '4th Year' },
 ];
-const DIVISIONS    = ['A', 'B', 'C', 'D', 'E'];
-const SUB_DIVISIONS = ['1', '2', '3', '4'];
-const SUBJECTS = [
+
+const YEARS = FALLBACK_YEARS;
+
+
+
+
+const FALLBACK_DIVISIONS    = ['A', 'B', 'C', 'D', 'E'];
+const FALLBACK_SUB_DIVISIONS = ['1', '2', '3', '4'];
+const FALLBACK_SUBJECTS = [
   'Mathematics', 'Physics', 'Chemistry', 'Biology',
   'English', 'History', 'Geography', 'Computer Science',
   'Economics', 'Accountancy', 'Political Science', 'Physical Education',
 ];
+
+const DIVISIONS = FALLBACK_DIVISIONS;
+const SUB_DIVISIONS = FALLBACK_SUB_DIVISIONS;
+const SUBJECTS = FALLBACK_SUBJECTS;
 
 let _uid = 1;
 const uid = () => _uid++;
@@ -68,6 +79,9 @@ const makeQuestion = () => ({
    SETTINGS FIRST SCREEN
 ══════════════════════════════════════════════════════════════════════ */
 function QuizSettingsSetup({ onProceed }) {
+  const { isDark } = useContext(ThemeContext);
+  const C = isDark ? C_DARK : C_LIGHT;
+  const ss = makeSS(C);
   const navigation = useNavigation();
 
   const [shuffle,     setShuffle]     = useState(true);
@@ -85,12 +99,109 @@ function QuizSettingsSetup({ onProceed }) {
   const [subDivOpen,  setSubDivOpen]  = useState(false);
   const [subjectOpen, setSubjectOpen] = useState(false);
 
+  /* ── Timetable-based data ── */
+  const [timetableSlots, setTimetableSlots] = useState([]);
+  const [years,          setYears]          = useState([]);
+  const [divisions,      setDivisions]      = useState([]);
+  const [batches,        setBatches]        = useState([]);
+  const [subjects,       setSubjects]       = useState([]);
+  const [teacherId,      setTeacherId]      = useState(null);
+
   const closeAll = () => {
     setYearOpen(false);
     setDivOpen(false);
     setSubDivOpen(false);
     setSubjectOpen(false);
   };
+
+  /* ── Load teacher ID from AsyncStorage ── */
+  useEffect(() => {
+    (async () => {
+      try {
+        const id = await AsyncStorage.getItem('teacherId');
+        if (id) setTeacherId(id);
+      } catch (err) {
+        console.error('Failed to load teacherId:', err);
+      }
+    })();
+  }, []);
+
+  /* ── Load timetable ── */
+  useEffect(() => {
+    if (!teacherId) return;
+    (async () => {
+      try {
+        const res = await axiosInstance.get(`/timetable/teacher/${teacherId}`);
+        const slots = res.data?.data || [];
+        setTimetableSlots(slots);
+        // Extract unique years
+        const yrs = [...new Set(slots.map(s => s.year))].sort();
+        const yearObjs = yrs.map(y => ({
+          value: y,
+          label: `Year ${y}`
+        }));
+        setYears(yearObjs);
+      } catch (err) {
+        console.error('Failed to load timetable:', err);
+        setYears(FALLBACK_YEARS);
+      }
+    })();
+  }, [teacherId]);
+
+  /* ── Year → Divisions ── */
+  useEffect(() => {
+    if (!selYear) {
+      setDivisions([]);
+      setSelDivision(null);
+      setBatches([]);
+      setSelSubDiv(null);
+      return;
+    }
+    const divs = [...new Set(timetableSlots
+      .filter(s => String(s.year) === String(selYear))
+      .map(s => s.division?.toUpperCase())
+      .filter(Boolean)
+    )].sort();
+    setDivisions(divs);
+    setSelDivision(null);
+    setBatches([]);
+    setSelSubDiv(null);
+  }, [selYear, timetableSlots]);
+
+  /* ── Year + Division → Batches ── */
+  useEffect(() => {
+    if (!selYear || !selDivision) {
+      setBatches([]);
+      setSelSubDiv(null);
+      return;
+    }
+    const filtered = timetableSlots.filter(s =>
+      String(s.year) === String(selYear) &&
+      s.division?.toUpperCase() === selDivision.toUpperCase()
+    );
+    const batchSet = [...new Set(filtered
+      .map(s => s.batch)
+      .filter(b => b && b.trim() !== '')
+    )].sort();
+    setBatches(batchSet);
+    setSelSubDiv(null);
+  }, [selYear, selDivision, timetableSlots]);
+
+  /* ── Year + Division → Subjects ── */
+  useEffect(() => {
+    if (!selYear || !selDivision) {
+      setSubjects([]);
+      setSelSubject(null);
+      return;
+    }
+    const subs = [...new Set(timetableSlots
+      .filter(s => String(s.year) === String(selYear) && s.division?.toUpperCase() === selDivision.toUpperCase())
+      .map(s => s.subject)
+      .filter(Boolean)
+    )].sort();
+    setSubjects(subs);
+    setSelSubject(null);
+  }, [selYear, selDivision, timetableSlots]);
 
   return (
     <View style={ss.root}>
@@ -115,8 +226,7 @@ function QuizSettingsSetup({ onProceed }) {
         <Text style={ss.sectionLabel}>OPTIONS</Text>
         <View style={ss.card}>
           <ToggleRow label="Shuffle Questions" sub="Randomize for each student" value={shuffle} onToggle={setShuffle} />
-          <View style={ss.hr} />
-          <ToggleRow label="Auto-grading" sub="Grade objective questions" value={autoGrade} onToggle={setAutoGrade} />
+       
           <View style={ss.hr} />
           <ToggleRow label="Lock Browser" sub="Prevent tab switching" value={lockBrowser} onToggle={setLockBrowser} />
         </View>
@@ -132,7 +242,7 @@ function QuizSettingsSetup({ onProceed }) {
             onPress={() => { closeAll(); setYearOpen(v => !v); }}
             activeOpacity={0.8}>
             <Text style={[ss.pickerText, !selYear && ss.pickerPlaceholder]}>
-              {selYear ? YEARS.find(y => y.value === selYear)?.label : '— Select Year —'}
+              {selYear ? years.find(y => y.value === String(selYear))?.label : '— Select Year —'}
             </Text>
             <View style={ss.pickerRight}>
               {selYear && (
@@ -145,7 +255,7 @@ function QuizSettingsSetup({ onProceed }) {
           </TouchableOpacity>
           {yearOpen && (
             <View style={ss.dropdown}>
-              {YEARS.map(y => (
+              {(years.length > 0 ? years : FALLBACK_YEARS).map(y => (
                 <TouchableOpacity
                   key={y.value}
                   style={[ss.dropItem, selYear === y.value && ss.dropItemActive]}
@@ -170,7 +280,7 @@ function QuizSettingsSetup({ onProceed }) {
             onPress={() => { closeAll(); setDivOpen(v => !v); }}
             activeOpacity={0.8}>
             <Text style={[ss.pickerText, !selDivision && ss.pickerPlaceholder]}>
-              {selDivision ? `Division ${selDivision}` : '— Select Division —'}
+              {selDivision ? `Division ${selDivision.toUpperCase()}` : '— Select Division —'}
             </Text>
             <View style={ss.pickerRight}>
               {selDivision && (
@@ -183,14 +293,14 @@ function QuizSettingsSetup({ onProceed }) {
           </TouchableOpacity>
           {divOpen && (
             <View style={ss.dropdown}>
-              {DIVISIONS.map(d => (
+              {(divisions.length > 0 ? divisions : FALLBACK_DIVISIONS).map(d => (
                 <TouchableOpacity
                   key={d}
-                  style={[ss.dropItem, selDivision === d && ss.dropItemActive]}
+                  style={[ss.dropItem, selDivision === d.toUpperCase?.() || selDivision === d && ss.dropItemActive]}
                   onPress={() => { setSelDivision(d); setDivOpen(false); }}
                   activeOpacity={0.75}>
-                  <Text style={[ss.dropText, selDivision === d && { color: C.accent }]}>Division {d}</Text>
-                  {selDivision === d && <Text style={{ color: C.accent, fontSize: 14, fontWeight: '700' }}>✓</Text>}
+                  <Text style={[ss.dropText, (selDivision === d.toUpperCase?.() || selDivision === d) && { color: C.accent }]}>Division {d}</Text>
+                  {(selDivision === d.toUpperCase?.() || selDivision === d) && <Text style={{ color: C.accent, fontSize: 14, fontWeight: '700' }}>✓</Text>}
                 </TouchableOpacity>
               ))}
             </View>
@@ -208,7 +318,7 @@ function QuizSettingsSetup({ onProceed }) {
             onPress={() => { closeAll(); setSubDivOpen(v => !v); }}
             activeOpacity={0.8}>
             <Text style={[ss.pickerText, !selSubDiv && ss.pickerPlaceholder]}>
-              {selSubDiv ? `Sub Division ${selSubDiv}` : '— Select Sub Division —'}
+              {selSubDiv ? `${batches.length > 0 ? 'Batch' : 'Sub Division'} ${selSubDiv}` : '— Select Sub Division —'}
             </Text>
             <View style={ss.pickerRight}>
               {selSubDiv && (
@@ -221,13 +331,13 @@ function QuizSettingsSetup({ onProceed }) {
           </TouchableOpacity>
           {subDivOpen && (
             <View style={ss.dropdown}>
-              {SUB_DIVISIONS.map(sd => (
+              {(batches.length > 0 ? batches : FALLBACK_SUB_DIVISIONS).map(sd => (
                 <TouchableOpacity
                   key={sd}
                   style={[ss.dropItem, selSubDiv === sd && ss.dropItemActive]}
                   onPress={() => { setSelSubDiv(sd); setSubDivOpen(false); }}
                   activeOpacity={0.75}>
-                  <Text style={[ss.dropText, selSubDiv === sd && { color: C.accent }]}>Sub Division {sd}</Text>
+                  <Text style={[ss.dropText, selSubDiv === sd && { color: C.accent }]}>{batches.length > 0 ? 'Batch ' : 'Sub Division '}{sd}</Text>
                   {selSubDiv === sd && <Text style={{ color: C.accent, fontSize: 14, fontWeight: '700' }}>✓</Text>}
                 </TouchableOpacity>
               ))}
@@ -240,7 +350,7 @@ function QuizSettingsSetup({ onProceed }) {
               <View style={ss.selDot} />
               <Text style={ss.selBadgeText}>
                 {[
-                  selYear     ? YEARS.find(y => y.value === selYear)?.label : null,
+                  selYear     ? (years.find(y => y.value === selYear)?.label || `Year ${selYear}`) : null,
                   selDivision ? `Division ${selDivision}` : null,
                   selSubDiv   ? `Sub Div ${selSubDiv}` : null,
                 ].filter(Boolean).join(' · ')}
@@ -274,7 +384,7 @@ function QuizSettingsSetup({ onProceed }) {
           </TouchableOpacity>
           {subjectOpen && (
             <View style={ss.dropdown}>
-              {SUBJECTS.map(sub => (
+              {(subjects.length > 0 ? subjects : FALLBACK_SUBJECTS).map(sub => (
                 <TouchableOpacity
                   key={sub}
                   style={[ss.dropItem, selSubject === sub && ss.dropItemActive]}
@@ -350,9 +460,15 @@ function QuizSettingsSetup({ onProceed }) {
    MAIN SCREEN
 ══════════════════════════════════════════════════════════════════════ */
 export default function QuizBuilderScreen() {
+  const { isDark } = useContext(ThemeContext);
+  const C = isDark ? C_DARK : C_LIGHT;
+  const b = makeB(C);
+  const ss = makeSS(C);
   const navigation = useNavigation();
 
-  const [setupDone, setSetupDone] = useState(false);
+  const [setupDone,  setSetupDone]  = useState(false);
+  const [publishing, setPublishing] = useState(false); // ← NEW
+  const [teacherId, setTeacherId] = useState(null);
 
   const [questions, setQuestions] = useState([makeQuestion()]);
   const [activeId,  setActiveId]  = useState(() => questions[0].id);
@@ -371,6 +487,14 @@ export default function QuizBuilderScreen() {
   const [toast, setToast] = useState(null);
   const toastAnim = useRef(new Animated.Value(0)).current;
   const stripRef  = useRef(null);
+
+  useEffect(() => {
+  const loadTeacherId = async () => {
+    const id = await AsyncStorage.getItem('teacherId');
+    setTeacherId(id);
+  };
+  loadTeacherId();
+}, []);
 
   /* ── ALL hooks must be declared before any early return ── */
   const showToast = useCallback((msg, type = 'green') => {
@@ -442,32 +566,98 @@ export default function QuizBuilderScreen() {
     showToast('📋 Question duplicated');
   };
 
-  const publishQuiz = () => {
-    const noText = questions.filter(q => !q.text.trim());
-    if (noText.length) { showToast(`⚠️ ${noText.length} question(s) missing text`, 'amber'); return; }
-    const noAns  = questions.filter(q => q.type === 'mc' && !q.options.some(o => o.correct));
-    if (noAns.length) { showToast(`⚠️ ${noAns.length} MC question(s) need a correct answer`, 'amber'); return; }
+  // ─── CHANGED: now calls POST /api/quizzes ────────────────────────────
+  const publishQuiz = async () => {
 
-    const yearLabel    = selYear ? YEARS.find(y => y.value === selYear)?.label : null;
-    const classDisplay = [yearLabel, selDivision && `Div ${selDivision}`, selSubDiv && `Sub ${selSubDiv}`].filter(Boolean).join(' · ');
+  // Validate
+  const noText = questions.filter(q => !q.text.trim());
+  if (noText.length) {
+    showToast(`⚠️ ${noText.length} question(s) missing text`, 'amber');
+    return;
+  }
+
+  const noAns = questions.filter(
+    q => q.type === 'mc' && !q.options.some(o => o.correct)
+  );
+  if (noAns.length) {
+    showToast(`⚠️ ${noAns.length} MC question(s) need a correct answer`, 'amber');
+    return;
+  }
+
+  setPublishing(true);
+
+  try {
+    // 🔹 Get teacherId from AsyncStorage
+    const teacherId = await AsyncStorage.getItem('teacherId');
+
+    if (!teacherId) {
+      showToast('❌ Teacher not authenticated', 'red');
+      setPublishing(false);
+      return;
+    }
+
+    // Strip local-only `id` fields — backend uses Mongoose _id
+    const sanitisedQuestions = questions.map(({ id: _lid, ...q }) => ({
+      ...q,
+      options: (q.options || []).map(({ id: _oid, ...opt }) => opt),
+    }));
+
+    const payload = {
+      title: selSubject ? `${selSubject} Quiz` : 'New Quiz',
+      teacherId: teacherId,
+      subject: selSubject || null,
+      year: selYear || null,
+      division: selDivision || null,
+      subDiv: selSubDiv || null,
+      questions: sanitisedQuestions,
+      duration: quizTimeLimit,
+      shuffle,
+      autoGrade,
+      lockBrowser,
+      total: 0,
+    };
+
+    const { data } = await axiosInstance.post('/quiz', payload);
+
+    if (!data.success) {
+      throw new Error(data.message || 'Publish failed');
+    }
+
+    const saved = data.data;
 
     const newQuiz = {
-      title:       selSubject ? `${selSubject} Quiz` : 'New Quiz',
-      class:       classDisplay || null,
-      subject:     selSubject,
-      questions:   questions.length,
-      duration:    `${totalTime} min`,
-      status:      'SCHEDULED',
+      _id: saved._id,
+      title: saved.title,
+      class: saved.class,
+      subject: saved.subject,
+      questions: saved.questions.length,
+      duration: `${saved.duration} min`,
+      status: saved.status,
       statusColor: '#F59E0B',
       submissions: 0,
-      total:       0,
+      total: saved.total || 0,
     };
 
     showToast('🚀 Quiz published!', 'green');
+
     setTimeout(() => {
-      navigation.navigate('QuizzSessionScreen', { newQuiz, publishedAt: Date.now() });
+      navigation.navigate('QuizzSessionScreen', {
+        newQuiz,
+        publishedAt: Date.now(),
+      });
     }, 1800);
-  };
+
+  } catch (err) {
+    console.error('Publish error:', err);
+    showToast(
+      `❌ ${err?.response?.data?.message || err.message || 'Publish failed'}`,
+      'red'
+    );
+  } finally {
+    setPublishing(false);
+  }
+};
+  // ─────────────────────────────────────────────────────────────────────
 
   const metaParts = [
     selSubject,
@@ -489,19 +679,27 @@ export default function QuizBuilderScreen() {
           </TouchableOpacity>
           <View style={b.logoIcon}><Text style={{ fontSize: 14 }}>🎓</Text></View>
           <View style={{ flex: 1 }}>
-            <Text style={b.logoText}>Campus360</Text>
+            <Text style={b.logoText}>UniVerse</Text>
             <Text style={b.quizMeta} numberOfLines={1}>{metaParts.join(' · ')}</Text>
           </View>
         </View>
         <View style={b.topbarRight}>
-          <TouchableOpacity style={b.btnGhost} onPress={() => showToast('👁 Preview mode')}>
+          <TouchableOpacity style={b.btnGhost} onPress={() => setActiveId(questions[questions.length - 1].id)}>
             <Text style={b.btnGhostText}>Preview</Text>
           </TouchableOpacity>
           <TouchableOpacity style={b.btnGhost} onPress={() => showToast('💾 Draft saved!')}>
             <Text style={b.btnGhostText}>Save</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={b.btnPrimary} onPress={publishQuiz}>
-            <Text style={b.btnPrimaryText}>Publish</Text>
+          {/* ── CHANGED: spinner while publishing ── */}
+          <TouchableOpacity
+            style={[b.btnPrimary, publishing && { opacity: 0.6 }]}
+            onPress={publishQuiz}
+            disabled={publishing}
+            activeOpacity={0.8}>
+            {publishing
+              ? <ActivityIndicator size="small" color={C.white} />
+              : <Text style={b.btnPrimaryText}>Publish</Text>
+            }
           </TouchableOpacity>
           <TouchableOpacity style={b.settingsBtn} onPress={() => setSettingsOpen(true)}>
             <Text style={{ fontSize: 18 }}>⚙️</Text>
@@ -661,6 +859,10 @@ function InBuilderSettingsModal({
   selSubDiv, setSelSubDiv, selSubject, setSelSubject,
   questions, totalPoints, totalTime, showToast,
 }) {
+  const { isDark } = useContext(ThemeContext);
+  const C = isDark ? C_DARK : C_LIGHT;
+  const b = makeB(C);
+  const ss = makeSS(C);
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={b.modalOverlay}>
@@ -678,8 +880,7 @@ function InBuilderSettingsModal({
             <Text style={b.sectionLabel}>OPTIONS</Text>
             <View style={b.settingsCard}>
               <ToggleRow label="Shuffle Questions" sub="Randomize for each student" value={shuffle} onToggle={setShuffle} />
-              <View style={b.settingsCardDivider} />
-              <ToggleRow label="Auto-grading" sub="Grade objective questions" value={autoGrade} onToggle={setAutoGrade} />
+             
               <View style={b.settingsCardDivider} />
               <ToggleRow label="Lock Browser" sub="Prevent tab switching" value={lockBrowser} onToggle={setLockBrowser} />
             </View>
@@ -774,6 +975,9 @@ function InBuilderSettingsModal({
    ANSWERS MC
 ══════════════════════════════════════════════════════════════════════ */
 function AnswersMC({ question, onUpdateQuestion, showToast }) {
+  const { isDark } = useContext(ThemeContext);
+  const C = isDark ? C_DARK : C_LIGHT;
+  const b = makeB(C);
   const addOption = () => {
     if (question.options.length >= 6) { showToast('Max 6 options', 'amber'); return; }
     onUpdateQuestion(question.id, { options: [...question.options, { id: uid(), text: '', correct: false }] });
@@ -818,6 +1022,9 @@ function AnswersMC({ question, onUpdateQuestion, showToast }) {
    STEPPER
 ══════════════════════════════════════════════════════════════════════ */
 function Stepper({ label, value, min, max, onChange }) {
+  const { isDark } = useContext(ThemeContext);
+  const C = isDark ? C_DARK : C_LIGHT;
+  const b = makeB(C);
   return (
     <View>
       <Text style={b.stepperLabel}>{label}</Text>
@@ -838,6 +1045,8 @@ function Stepper({ label, value, min, max, onChange }) {
    TOGGLE ROW
 ══════════════════════════════════════════════════════════════════════ */
 function ToggleRow({ label, sub, value, onToggle }) {
+  const { isDark } = useContext(ThemeContext);
+  const C = isDark ? C_DARK : C_LIGHT;
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
       <View style={{ flex: 1 }}>
@@ -852,7 +1061,7 @@ function ToggleRow({ label, sub, value, onToggle }) {
 /* ══════════════════════════════════════════════════════════════════════
    STYLES — SETUP SCREEN
 ══════════════════════════════════════════════════════════════════════ */
-const ss = StyleSheet.create({
+const makeSS = (C) => StyleSheet.create({
   root:        { flex: 1, backgroundColor: C.bg },
   topbar:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: Platform.OS === 'ios' ? 54 : 20, paddingBottom: 14, backgroundColor: C.surface, borderBottomWidth: 1, borderBottomColor: C.border },
   closeBtn:    { width: 36, height: 36, borderRadius: 18, backgroundColor: C.card, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' },
@@ -910,7 +1119,7 @@ const ss = StyleSheet.create({
 /* ══════════════════════════════════════════════════════════════════════
    STYLES — BUILDER
 ══════════════════════════════════════════════════════════════════════ */
-const b = StyleSheet.create({
+const makeB = (C) => StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
 
   topbar:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: Platform.OS === 'ios' ? 52 : 16, paddingBottom: 12, backgroundColor: C.surface, borderBottomWidth: 1, borderBottomColor: C.border },
@@ -923,7 +1132,7 @@ const b = StyleSheet.create({
   quizMeta:    { fontSize: 10, color: C.textSec, marginTop: 1, maxWidth: 200 },
   btnGhost:    { paddingHorizontal: 11, paddingVertical: 6, borderRadius: 7, borderWidth: 1, borderColor: C.border },
   btnGhostText:{ fontSize: 11, fontWeight: '700', color: C.textSec },
-  btnPrimary:  { paddingHorizontal: 13, paddingVertical: 7, borderRadius: 7, backgroundColor: C.accent },
+  btnPrimary:  { paddingHorizontal: 13, paddingVertical: 7, borderRadius: 7, backgroundColor: C.accent, minWidth: 66, alignItems: 'center' }, // ← minWidth for spinner
   btnPrimaryText: { fontSize: 11, fontWeight: '700', color: C.white },
   settingsBtn: { paddingHorizontal: 8, paddingVertical: 6 },
 

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import axiosInstance from '../../../Src/Axios';
 import {
   View,
   Text,
@@ -8,33 +9,32 @@ import {
   Dimensions,
   Animated,
   StatusBar,
+  ActivityIndicator,
 } from 'react-native';
+
+const API_BASE_URL = axiosInstance.defaults.baseURL.replace(/\/api$/, "");
 
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// ─── Mock Data ────────────────────────────────────────────────────────────────
-const attendanceByYearDiv = {
-  '1st': {
-    A: [78, 82, 80, 85, 88, 83, 81, 87, 84, 86, 89, 85, 83, 88, 90, 86, 84, 88, 91, 87, 85, 89, 92, 88, 86, 90, 93, 89, 87, 91],
-    B: [72, 75, 78, 74, 80, 77, 73, 81, 79, 76, 78, 82, 80, 77, 75, 79, 83, 81, 78, 76, 80, 82, 79, 77, 81, 84, 80, 78, 82, 79],
-    C: [80, 84, 82, 87, 90, 85, 83, 89, 86, 88, 91, 87, 85, 90, 92, 88, 86, 90, 93, 89, 87, 91, 94, 90, 88, 92, 95, 91, 89, 93],
-  },
-  '2nd': {
-    A: [85, 88, 86, 91, 94, 89, 87, 93, 90, 92, 95, 91, 89, 94, 92, 90, 88, 92, 95, 91, 89, 93, 96, 92, 90, 94, 93, 91, 89, 93],
-    B: [76, 79, 77, 82, 85, 80, 78, 84, 81, 83, 86, 82, 80, 85, 87, 83, 81, 85, 88, 84, 82, 86, 89, 85, 83, 87, 90, 86, 84, 88],
-    C: [82, 85, 83, 88, 91, 86, 84, 90, 87, 89, 92, 88, 86, 91, 89, 87, 85, 89, 92, 88, 86, 90, 93, 89, 87, 91, 94, 90, 88, 92],
-  },
-  '3rd': {
-    A: [88, 91, 89, 94, 92, 90, 88, 93, 91, 95, 93, 91, 89, 92, 94, 90, 92, 96, 94, 92, 90, 93, 91, 95, 93, 97, 95, 93, 91, 94],
-    B: [79, 82, 80, 85, 83, 81, 79, 84, 82, 86, 84, 82, 80, 83, 85, 81, 83, 87, 85, 83, 81, 84, 82, 86, 84, 88, 86, 84, 82, 85],
-    C: [83, 86, 84, 89, 87, 85, 83, 88, 86, 90, 88, 86, 84, 87, 89, 85, 87, 91, 89, 87, 85, 88, 86, 90, 88, 92, 90, 88, 86, 89],
-  },
-  '4th': {
-    A: [91, 94, 92, 97, 95, 93, 91, 96, 94, 92, 95, 93, 91, 94, 96, 92, 94, 98, 96, 94, 92, 95, 93, 97, 95, 93, 96, 94, 92, 95],
-    B: [83, 86, 84, 89, 87, 85, 83, 88, 86, 84, 87, 85, 83, 86, 88, 84, 86, 90, 88, 86, 84, 87, 85, 89, 87, 85, 88, 86, 84, 87],
-    C: [87, 90, 88, 93, 91, 89, 87, 92, 90, 88, 91, 89, 87, 90, 92, 88, 90, 94, 92, 90, 88, 91, 89, 93, 91, 89, 92, 90, 88, 91],
-  },
+// ─── Helper: compute daily attendance % from sessions ────────────────────────
+const computeDailyPercentages = (sessions) => {
+  // Group sessions by date, compute % for each day
+  const byDate = {};
+  for (const session of sessions) {
+    const key = new Date(session.date).toISOString().slice(0, 10);
+    if (!byDate[key]) byDate[key] = { present: 0, total: 0 };
+    for (const s of session.students || []) {
+      byDate[key].total += 1;
+      if (s.status === 'Present') byDate[key].present += 1;
+    }
+  }
+  // Sort dates ascending and return percentages
+  const sorted = Object.keys(byDate).sort();
+  return sorted.map(d => {
+    const { present, total } = byDate[d];
+    return total > 0 ? Math.round((present / total) * 100) : 0;
+  });
 };
 
 const YEARS = ['1st', '2nd', '3rd', '4th'];
@@ -92,8 +92,63 @@ export default function ReportYearDivSelection({ onBack }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(20)).current;
 
+  // ── Backend student fetch ─────────────────────────────────────────────────────
+  const [students, setStudents]         = useState([]);
+  const [studentsLoading, setStudentsLoading] = useState(false);
+  const [fetchError, setFetchError]     = useState(null);
+
+  // ── Backend attendance fetch ──────────────────────────────────────────────────
+  const [dailyData, setDailyData]             = useState([]);
+  const [attendanceLoading, setAttendanceLoading] = useState(false);
+
+  useEffect(() => {
+    const yearNum = selectedYear.replace(/\D/g, '');
+
+    // Fetch students
+    const fetchStudents = async () => {
+      setStudentsLoading(true);
+      setFetchError(null);
+      try {
+        const res = await axiosInstance.get('/students/by-class', {
+          params: { year: yearNum, division: selectedDiv }
+        });
+        const data = res.data;
+        setStudents(Array.isArray(data) ? data : []);
+      } catch (err) {
+        setFetchError(err.message);
+        setStudents([]);
+      } finally {
+        setStudentsLoading(false);
+      }
+    };
+
+    // Fetch attendance sessions for current month
+    const fetchAttendance = async () => {
+      setAttendanceLoading(true);
+      try {
+        const now = new Date();
+        const from = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+        const to = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+        const res = await axiosInstance.get('/attendance/class', {
+          params: { year: yearNum, division: selectedDiv, from, to }
+        });
+        const json = res.data;
+        const pcts = computeDailyPercentages(json.sessions || []);
+        setDailyData(pcts);
+      } catch {
+        setDailyData([]);
+      } finally {
+        setAttendanceLoading(false);
+      }
+    };
+
+    fetchStudents();
+    fetchAttendance();
+  }, [selectedYear, selectedDiv]);
+  // ──────────────────────────────────────────────────────────────────────────
+
   const accentColor = YEAR_COLORS[selectedYear].primary;
-  const data = attendanceByYearDiv[selectedYear][selectedDiv];
+  const data = dailyData.length > 0 ? dailyData : [0];
   const avg = Math.round(data.reduce((a, b) => a + b, 0) / data.length);
   const max = Math.max(...data);
   const min = Math.min(...data);
@@ -188,7 +243,7 @@ export default function ReportYearDivSelection({ onBack }) {
             <StatPill label="AVG %" value={`${avg}%`} color={accentColor} />
             <StatPill label="PEAK" value={`${max}%`} color="#66BB6A" />
             <StatPill label="LOW" value={`${min}%`} color="#EF5350" />
-            <StatPill label="DAYS" value="30" color="#7A9AAA" />
+            <StatPill label="DAYS" value={`${dailyData.length}`} color="#7A9AAA" />
           </View>
 
           {/* Chart Card */}
@@ -205,12 +260,23 @@ export default function ReportYearDivSelection({ onBack }) {
               </View>
             </View>
 
-            <MiniBarChart data={data} color={accentColor} height={120} />
+            {dailyData.length > 0 ? (
+              <MiniBarChart data={data} color={accentColor} height={120} />
+            ) : (
+              <View style={{ height: 120, justifyContent: 'center', alignItems: 'center' }}>
+                <Text style={{ color: '#4A6070', fontSize: 12 }}>
+                  {attendanceLoading ? 'Loading attendance…' : 'No attendance data for this month'}
+                </Text>
+              </View>
+            )}
 
             <View style={styles.xAxisRow}>
-              {['Day 1', 'Day 10', 'Day 20', 'Day 30'].map(l => (
-                <Text key={l} style={styles.xAxisLabel}>{l}</Text>
-              ))}
+              {dailyData.length > 0
+                ? [1, Math.ceil(dailyData.length / 3), Math.ceil((2 * dailyData.length) / 3), dailyData.length]
+                    .filter((v, i, a) => a.indexOf(v) === i)
+                    .map(d => <Text key={d} style={styles.xAxisLabel}>Day {d}</Text>)
+                : [<Text key="none" style={styles.xAxisLabel}>—</Text>]
+              }
             </View>
 
             {/* Threshold line indicator */}
@@ -222,49 +288,72 @@ export default function ReportYearDivSelection({ onBack }) {
 
           {/* Week breakdown */}
           <Text style={[styles.sectionLabel, { marginTop: 20, marginBottom: 12 }]}>WEEKLY BREAKDOWN</Text>
-          {[0, 1, 2, 3].map(week => {
-            const weekData = data.slice(week * 7, week * 7 + 7);
-            const weekAvg = Math.round(weekData.reduce((a, b) => a + b, 0) / weekData.length);
-            const status = weekAvg >= 90 ? 'Excellent' : weekAvg >= 80 ? 'Good' : weekAvg >= 75 ? 'Satisfactory' : 'Critical';
-            const statusColor = weekAvg >= 90 ? '#66BB6A' : weekAvg >= 80 ? accentColor : weekAvg >= 75 ? '#FFA726' : '#EF5350';
-            return (
-              <View key={week} style={styles.weekRow}>
-                <Text style={styles.weekLabel}>Week {week + 1}</Text>
-                <View style={styles.weekBarBg}>
-                  <View style={[styles.weekBarFill, { width: `${weekAvg}%`, backgroundColor: statusColor }]} />
-                </View>
-                <Text style={[styles.weekPct, { color: statusColor }]}>{weekAvg}%</Text>
-                <View style={[styles.weekTag, { backgroundColor: statusColor + '20', borderColor: statusColor + '40' }]}>
-                  <Text style={[styles.weekTagText, { color: statusColor }]}>{status}</Text>
-                </View>
-              </View>
-            );
-          })}
-
-          {/* Students at risk */}
-          <View style={styles.riskCard}>
-            <View style={styles.riskHeader}>
-              <Text style={styles.riskTitle}>⚠️  Students At Risk</Text>
-              <Text style={styles.riskSub}>Below 75% attendance</Text>
+          {dailyData.length === 0 ? (
+            <View style={[styles.riskCard, { borderColor: '#1A2C3D' }]}>
+              <Text style={{ color: '#7A9AAA', fontSize: 12, fontWeight: '600' }}>No attendance sessions recorded this month.</Text>
             </View>
-            {[
-              { name: 'Marcus Reid', id: `${selectedYear === '1st' ? 'CS' : selectedYear === '2nd' ? 'BM' : selectedYear === '3rd' ? 'EC' : 'ME'}-2024-0${selectedDiv === 'A' ? '312' : selectedDiv === 'B' ? '445' : '518'}`, pct: 68 },
-              { name: 'Priya Nair', id: `${selectedYear === '1st' ? 'CS' : selectedYear === '2nd' ? 'BM' : selectedYear === '3rd' ? 'EC' : 'ME'}-2024-0${selectedDiv === 'A' ? '287' : selectedDiv === 'B' ? '391' : '472'}`, pct: 71 },
-            ].map((s, i) => (
-              <View key={i} style={styles.riskRow}>
-                <View style={[styles.riskAvatar, { backgroundColor: '#EF535020', borderColor: '#EF535040' }]}>
-                  <Text style={styles.riskAvatarText}>{s.name.split(' ').map(n => n[0]).join('')}</Text>
+          ) : (
+            Array.from({ length: Math.ceil(dailyData.length / 7) }, (_, week) => {
+              const weekData = dailyData.slice(week * 7, week * 7 + 7);
+              if (weekData.length === 0) return null;
+              const weekAvg = Math.round(weekData.reduce((a, b) => a + b, 0) / weekData.length);
+              const status = weekAvg >= 90 ? 'Excellent' : weekAvg >= 80 ? 'Good' : weekAvg >= 75 ? 'Satisfactory' : 'Critical';
+              const statusColor = weekAvg >= 90 ? '#66BB6A' : weekAvg >= 80 ? accentColor : weekAvg >= 75 ? '#FFA726' : '#EF5350';
+              return (
+                <View key={week} style={styles.weekRow}>
+                  <Text style={styles.weekLabel}>Week {week + 1}</Text>
+                  <View style={styles.weekBarBg}>
+                    <View style={[styles.weekBarFill, { width: `${weekAvg}%`, backgroundColor: statusColor }]} />
+                  </View>
+                  <Text style={[styles.weekPct, { color: statusColor }]}>{weekAvg}%</Text>
+                  <View style={[styles.weekTag, { backgroundColor: statusColor + '20', borderColor: statusColor + '40' }]}>
+                    <Text style={[styles.weekTagText, { color: statusColor }]}>{status}</Text>
+                  </View>
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.riskName}>{s.name}</Text>
-                  <Text style={styles.riskId}>{s.id}</Text>
-                </View>
-                <View style={styles.riskPctBadge}>
-                  <Text style={styles.riskPctText}>{s.pct}%</Text>
-                </View>
+              );
+            })
+          )}
+
+          {/* Students List (fetched from backend) */}
+          <Text style={[styles.sectionLabel, { marginTop: 20, marginBottom: 12 }]}>STUDENTS — {selectedYear} YEAR · DIV {selectedDiv}</Text>
+          {studentsLoading ? (
+            <View style={{ alignItems: 'center', paddingVertical: 30 }}>
+              <ActivityIndicator size="large" color={accentColor} />
+              <Text style={{ color: '#4A6070', marginTop: 10, fontSize: 11 }}>Loading students…</Text>
+            </View>
+          ) : fetchError ? (
+            <View style={[styles.riskCard, { borderColor: '#EF535030' }]}>
+              <Text style={{ color: '#EF5350', fontSize: 12, fontWeight: '700' }}>⚠ Could not fetch students</Text>
+              <Text style={{ color: '#4A6070', fontSize: 10, marginTop: 4 }}>{fetchError}</Text>
+            </View>
+          ) : students.length === 0 ? (
+            <View style={[styles.riskCard, { borderColor: '#1A2C3D' }]}>
+              <Text style={{ color: '#7A9AAA', fontSize: 12, fontWeight: '600' }}>No students found for this class.</Text>
+            </View>
+          ) : (
+            <View style={[styles.riskCard, { borderColor: accentColor + '30' }]}>
+              <View style={styles.riskHeader}>
+                <Text style={styles.riskTitle}>📋  Student List ({students.length})</Text>
+                <Text style={styles.riskSub}>{selectedYear} Year · Division {selectedDiv}</Text>
               </View>
-            ))}
-          </View>
+              {students.map((s, i) => (
+                <View key={s._id || s.id || i} style={styles.riskRow}>
+                  <View style={[styles.riskAvatar, { backgroundColor: accentColor + '20', borderColor: accentColor + '40' }]}>
+                    <Text style={[styles.riskAvatarText, { color: accentColor }]}>{s.name ? s.name.charAt(0) : '?'}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.riskName}>{s.name}</Text>
+                    <Text style={styles.riskId}>Roll: {s.roll_no || s.rollNo || '—'} · PRN: {s.prn || '—'}</Text>
+                  </View>
+                  {s.subjects && s.subjects.length > 0 && (
+                    <View style={{ backgroundColor: accentColor + '20', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, borderColor: accentColor + '40' }}>
+                      <Text style={{ color: accentColor, fontSize: 9, fontWeight: '700' }}>{s.subjects.length + (s.lab ? s.lab.length : 0)} subs</Text>
+                    </View>
+                  )}
+                </View>
+              ))}
+            </View>
+          )}
 
           <View style={{ height: 40 }} />
         </Animated.View>

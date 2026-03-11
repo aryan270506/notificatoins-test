@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,9 @@ import {
   StatusBar,
   ScrollView,
   TextInput,
+  ActivityIndicator,
 } from 'react-native';
+import axiosInstance from '../../../Src/Axios';
 
 const C = {
   bg: '#0d1b3e',
@@ -51,31 +53,35 @@ function MiniDonut({ percent, size = 44 }) {
   );
 }
 
-// Generate dummy students
-function generateStudents(year, division) {
-  const names = [
-    'Aarav Shah', 'Priya Patel', 'Rohit Mehta', 'Sneha Joshi', 'Karan Desai',
-    'Pooja Nair', 'Arjun Rao', 'Anjali Singh', 'Vivek Sharma', 'Neha Gupta',
-    'Rahul Verma', 'Divya Iyer', 'Aditya Kumar', 'Riya Bose', 'Siddharth Malhotra',
-    'Kavya Reddy', 'Manish Tiwari', 'Tanvi Kulkarni', 'Nikhil Patil', 'Shreya Das',
-    'Amit Jain', 'Swati Mishra', 'Rohan Pillai', 'Meera Agarwal', 'Harsh Bajaj',
-  ];
-  return names.map((name, i) => ({
-    id: i + 1,
-    name,
-    rollNo: `${year}${division}${String(i + 1).padStart(3, '0')}`,
-    attendance: Math.floor(Math.random() * 45) + 50, // 50–95%
-    present: Math.floor(Math.random() * 20) + 40,
-    total: 65,
-    avatar: name.charAt(0),
-  }));
-}
-
 export default function StudentListScreen({ year, division, onBack, onSelectStudent }) {
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState('All'); // All | Good | Average | Low
+  const [filter, setFilter] = useState('All');
+  const [students, setStudents] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const students = generateStudents(year?.value || 1, division?.value || 'A');
+  useEffect(() => {
+    const fetchStudents = async () => {
+      try {
+        setLoading(true);
+        const res = await axiosInstance.get(`/students/year/${year?.value || 1}/division/${division?.value || 'A'}`);
+        const data = res.data?.data || [];
+        setStudents(data.map(s => ({
+          id: s._id,
+          name: s.name,
+          rollNo: s.roll_no || s.id,
+          attendance: s.attendanceSummary?.overallPercentage || 0,
+          present: s.attendanceSummary?.totalAttended || 0,
+          total: s.attendanceSummary?.totalClasses || 0,
+          avatar: s.name?.charAt(0) || '?',
+        })));
+      } catch (err) {
+        console.error('Error fetching students:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchStudents();
+  }, [year, division]);
 
   const filtered = students.filter(s => {
     const matchSearch = s.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -87,7 +93,7 @@ export default function StudentListScreen({ year, division, onBack, onSelectStud
     return true;
   });
 
-  const avgAtt = Math.round(students.reduce((sum, s) => sum + s.attendance, 0) / students.length);
+  const avgAtt = students.length > 0 ? Math.round(students.reduce((sum, s) => sum + s.attendance, 0) / students.length) : 0;
   const goodCount = students.filter(s => s.attendance >= 75).length;
   const avgCount = students.filter(s => s.attendance >= 50 && s.attendance < 75).length;
   const lowCount = students.filter(s => s.attendance < 50).length;
@@ -167,7 +173,12 @@ export default function StudentListScreen({ year, division, onBack, onSelectStud
 
         {/* Student Cards */}
         <View style={s.listWrap}>
-          {filtered.map((student) => {
+          {loading ? (
+            <View style={{ padding: 40, alignItems: 'center' }}>
+              <ActivityIndicator size="large" color={C.accent} />
+              <Text style={{ color: C.textMuted, marginTop: 12, fontSize: 13 }}>Loading students...</Text>
+            </View>
+          ) : filtered.map((student) => {
             const color = attColor(student.attendance);
             return (
               <TouchableOpacity

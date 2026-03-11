@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useContext } from 'react';
+import React, { useState, useRef, useEffect, useContext, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,29 +9,13 @@ import {
   TextInput,
   Animated,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { ThemeContext } from '../dashboard/AdminDashboard';
+import axiosInstance from '../../../Src/Axios';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const isDesktop = SCREEN_WIDTH >= 768;
-
-const LOGS = [
-  { id: '1',  time: '09:42:15', actor: 'sys_admin_vance', ip: '10.0.0.1',      action: 'Database Schema Migration',       type: 'System',   status: 'Success' },
-  { id: '2',  time: '09:38:01', actor: 'm_garcia_edu',    ip: '192.168.1.1',   action: 'Failed Login Attempt',            type: 'Auth',     status: 'Failed'  },
-  { id: '3',  time: '09:15:02', actor: 'auto_bot_04',     ip: '10.0.0.8',      action: 'Scheduled Backup Initiated',      type: 'System',   status: 'Warning' },
-  { id: '4',  time: '08:55:44', actor: 'security_ovr',    ip: '10.0.0.3',      action: 'API Key Rotation (Production)',   type: 'Security', status: 'Success' },
-  { id: '5',  time: '08:32:10', actor: 'm_garcia_edu',    ip: '192.168.1.1',   action: 'Failed Login Attempt',            type: 'Auth',     status: 'Failed'  },
-  { id: '6',  time: '08:20:55', actor: 'j_patel_dev',     ip: '10.0.1.22',     action: 'Firewall Rule Updated',           type: 'Security', status: 'Success' },
-  { id: '7',  time: '08:10:30', actor: 'auto_bot_04',     ip: '10.0.0.8',      action: 'SSL Certificate Renewed',         type: 'Security', status: 'Success' },
-  { id: '8',  time: '07:58:12', actor: 'unknown',         ip: '203.0.113.42',  action: 'Brute Force Detected',            type: 'Threat',   status: 'Failed'  },
-  { id: '9',  time: '07:45:00', actor: 'sys_admin_vance', ip: '10.0.0.1',      action: 'User Role Permission Changed',    type: 'Auth',     status: 'Success' },
-  { id: '10', time: '07:30:18', actor: 'k_lee_admin',     ip: '10.0.0.5',      action: 'Config File Modified',            type: 'System',   status: 'Warning' },
-  { id: '11', time: '07:15:44', actor: 'unknown',         ip: '198.51.100.7',  action: 'Port Scan Detected',              type: 'Threat',   status: 'Failed'  },
-  { id: '12', time: '07:00:00', actor: 'auto_bot_04',     ip: '10.0.0.8',      action: 'Log Rotation Completed',          type: 'System',   status: 'Success' },
-  { id: '13', time: '06:45:33', actor: 'r_chen_sec',      ip: '10.0.0.11',     action: '2FA Policy Enforced',             type: 'Security', status: 'Success' },
-  { id: '14', time: '06:30:21', actor: 'unknown',         ip: '203.0.113.99',  action: 'SQL Injection Attempt Blocked',   type: 'Threat',   status: 'Failed'  },
-  { id: '15', time: '06:10:09', actor: 'sys_admin_vance', ip: '10.0.0.1',      action: 'System Patch Applied',            type: 'System',   status: 'Success' },
-];
 
 const FILTERS = ['All', 'Success', 'Warning', 'Failed'];
 const TYPES   = ['All Types', 'Auth', 'Security', 'System', 'Threat'];
@@ -84,6 +68,9 @@ const LogRow = ({ item, onPress }) => {
   const { colors } = useContext(ThemeContext);
   const s = STATUS_CONFIG[item.status];
   const t = TYPE_CONFIG[item.type] || TYPE_CONFIG.System;
+  const time = item.createdAt
+    ? new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : item.time || '';
   return (
     <TouchableOpacity style={[logStyles.row, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => onPress(item)} activeOpacity={0.75}>
       <View style={[logStyles.stripe, { backgroundColor: s.color }]} />
@@ -95,7 +82,7 @@ const LogRow = ({ item, onPress }) => {
           </View>
         </View>
         <View style={logStyles.bottomLine}>
-          <Text style={[logStyles.meta, { color: colors.textMuted }]}>{'clock'} {item.time}</Text>
+          <Text style={[logStyles.meta, { color: colors.textMuted }]}>{'clock'} {time}</Text>
           <Text style={[logStyles.meta, { color: colors.textMuted }]}>{'user'} {item.actor}</Text>
           <Text style={[logStyles.meta, { color: colors.textMuted }]}>{'ip'} {item.ip}</Text>
           <View style={[logStyles.typeBadge, { backgroundColor: t.bg }]}>
@@ -184,7 +171,7 @@ const DetailModal = ({ log, onClose }) => {
         <View style={[modalStyles.header, { borderBottomColor: s.color }]}>
           <View style={{ flex: 1 }}>
             <Text style={[modalStyles.headerTitle, { color: colors.textPrim }]}>Log Details</Text>
-            <Text style={[modalStyles.headerSub, { color: colors.textMuted }]}>Event ID #{String(log.id).padStart(6, '0')}</Text>
+            <Text style={[modalStyles.headerSub, { color: colors.textMuted }]}>Event ID #{String(log._id || log.id).slice(-6)}</Text>
           </View>
           <TouchableOpacity style={[modalStyles.closeBtn, { backgroundColor: colors.surfaceAlt }]} onPress={close}>
             <Text style={[modalStyles.closeBtnText, { color: colors.textSec }]}>X</Text>
@@ -197,7 +184,7 @@ const DetailModal = ({ log, onClose }) => {
 
         <ScrollView showsVerticalScrollIndicator={false}>
           <Field label="ACTION"     value={log.action} colors={colors} />
-          <Field label="TIMESTAMP"  value={log.time} colors={colors} />
+          <Field label="TIMESTAMP"  value={log.createdAt ? new Date(log.createdAt).toLocaleString() : log.time} colors={colors} />
           <Field label="ACTOR"      value={log.actor} colors={colors} />
           <Field label="IP ADDRESS" value={log.ip} colors={colors} />
           <Field label="EVENT TYPE" value={log.type}   valueColor={t.color} colors={colors} />
@@ -298,34 +285,73 @@ const modalStyles = StyleSheet.create({
 // Main Screen
 export default function SecurityLogsScreen() {
   const { colors } = useContext(ThemeContext);
+  const [logs, setLogs]                 = useState([]);
+  const [loading, setLoading]           = useState(true);
+  const [refreshing, setRefreshing]     = useState(false);
+  const [error, setError]               = useState(null);
   const [search, setSearch]             = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [typeFilter, setTypeFilter]     = useState('All Types');
   const [selectedLog, setSelectedLog]   = useState(null);
+  const [counts, setCounts]             = useState({ total: 0, success: 0, warning: 0, failed: 0, threats: 0 });
   const headerAnim = useRef(new Animated.Value(0)).current;
+  const searchTimer = useRef(null);
+
+  // Debounce search input
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 500);
+    return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
+  }, [search]);
+
+  const fetchLogs = useCallback(async (opts = {}) => {
+    const { silent = false } = opts;
+    try {
+      if (!silent) setLoading(true);
+      if (silent) setRefreshing(true);
+      setError(null);
+      const params = {};
+      if (statusFilter !== 'All') params.status = statusFilter;
+      if (typeFilter !== 'All Types') params.type = typeFilter;
+      if (debouncedSearch) params.search = debouncedSearch;
+
+      const [logsRes, summaryRes] = await Promise.all([
+        axiosInstance.get('/admins/security-logs', { params }),
+        axiosInstance.get('/admins/security-logs/summary', { params }),
+      ]);
+
+      setLogs(logsRes.data.logs || []);
+      setCounts(summaryRes.data);
+    } catch (err) {
+      console.error('Failed to fetch security logs:', err);
+      const msg = err?.response?.data?.error || err?.response?.data?.message || err?.message || 'Failed to fetch logs';
+      setError(msg);
+    } finally {
+      if (!silent) setLoading(false);
+      if (silent) setRefreshing(false);
+    }
+  }, [statusFilter, typeFilter, debouncedSearch]);
+
+  useEffect(() => {
+    fetchLogs();
+  }, [fetchLogs]);
+
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      fetchLogs({ silent: true });
+    }, 3000);
+
+    return () => clearInterval(intervalId);
+  }, [fetchLogs]);
 
   useEffect(() => {
     Animated.timing(headerAnim, { toValue: 1, duration: 600, useNativeDriver: true }).start();
   }, []);
 
-  const filtered = LOGS.filter((l) => {
-    const q = search.toLowerCase();
-    const matchSearch = q === '' ||
-      l.action.toLowerCase().includes(q) ||
-      l.actor.toLowerCase().includes(q) ||
-      l.ip.includes(q);
-    const matchStatus = statusFilter === 'All' || l.status === statusFilter;
-    const matchType   = typeFilter === 'All Types' || l.type === typeFilter;
-    return matchSearch && matchStatus && matchType;
-  });
-
-  const counts = {
-    total:   LOGS.length,
-    success: LOGS.filter(l => l.status === 'Success').length,
-    warning: LOGS.filter(l => l.status === 'Warning').length,
-    failed:  LOGS.filter(l => l.status === 'Failed').length,
-    threats: LOGS.filter(l => l.type === 'Threat').length,
-  };
+  const filtered = logs;
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.bg }]}>
@@ -340,8 +366,12 @@ export default function SecurityLogsScreen() {
             <Text style={[styles.headerTitle, { color: colors.textPrim }]}>Security Logs</Text>
             <Text style={[styles.headerSub, { color: colors.textMuted }]}>Real-time audit trail  {counts.total} events today</Text>
           </View>
-          <TouchableOpacity style={[styles.exportAllBtn, { backgroundColor: colors.accentBlue + '26', borderColor: colors.accentBlue + '59' }]}>
-            <Text style={[styles.exportAllText, { color: colors.accentBlue }]}>Export All</Text>
+          <TouchableOpacity
+            style={[styles.exportAllBtn, { backgroundColor: colors.accentBlue + '26', borderColor: colors.accentBlue + '59' }]}
+            onPress={() => fetchLogs({ silent: true })}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.exportAllText, { color: colors.accentBlue }]}>{refreshing ? 'Refreshing...' : 'Refresh'}</Text>
           </TouchableOpacity>
         </Animated.View>
 
@@ -446,7 +476,12 @@ export default function SecurityLogsScreen() {
         </View>
 
         {/* Log List */}
-        {filtered.length === 0 ? (
+        {loading ? (
+          <View style={styles.emptyState}>
+            <ActivityIndicator size="large" color={colors.accentBlue} />
+            <Text style={[styles.emptySub, { color: colors.textMuted, marginTop: 12 }]}>Loading security logs...</Text>
+          </View>
+        ) : filtered.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyIcon}>🔍</Text>
             <Text style={[styles.emptyTitle, { color: colors.textPrim }]}>No logs found</Text>
@@ -454,7 +489,7 @@ export default function SecurityLogsScreen() {
           </View>
         ) : (
           filtered.map((item) => (
-            <LogRow key={item.id} item={item} onPress={setSelectedLog} />
+            <LogRow key={item._id || item.id} item={item} onPress={setSelectedLog} />
           ))
         )}
       </ScrollView>

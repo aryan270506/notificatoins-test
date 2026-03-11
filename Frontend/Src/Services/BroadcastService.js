@@ -3,9 +3,7 @@
 // Handles all broadcast-related API calls from Frontend
 // ============================================================
 
-import axios from 'axios';
-
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
+import axiosInstance from '../Axios';
 
 const BroadcastService = {
   
@@ -17,8 +15,8 @@ const BroadcastService = {
    */
   sendMessage: async (messageData) => {
     try {
-      const response = await axios.post(
-        `${API_BASE_URL}/messages/save`,
+      const response = await axiosInstance.post(
+        '/messages/save',
         messageData
       );
       return response.data;
@@ -35,8 +33,8 @@ const BroadcastService = {
    */
   getMessages: async () => {
     try {
-      const response = await axios.get(
-        `${API_BASE_URL}/messages`
+      const response = await axiosInstance.get(
+        '/messages'
       );
       return response.data;
     } catch (error) {
@@ -53,8 +51,8 @@ const BroadcastService = {
    */
   getMessageById: async (messageId) => {
     try {
-      const response = await axios.get(
-        `${API_BASE_URL}/messages/${messageId}`
+      const response = await axiosInstance.get(
+        `/messages/${messageId}`
       );
       return response.data;
     } catch (error) {
@@ -71,10 +69,7 @@ const BroadcastService = {
    */
   getMessagesByRecipient: async (filters) => {
     try {
-      const queryParams = new URLSearchParams(filters);
-      const response = await axios.get(
-        `${API_BASE_URL}/messages/filter/by-recipient?${queryParams.toString()}`
-      );
+      const response = await axiosInstance.get('/messages/filter/by-recipient', { params: filters });
       return response.data;
     } catch (error) {
       console.error('Error fetching filtered messages:', error);
@@ -90,8 +85,8 @@ const BroadcastService = {
    */
   getMessagesBySender: async (senderId) => {
     try {
-      const response = await axios.get(
-        `${API_BASE_URL}/messages/sender/${senderId}`
+      const response = await axiosInstance.get(
+        `/messages/sender/${senderId}`
       );
       return response.data;
     } catch (error) {
@@ -109,8 +104,8 @@ const BroadcastService = {
    */
   updateMessageStatus: async (messageId, statusData) => {
     try {
-      const response = await axios.put(
-        `${API_BASE_URL}/messages/status/${messageId}`,
+      const response = await axiosInstance.put(
+        `/messages/status/${messageId}`,
         statusData
       );
       return response.data;
@@ -128,8 +123,8 @@ const BroadcastService = {
    */
   deleteMessage: async (messageId) => {
     try {
-      const response = await axios.delete(
-        `${API_BASE_URL}/messages/${messageId}`
+      const response = await axiosInstance.delete(
+        `/messages/${messageId}`
       );
       return response.data;
     } catch (error) {

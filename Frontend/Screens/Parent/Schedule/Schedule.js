@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,41 +7,8 @@ import {
   StyleSheet,
 } from 'react-native';
 import { useTheme } from '../Dashboard/Dashboard';
-
-// ─── Data ─────────────────────────────────────────────────────────────────────
-const getSchedule = (C) => [
-  {
-    day: 'MON', date: 'OCT 23',
-    events: [
-      { id: 'mon1', title: 'Advanced Calculus', startTime: '10:30', endTime: '11:30 AM', accentColor: C.blueLight },
-      { id: 'mon2', title: 'Physics Lab', startTime: '01:15', endTime: '03:15 PM', type: 'LAB', location: 'Science Wing 4', accentColor: '#6366f1' },
-    ],
-  },
-  {
-    day: 'TUE', date: 'OCT 24',
-    events: [
-      { id: 'tue1', title: 'Data Structures Lab', startTime: '10:30', endTime: '12:30 PM', type: 'LAB', hasJoinButton: true, accentColor: C.teal },
-    ],
-  },
-  {
-    day: 'WED', date: 'OCT 25',
-    events: [
-      { id: 'wed1', title: 'System Arch.', startTime: '1:15', endTime: '2:15 PM', accentColor: C.blueLight },
-    ],
-  },
-  {
-    day: 'THU', date: 'OCT 26',
-    events: [
-      { id: 'thu1', title: 'Database Lab', startTime: '10:30', endTime: '12:30 PM', type: 'LAB', accentColor: C.teal },
-    ],
-  },
-  {
-    day: 'FRI', date: 'OCT 27',
-    events: [
-      { id: 'fri1', title: 'Research Lab', startTime: '03:30', endTime: '05:30 PM', type: 'LAB', accentColor: C.blueLight },
-    ],
-  },
-];
+import axiosInstance from '../../../Src/Axios';
+import AsyncStorage from '@react-native-async-storage/async-storage'; 
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 const LabBadge = ({ color }) => (
@@ -50,138 +17,173 @@ const LabBadge = ({ color }) => (
   </View>
 );
 
-const ClassCard = ({ event, isActive, compact, C, s }) => (
-  <View style={[s.classCard, { borderLeftColor: event.accentColor }, isActive && s.classCardActive, compact && s.classCardCompact]}>
-    <View style={s.classCardHeader}>
-      <Text style={[s.classTitle, compact && s.classTitleCompact]} numberOfLines={compact ? 2 : 1}>
-        {event.title}
-      </Text>
-      {event.type === 'LAB' && <LabBadge color={event.accentColor} />}
-    </View>
-    <Text style={[s.classTime, compact && s.classTimeCompact]}>
-      {event.startTime} – {event.endTime}
-    </Text>
-    {event.location && !compact && (
-      <View style={s.locationRow}>
-        <Text style={s.locationPin}>📍</Text>
-        <Text style={[s.locationText, { color: event.accentColor }]}>{event.location}</Text>
-      </View>
-    )}
-    {event.hasJoinButton && !compact && (
-      <TouchableOpacity style={[s.joinBtn, { backgroundColor: event.accentColor }]}>
-        <Text style={s.joinBtnText}>Join Class</Text>
-      </TouchableOpacity>
-    )}
-  </View>
-);
+// ─── Weekly Grid (from Backend Data) ──────────────────────────────────────────
+const WeeklyGridFromData = ({ colWidth, timeColWidth, C, s, timetable }) => {
+  const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const DAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const SLOT_TIMES = {
+    t1: { startTime: '10:30', endTime: '11:30', label: '10:30 AM' },
+    t2: { startTime: '11:30', endTime: '12:30', label: '11:30 AM' },
+    t3: { startTime: '1:15', endTime: '2:15', label: '01:15 PM' },
+    t4: { startTime: '2:15', endTime: '3:15', label: '02:15 PM' },
+    t5: { startTime: '3:30', endTime: '4:30', label: '03:30 PM' },
+    t6: { startTime: '4:30', endTime: '5:30', label: '04:30 PM' },
+  };
 
-// ─── Weekly Grid ──────────────────────────────────────────────────────────────
-const WeeklyGrid = ({ colWidth, timeColWidth, C, s }) => {
-  const SCHEDULE = getSchedule(C);
+  const colorMap = {
+    teal: C.teal,
+    blue: C.blueLight,
+    purple: '#a78bfa',
+    orange: C.orange,
+    green: '#22c55e',
+    pink: '#f472b6',
+  };
+
+  const renderSlot = (day, slotId) => {
+    if (!timetable?.[day]?.[slotId]) {
+      return null;
+    }
+    
+    const slot = timetable[day][slotId];
+    const isLab = slot.subject.toLowerCase().includes('lab');
+    const times = SLOT_TIMES[slotId];
+    const accentColor = colorMap[slot.color] || C.teal;
+
+    return (
+      <View style={[s.classCard, { borderLeftColor: accentColor }]}>
+        <View style={s.classCardHeader}>
+          <Text style={[s.classTitle, { flex: 1 }]} numberOfLines={2}>
+            {slot.subject}
+          </Text>
+          {isLab && <LabBadge color={accentColor} />}
+        </View>
+        <Text style={s.classTime}>
+          {times.startTime} – {times.endTime}
+        </Text>
+        {slot.room && (
+          <View style={s.locationRow}>
+            <Text style={s.locationPin}>📍</Text>
+            <Text style={[s.locationText, { color: accentColor }]}>{slot.room}</Text>
+          </View>
+        )}
+        {slot.teacherName && (
+          <Text style={[s.classTime, { fontSize: 8, marginTop: 4 }]}>
+            👨‍🏫 {slot.teacherName}
+          </Text>
+        )}
+      </View>
+    );
+  };
+
   return (
     <View>
       <View style={s.gridHeader}>
         <View style={[s.timeCol, { width: timeColWidth }]}>
           <Text style={s.timeColLabel}>TIME</Text>
         </View>
-        {SCHEDULE.map((day, i) => (
-          <View key={day.day} style={[s.dayHeaderCol, { width: colWidth }, i === 1 && s.dayHeaderActive]}>
-            <Text style={[s.dayHeaderDay, i === 1 && s.dayHeaderDayActive]}>{day.day}</Text>
-            <Text style={[s.dayHeaderDate, i === 1 && s.dayHeaderDateActive]}>{day.date}</Text>
+        {DAYS.map((day, i) => (
+          <View key={day} style={[s.dayHeaderCol, { width: colWidth }, i === 1 && s.dayHeaderActive]}>
+            <Text style={[s.dayHeaderDay, i === 1 && s.dayHeaderDayActive]}>{DAY_SHORT[i]}</Text>
+            <Text style={[s.dayHeaderDate, i === 1 && s.dayHeaderDateActive]}>—</Text>
           </View>
         ))}
       </View>
 
-      {/* 10:00 AM */}
-      <View style={s.timeRow}>
-        <View style={[s.timeCol, { width: timeColWidth }]}>
-          <Text style={s.timeLabel}>10:00 AM</Text>
-        </View>
-        {SCHEDULE.map((day) => (
-          <View key={day.day} style={[s.cellBlock, { width: colWidth }]} />
-        ))}
-      </View>
-
-      {/* 10:30 AM */}
-      <View style={s.timeRow}>
-        <View style={[s.timeCol, { width: timeColWidth }]}>
-          <Text style={s.timeLabel}>10:30 AM</Text>
-        </View>
-        {SCHEDULE.map((day) => {
-          const evt = day.events.find((e) => e.startTime === '10:30');
-          return (
-            <View key={day.day} style={[s.cellBlock, { width: colWidth }]}>
-              {evt && <ClassCard event={evt} isActive={day.day === 'TUE'} compact={colWidth < 100} C={C} s={s} />}
+      {Object.keys(SLOT_TIMES).map((slotId) => {
+        const times = SLOT_TIMES[slotId];
+        return (
+          <View key={slotId} style={s.timeRow}>
+            <View style={[s.timeCol, { width: timeColWidth }]}>
+              <Text style={s.timeLabel}>{times.label}</Text>
             </View>
-          );
-        })}
-      </View>
-
-      <View style={s.breakRow}>
-        <Text style={s.breakText}>🍴  LUNCH BREAK  (12:30 – 1:15)</Text>
-      </View>
-
-      {/* 1:15 PM */}
-      <View style={s.timeRow}>
-        <View style={[s.timeCol, { width: timeColWidth }]}>
-          <Text style={s.timeLabel}>01:15 PM</Text>
-        </View>
-        {SCHEDULE.map((day) => {
-          const evt = day.events.find((e) => e.startTime === '01:15' || e.startTime === '1:15');
-          return (
-            <View key={day.day} style={[s.cellBlock, { width: colWidth }]}>
-              {evt && <ClassCard event={evt} compact={colWidth < 100} C={C} s={s} />}
-            </View>
-          );
-        })}
-      </View>
-
-      <View style={[s.breakRow, { backgroundColor: 'transparent' }]}>
-        <Text style={[s.breakText, { fontSize: 10 }]}>SHORT BREAK  (3:15 – 3:30)</Text>
-      </View>
-
-      {/* 3:30 PM */}
-      <View style={s.timeRow}>
-        <View style={[s.timeCol, { width: timeColWidth }]}>
-          <Text style={s.timeLabel}>03:30 PM</Text>
-        </View>
-        {SCHEDULE.map((day) => {
-          const evt = day.events.find((e) => e.startTime === '03:30');
-          return (
-            <View key={day.day} style={[s.cellBlock, { width: colWidth }]}>
-              {evt && <ClassCard event={evt} compact={colWidth < 100} C={C} s={s} />}
-            </View>
-          );
-        })}
-      </View>
+            {DAYS.map((day) => (
+              <View key={`${day}-${slotId}`} style={[s.cellBlock, { width: colWidth }]}>
+                {renderSlot(day, slotId)}
+              </View>
+            ))}
+          </View>
+        );
+      })}
 
       <View style={{ height: 40 }} />
     </View>
   );
 };
 
-// ─── Daily/List View ──────────────────────────────────────────────────────────
-const DailyList = ({ C, s }) => {
-  const SCHEDULE = getSchedule(C);
+// ─── Daily List (from Backend Data) ─────────────────────────────────────────
+const DailyListFromData = ({ C, s, timetable }) => {
+  const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const SLOT_TIMES = {
+    t1: { startTime: '10:30', endTime: '11:30 AM' },
+    t2: { startTime: '11:30', endTime: '12:30 PM' },
+    t3: { startTime: '1:15', endTime: '2:15 PM' },
+    t4: { startTime: '2:15', endTime: '3:15 PM' },
+    t5: { startTime: '3:30', endTime: '4:30 PM' },
+    t6: { startTime: '4:30', endTime: '5:30 PM' },
+  };
+
+  const colorMap = {
+    teal: C.teal,
+    blue: C.blueLight,
+    purple: '#a78bfa',
+    orange: C.orange,
+    green: '#22c55e',
+    pink: '#f472b6',
+  };
+
   return (
     <ScrollView contentContainerStyle={{ padding: 16, gap: 20 }}>
-      {SCHEDULE.map((day) => (
-        <View key={day.day}>
+      {DAYS.map((day) => (
+        <View key={day}>
           <View style={s.listDayHeader}>
-            <Text style={s.listDayLabel}>{day.day}</Text>
-            <Text style={s.listDayDate}>{day.date}</Text>
+            <Text style={s.listDayLabel}>{day}</Text>
+            <Text style={s.listDayDate}>—</Text>
           </View>
           <View style={{ gap: 8, marginTop: 8 }}>
-            {day.events.length > 0
-              ? day.events.map((evt) => <ClassCard key={evt.id} event={evt} C={C} s={s} />)
-              : <Text style={{ color: C.muted, fontSize: 13, fontStyle: 'italic', paddingLeft: 4 }}>No classes</Text>
-            }
+            {!timetable?.[day] ? (
+              <Text style={{ color: C.muted, fontSize: 13, fontStyle: 'italic', paddingLeft: 4 }}>No classes</Text>
+            ) : (
+              Object.keys(timetable[day]).map((slotId) => {
+                const slot = timetable[day][slotId];
+                if (!slot) return null;
+
+                const isLab = slot.subject.toLowerCase().includes('lab');
+                const times = SLOT_TIMES[slotId];
+                const accentColor = colorMap[slot.color] || C.teal;
+
+                return (
+                  <View key={slotId} style={[s.classCard, { borderLeftColor: accentColor }]}>
+                    <View style={s.classCardHeader}>
+                      <Text style={[s.classTitle]} numberOfLines={2}>
+                        {slot.subject}
+                      </Text>
+                      {isLab && <LabBadge color={accentColor} />}
+                    </View>
+                    <Text style={s.classTime}>
+                      {times.startTime} – {times.endTime}
+                    </Text>
+                    {slot.room && (
+                      <View style={s.locationRow}>
+                        <Text style={s.locationPin}>📍</Text>
+                        <Text style={[s.locationText, { color: accentColor }]}>{slot.room}</Text>
+                      </View>
+                    )}
+                    {slot.teacherName && (
+                      <Text style={[s.classTime, { fontSize: 8, marginTop: 4 }]}>
+                        👨‍🏫 {slot.teacherName}
+                      </Text>
+                    )}
+                  </View>
+                );
+              })
+            )}
           </View>
         </View>
       ))}
     </ScrollView>
   );
 };
+
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function ParentSchedule({ onMenuOpen }) {
@@ -190,11 +192,110 @@ export default function ParentSchedule({ onMenuOpen }) {
 
   const [viewMode] = useState('Weekly');
   const [containerWidth, setContainerWidth] = useState(0);
+  const [timetableData, setTimetableData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const timeColWidth = containerWidth < 400 ? 58 : 80;
+  useEffect(() => {
+    fetchTimetable();
+  }, []);
+
+const fetchTimetable = async () => {
+  try {
+    setLoading(true);
+    setError(null);
+
+    // ── Read every possible key that login.js might have saved ───────────────
+    const parentId =
+      (await AsyncStorage.getItem('parentId')) ||
+      (await AsyncStorage.getItem('userId'));
+
+    console.log("🔑 parentId from storage:", parentId);
+
+    if (!parentId) {
+      setError("Parent ID not found. Please log in again.");
+      return;
+    }
+
+    const response = await axiosInstance.get(`/timetable/parent/${parentId}`);
+    console.log("RESPONSE:", response.data);
+
+    if (response.data?.success) {
+      setTimetableData(response.data.data);
+    } else {
+      setError(response.data?.message || "Failed to fetch timetable");
+    }
+
+  } catch (err) {
+    console.log("FULL ERROR:", err.response?.data);
+    console.log("STATUS:", err.response?.status);
+    if (err.response?.status === 404) {
+      setError("Timetable not found for your child's class.");
+    } else {
+      setError(err.response?.data?.message || err.message);
+    }
+  } finally {
+    setLoading(false);
+  }
+};
+
+  // Helper: Convert timetable slot data to event format for rendering
+  const convertTimetableToEvents = () => {
+    if (!timetableData?.timetable) return [];
+    
+    const tt = timetableData.timetable;
+    const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const SLOT_TIMES = {
+      t1: { startTime: '10:30', endTime: '11:30 AM' },
+      t2: { startTime: '11:30', endTime: '12:30 PM' },
+      t3: { startTime: '1:15', endTime: '2:15 PM' },
+      t4: { startTime: '2:15', endTime: '3:15 PM' },
+      t5: { startTime: '3:30', endTime: '4:30 PM' },
+      t6: { startTime: '4:30', endTime: '5:30 PM' },
+    };
+
+    const events = [];
+    const colorMap = {
+      teal: C.teal,
+      blue: C.blueLight,
+      purple: '#a78bfa',
+      orange: C.orange,
+      green: '#22c55e',
+      pink: '#f472b6',
+    };
+
+    DAYS.forEach((day) => {
+      if (!tt[day]) return;
+      
+      Object.keys(tt[day]).forEach((slotId) => {
+        const slot = tt[day][slotId];
+        if (!slot) return;
+
+        const times = SLOT_TIMES[slotId] || { startTime: '', endTime: '' };
+        const isLab = slot.subject.toLowerCase().includes('lab');
+
+        events.push({
+          id: `${day}-${slotId}`,
+          day: day.substring(0, 3).toUpperCase(),
+          title: slot.subject,
+          startTime: times.startTime,
+          endTime: times.endTime,
+          type: isLab ? 'LAB' : undefined,
+          location: slot.room || undefined,
+          accentColor: colorMap[slot.color] || C.teal,
+          teacherName: slot.teacherName,
+        });
+      });
+    });
+
+    return events;
+  };
+
+  const isMobile = containerWidth < 768;
+  const timeColWidth = containerWidth < 400 ? 50 : 70;
   const colWidth = containerWidth > 0
-    ? Math.max(80, (containerWidth - timeColWidth) / 5)
-    : 120;
+    ? Math.max(isMobile ? 70 : 80, (containerWidth - timeColWidth) / 5)
+    : 110;
 
   return (
     <View
@@ -210,7 +311,7 @@ export default function ParentSchedule({ onMenuOpen }) {
             activeOpacity={0.7}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Text style={{ fontSize: 24, color: C.white }}>☰</Text>
+            <Text style={{ fontSize: 24, color: C.white }}></Text>
           </TouchableOpacity>
         )}
 
@@ -220,13 +321,15 @@ export default function ParentSchedule({ onMenuOpen }) {
           {containerWidth > 500 && (
             <View style={s.profilePill}>
               <View>
-                <Text style={{ color: C.white, fontSize: 13, fontWeight: '600', textAlign: 'right' }}></Text>
+                <Text style={{ color: C.white, fontSize: 13, fontWeight: '600', textAlign: 'right' }}>
+                  {loading ? 'Loading...' : timetableData?.studentName || 'Schedule'}
+                </Text>
                <Text
                     style={{
                       color: C.white,
                       fontSize: 22,
                       textAlign: 'right',
-                      fontWeight: '800',   // 🔥 bold
+                      fontWeight: '800',
                     }}
                   >
                     Schedule
@@ -246,20 +349,47 @@ export default function ParentSchedule({ onMenuOpen }) {
             ACADEMIC YEAR 2023/24 / <Text style={{ color: C.teal, fontWeight: '700' }}>SEMESTER 1</Text>
           </Text>
           <Text style={s.pageTitle}>Weekly Timetable</Text>
-          <Text style={{ color: C.sub, fontSize: 12 }}>Week 12: Oct 23rd – Oct 27th</Text>
+          {error ? (
+            <Text style={{ color: C.orange, fontSize: 12 }}>❌ {error}</Text>
+          ) : (
+            <Text style={{ color: C.sub, fontSize: 12 }}>
+              {timetableData?.batch ? `Batch: ${timetableData.batch}` : 'Loading...'}
+            </Text>
+          )}
         </View>
       </View>
 
       {/* Schedule content */}
-      <View style={s.scheduleBody}>
-        {viewMode === 'Weekly' ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <WeeklyGrid colWidth={colWidth} timeColWidth={timeColWidth} C={C} s={s} />
-            </ScrollView>
-          </ScrollView>
+      <View style={[s.scheduleBody, isMobile && { paddingHorizontal: 0 }]}>
+        {loading ? (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+            <Text style={{ color: C.white }}>Loading timetable...</Text>
+          </View>
+        ) : error ? (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+            <Text style={{ color: C.red, textAlign: 'center' }}>{error}</Text>
+          </View>
         ) : (
-          <DailyList C={C} s={s} />
+          viewMode === 'Weekly' ? (
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={isMobile} 
+              scrollEventThrottle={16}
+              contentContainerStyle={isMobile && { minWidth: '100%' }}
+            >
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <WeeklyGridFromData 
+                  colWidth={colWidth} 
+                  timeColWidth={timeColWidth} 
+                  C={C} 
+                  s={s}
+                  timetable={timetableData?.timetable}
+                />
+              </ScrollView>
+            </ScrollView>
+          ) : (
+            <DailyListFromData C={C} s={s} timetable={timetableData?.timetable} />
+          )
         )}
       </View>
     </View>
@@ -300,49 +430,49 @@ function makeStyles(C) {
     breadcrumb: { color: C.sub, fontSize: 11, letterSpacing: 0.8, marginBottom: 4 },
     pageTitle: { color: C.white, fontSize: 22, fontWeight: '800', marginBottom: 2 },
 
-    scheduleBody: { flex: 1 },
+    scheduleBody: { flex: 1, overflow: 'hidden' },
 
     gridHeader: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: C.cardBorder },
-    timeCol: { paddingHorizontal: 10, paddingVertical: 10, justifyContent: 'center' },
-    timeColLabel: { color: C.sub, fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
+    timeCol: { paddingHorizontal: 8, paddingVertical: 8, justifyContent: 'center' },
+    timeColLabel: { color: C.sub, fontSize: 9, fontWeight: '700', letterSpacing: 0.4 },
     dayHeaderCol: {
-      paddingVertical: 10, paddingHorizontal: 6, alignItems: 'center',
+      paddingVertical: 8, paddingHorizontal: 4, alignItems: 'center',
       borderLeftWidth: 1, borderLeftColor: C.cardBorder,
     },
     dayHeaderActive: { borderBottomWidth: 2, borderBottomColor: C.teal },
-    dayHeaderDay: { color: C.sub, fontSize: 11, fontWeight: '700', letterSpacing: 1 },
+    dayHeaderDay: { color: C.sub, fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
     dayHeaderDayActive: { color: C.white },
-    dayHeaderDate: { color: C.muted, fontSize: 9, marginTop: 2 },
+    dayHeaderDate: { color: C.muted, fontSize: 8, marginTop: 1 },
     dayHeaderDateActive: { color: C.teal },
     timeRow: {
-      flexDirection: 'row', minHeight: 86,
+      flexDirection: 'row', minHeight: 80,
       borderBottomWidth: 1, borderBottomColor: C.cardBorder,
     },
-    timeLabel: { color: C.sub, fontSize: 9, paddingTop: 10, paddingHorizontal: 10 },
-    cellBlock: { borderLeftWidth: 1, borderLeftColor: C.cardBorder, padding: 5 },
+    timeLabel: { color: C.sub, fontSize: 8, paddingTop: 8, paddingHorizontal: 8 },
+    cellBlock: { borderLeftWidth: 1, borderLeftColor: C.cardBorder, padding: 4 },
     breakRow: {
-      backgroundColor: C.sidebar, paddingVertical: 8, paddingHorizontal: 20,
+      backgroundColor: C.sidebar, paddingVertical: 6, paddingHorizontal: 16,
       borderTopWidth: 1, borderBottomWidth: 1, borderColor: C.cardBorder, alignItems: 'center',
     },
-    breakText: { color: C.sub, fontSize: 10, letterSpacing: 1.5, fontWeight: '600' },
+    breakText: { color: C.sub, fontSize: 9, letterSpacing: 1, fontWeight: '600' },
 
     classCard: {
-      backgroundColor: C.card, borderRadius: 10,
-      padding: 9, borderLeftWidth: 3, flex: 1, gap: 3,
+      backgroundColor: C.card, borderRadius: 8,
+      padding: 8, borderLeftWidth: 3, flex: 1, gap: 2,
       borderWidth: 1, borderColor: C.cardBorder,
     },
     classCardActive: { borderColor: C.teal + '44' },
-    classCardCompact: { padding: 5 },
-    classCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 3 },
-    classTitle: { color: C.white, fontSize: 12, fontWeight: '700', flex: 1 },
-    classTitleCompact: { fontSize: 10 },
-    classTime: { color: C.sub, fontSize: 10 },
-    classTimeCompact: { fontSize: 9 },
-    locationRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 3 },
-    locationPin: { fontSize: 10 },
-    locationText: { fontSize: 10, fontWeight: '500' },
-    joinBtn: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, alignSelf: 'flex-start', marginTop: 5 },
-    joinBtnText: { color: '#fff', fontSize: 10, fontWeight: '700' },
+    classCardCompact: { padding: 4 },
+    classCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2 },
+    classTitle: { color: C.white, fontSize: 11, fontWeight: '700', flex: 1 },
+    classTitleCompact: { fontSize: 9 },
+    classTime: { color: C.sub, fontSize: 9 },
+    classTimeCompact: { fontSize: 8 },
+    locationRow: { flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 2 },
+    locationPin: { fontSize: 9 },
+    locationText: { fontSize: 9, fontWeight: '500' },
+    joinBtn: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 5, alignSelf: 'flex-start', marginTop: 4 },
+    joinBtnText: { color: '#fff', fontSize: 9, fontWeight: '700' },
 
     listDayHeader: {
       flexDirection: 'row', alignItems: 'baseline', gap: 10,

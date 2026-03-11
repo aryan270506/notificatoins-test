@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,9 @@ import {
   ScrollView,
   Alert,
   TextInput,
+  ActivityIndicator,
 } from 'react-native';
+import axiosInstance from '../../../Src/Axios';
 
 const C = {
   bg: '#0d1b3e',
@@ -89,35 +91,76 @@ function SubjectDonut({ percent, size = 36 }) {
   );
 }
 
-// Generate subject data for a student
-function generateSubjects(studentId) {
-  const subjectList = [
-    { name: 'DBMS', icon: '🗃️', iconBg: '#ff6b35' },
-    { name: 'Operating Systems', icon: '🖥️', iconBg: '#4f7cff' },
-    { name: 'Data Structures', icon: '⚙️', iconBg: '#8b6fff' },
-    { name: 'AI/ML Basics', icon: '🤖', iconBg: '#e74c3c' },
-    { name: 'Computer Networks', icon: '🌐', iconBg: '#2ecc71' },
-    { name: 'Software Engineering', icon: '📐', iconBg: '#f0a500' },
-  ];
-  // Use studentId as seed for reproducible "random" data
-  return subjectList.map((sub, i) => {
-    const seed = (studentId * 7 + i * 13) % 40;
-    const total = 40 + (i % 3) * 5; // 40–50 total classes
-    const attended = Math.min(total, 20 + seed);
-    const pct = Math.round((attended / total) * 100);
-    return { ...sub, total, attended, pct, id: i };
-  });
-}
+const SUBJECT_ICONS = {
+  'DBMS': { icon: '🗃️', iconBg: '#ff6b35' },
+  'Operating Systems': { icon: '🖥️', iconBg: '#4f7cff' },
+  'Data Structures': { icon: '⚙️', iconBg: '#8b6fff' },
+  'AI/ML Basics': { icon: '🤖', iconBg: '#e74c3c' },
+  'Computer Networks': { icon: '🌐', iconBg: '#2ecc71' },
+  'Software Engineering': { icon: '📐', iconBg: '#f0a500' },
+};
+const ICON_COLORS = ['#ff6b35', '#4f7cff', '#8b6fff', '#e74c3c', '#2ecc71', '#f0a500'];
 
 export default function StudentDetailScreen({ student, year, division, onBack }) {
-  const [subjects, setSubjects] = useState(() => generateSubjects(student?.id || 1));
-  const [editingSubject, setEditingSubject] = useState(null); // subject being edited
+  const [subjects, setSubjects] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editingSubject, setEditingSubject] = useState(null);
   const [editValue, setEditValue] = useState('');
   const [saved, setSaved] = useState(false);
 
-  const overallPct = Math.round(
+  useEffect(() => {
+    const fetchAttendance = async () => {
+      try {
+        setLoading(true);
+        // Fetch student profile, student attendance, and class sessions in parallel
+        const [profileRes, attRes, classRes] = await Promise.all([
+          axiosInstance.get(`/students/${student?.id}`).catch(() => null),
+          axiosInstance.get(`/attendance/student/${student?.id}`).catch(() => null),
+          axiosInstance.get(`/attendance/class?year=${year?.value || 1}&division=${division?.value || 'A'}`).catch(() => null),
+        ]);
+
+        // Build attendance map from student's own data
+        const attSummary = attRes?.data?.subjectSummary || [];
+        const attMap = {};
+        attSummary.forEach(s => { attMap[s.subject] = s; });
+
+        // Get subjects from student profile
+        const profile = profileRes?.data;
+        const theorySubjects = Array.isArray(profile?.subjects) ? profile.subjects : [];
+        const labSubjects = Array.isArray(profile?.lab) ? profile.lab : [];
+
+        // Also extract unique subjects from class attendance sessions
+        const classSessions = classRes?.data?.sessions || [];
+        const classSubjects = [...new Set(classSessions.map(s => s.subject))];
+
+        // Merge all subject sources, deduplicate
+        const allSubjectNames = [...new Set([...theorySubjects, ...labSubjects, ...classSubjects, ...attSummary.map(s => s.subject)])];
+
+        setSubjects(allSubjectNames.map((name, i) => {
+          const att = attMap[name];
+          const icons = SUBJECT_ICONS[name] || { icon: '📚', iconBg: ICON_COLORS[i % ICON_COLORS.length] };
+          return {
+            name,
+            icon: icons.icon,
+            iconBg: icons.iconBg,
+            total: att?.total || 0,
+            attended: att?.present || 0,
+            pct: att?.percentage || 0,
+            id: i,
+          };
+        }));
+      } catch (err) {
+        console.error('Error fetching student attendance:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchAttendance();
+  }, [student]);
+
+  const overallPct = subjects.length > 0 ? Math.round(
     subjects.reduce((sum, s) => sum + s.pct, 0) / subjects.length
-  );
+  ) : 0;
   const color = attColor(overallPct);
 
   // Update attended classes directly

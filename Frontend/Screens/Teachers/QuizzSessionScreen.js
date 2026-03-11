@@ -1,19 +1,21 @@
-// QuizzSessionScreen.js — Campus360
+// QuizzSessionScreen.js — UniVerse
 // Teacher view: publish quizzes, start live timer, students see OPEN state, end quiz
+// Backend integrated: GET /api/quizzes, PATCH /api/quizzes/:id/start, PATCH /api/quizzes/:id/end
 
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useContext } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Animated, Dimensions, Platform, StatusBar, Modal,
+  Animated, Dimensions, Platform, StatusBar, Modal, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useRoute } from '@react-navigation/native';
-import Quizresultscreen from './Quizresultscreen';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
+import axiosInstance from '../../Src/Axios'; // adjust path as needed
+import { ThemeContext } from './TeacherStack';
 
 const { width: W } = Dimensions.get('window');
 
 /* ─── Theme ─────────────────────────────────────────────────────────────── */
-const C = {
+const C_DARK = {
   bg:           '#07080F',
   surface:      '#0E1020',
   surfaceEl:    '#141728',
@@ -32,14 +34,26 @@ const C = {
   textMuted:    '#383F60',
   white:        '#ffffff',
 };
+const C_LIGHT = {
+  bg:           '#F1F4FD',
+  surface:      '#FFFFFF',
+  surfaceEl:    '#EAEEf9',
+  border:       '#DDE3F4',
+  accent:       '#D97706',
+  accentSoft:   'rgba(217,119,6,0.10)',
+  green:        '#059669',
+  greenSoft:    'rgba(5,150,105,0.10)',
+  greenGlow:    'rgba(5,150,105,0.12)',
+  red:          '#DC2626',
+  redSoft:      'rgba(220,38,38,0.10)',
+  blue:         '#4F46E5',
+  purple:       '#7C3AED',
+  textPrimary:  '#0F172A',
+  textSecondary:'#4B5563',
+  textMuted:    '#9CA3AF',
+  white:        '#ffffff',
+};
 const FONTS = { heading: Platform.OS === 'ios' ? 'Georgia' : 'serif' };
-
-/* ─── Seed data ─────────────────────────────────────────────────────────── */
-const INITIAL_QUIZZES = [
-  { id: 1, title: 'Thermodynamics Mid-Term Quiz', class: 'TY-B', subject: 'Physics',      questions: 20, duration: '30 min', status: 'ACTIVE',    statusColor: C.green,     submissions: 38, total: 45 },
-  { id: 2, title: 'Quantum Mechanics Chapter 3',  class: 'SY-A', subject: 'Physics',      questions: 15, duration: '20 min', status: 'SCHEDULED', statusColor: C.accent,    submissions: 0,  total: 52 },
-  { id: 3, title: 'Applied Mechanics Unit Test',  class: 'FY-C', subject: 'Engineering',  questions: 25, duration: '45 min', status: 'COMPLETED', statusColor: C.textMuted, submissions: 61, total: 61 },
-];
 
 /* ─── Helpers ───────────────────────────────────────────────────────────── */
 const pad = n => String(n).padStart(2, '0');
@@ -50,8 +64,15 @@ const formatElapsed = secs => {
   return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
 };
 
+/** Map raw DB status → UI color */
+const statusColorFn = (C, status) => ({
+  ACTIVE:    C.green,
+  SCHEDULED: C.accent,
+  COMPLETED: C.textMuted,
+}[status] ?? C.textMuted);
+
 /* ─── Pulsing live dot ───────────────────────────────────────────────────── */
-const PulseDot = ({ color = C.green, size = 10 }) => {
+const PulseDot = ({ color = '#059669', size = 10 }) => {
   const scale = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     Animated.loop(
@@ -74,7 +95,11 @@ const PulseDot = ({ color = C.green, size = 10 }) => {
 };
 
 /* ─── End-Quiz Confirmation Modal ───────────────────────────────────────── */
-const EndQuizModal = ({ visible, quiz, elapsed, onConfirm, onCancel }) => (
+const EndQuizModal = ({ visible, quiz, elapsed, onConfirm, onCancel, loading }) => {
+  const { isDark } = useContext(ThemeContext);
+  const C = isDark ? C_DARK : C_LIGHT;
+  const em = makeEm(C);
+  return (
   <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
     <View style={em.overlay}>
       <View style={em.sheet}>
@@ -107,26 +132,37 @@ const EndQuizModal = ({ visible, quiz, elapsed, onConfirm, onCancel }) => (
         )}
 
         <View style={em.btnRow}>
-          <TouchableOpacity style={em.cancelBtn} onPress={onCancel} activeOpacity={0.8}>
+          <TouchableOpacity style={em.cancelBtn} onPress={onCancel} activeOpacity={0.8} disabled={loading}>
             <Text style={em.cancelText}>Keep Running</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={em.confirmBtn} onPress={onConfirm} activeOpacity={0.8}>
-            <Ionicons name="stop-circle-outline" size={16} color={C.white} />
-            <Text style={em.confirmText}>End Quiz</Text>
+          <TouchableOpacity style={em.confirmBtn} onPress={onConfirm} activeOpacity={0.8} disabled={loading}>
+            {loading
+              ? <ActivityIndicator size="small" color={C.white} />
+              : <>
+                  <Ionicons name="stop-circle-outline" size={16} color={C.white} />
+                  <Text style={em.confirmText}>End Quiz</Text>
+                </>
+            }
           </TouchableOpacity>
         </View>
       </View>
     </View>
   </Modal>
-);
+  );
+};
 
 /* ─── Quiz Card ─────────────────────────────────────────────────────────── */
-const QuizCard = ({ quiz, elapsed, onStart, onEndPress, onEdit, onResults }) => {
+const QuizCard = ({ quiz, elapsed, onStart, onEndPress, onEdit, startLoading }) => {
+  const { isDark } = useContext(ThemeContext);
+  const C = isDark ? C_DARK : C_LIGHT;
+  const qc = makeQc(C);
+  const statusColor = (status) => statusColorFn(C, status);
   const navigation = useNavigation();
   const isActive    = quiz.status === 'ACTIVE';
   const isScheduled = quiz.status === 'SCHEDULED';
   const isDone      = quiz.status === 'COMPLETED';
   const pct         = quiz.total > 0 ? (quiz.submissions / quiz.total) * 100 : 0;
+  const color       = statusColor(quiz.status);
 
   const cardAnim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -142,7 +178,6 @@ const QuizCard = ({ quiz, elapsed, onStart, onEndPress, onEdit, onResults }) => 
         transform: [{ translateY: cardAnim.interpolate({ inputRange: [0,1], outputRange: [16,0] }) }],
       },
     ]}>
-      {/* Green top accent bar when ACTIVE */}
       {isActive && <View style={qc.activeBar} />}
 
       {/* ── Title row ── */}
@@ -151,7 +186,7 @@ const QuizCard = ({ quiz, elapsed, onStart, onEndPress, onEdit, onResults }) => 
           <Text style={qc.title} numberOfLines={2}>{quiz.title}</Text>
           <View style={qc.metaRow}>
             <Ionicons name="school-outline" size={11} color={C.textMuted} />
-            <Text style={qc.meta}>{quiz.class}</Text>
+            <Text style={qc.meta}>{quiz.class || '—'}</Text>
             {quiz.subject
               ? <><Text style={qc.dot}>·</Text><Text style={qc.meta}>{quiz.subject}</Text></>
               : null}
@@ -164,13 +199,13 @@ const QuizCard = ({ quiz, elapsed, onStart, onEndPress, onEdit, onResults }) => 
           </View>
         </View>
 
-        <View style={[qc.statusPill, { backgroundColor: quiz.statusColor + '20', borderColor: quiz.statusColor + '55' }]}>
-          {isActive ? <PulseDot color={C.green} size={8} /> : <View style={[qc.statusDot, { backgroundColor: quiz.statusColor }]} />}
-          <Text style={[qc.statusText, { color: quiz.statusColor }]}>{quiz.status}</Text>
+        <View style={[qc.statusPill, { backgroundColor: color + '20', borderColor: color + '55' }]}>
+          {isActive ? <PulseDot color={C.green} size={8} /> : <View style={[qc.statusDot, { backgroundColor: color }]} />}
+          <Text style={[qc.statusText, { color }]}>{quiz.status}</Text>
         </View>
       </View>
 
-      {/* ── ACTIVE: live timer + open indicator ── */}
+      {/* ── ACTIVE: live timer ── */}
       {isActive && (
         <View style={qc.timerBlock}>
           <View style={qc.timerSide}>
@@ -193,13 +228,11 @@ const QuizCard = ({ quiz, elapsed, onStart, onEndPress, onEdit, onResults }) => 
       {isActive && (
         <View style={qc.progressWrap}>
           <View style={qc.progressHeader}>
-            <Text style={qc.progressLabel}>
-              Submissions
-            </Text>
+            <Text style={qc.progressLabel}>Submissions</Text>
             <Text style={qc.progressFraction}>{quiz.submissions} / {quiz.total}</Text>
           </View>
           <View style={qc.track}>
-            <Animated.View style={[qc.fill, { width: `${pct}%` }]} />
+            <View style={[qc.fill, { width: `${pct}%` }]} />
           </View>
           <Text style={qc.progressPct}>{Math.round(pct)}% of students submitted</Text>
         </View>
@@ -219,8 +252,8 @@ const QuizCard = ({ quiz, elapsed, onStart, onEndPress, onEdit, onResults }) => 
       {isDone && (
         <View style={qc.doneBlock}>
           {[
-            { icon: 'checkmark-circle-outline', val: quiz.submissions,                                     label: 'Submitted', color: C.green  },
-            { icon: 'close-circle-outline',     val: Math.max(0, quiz.total - quiz.submissions),           label: 'Missed',    color: C.red    },
+            { icon: 'checkmark-circle-outline', val: quiz.submissions, label: 'Submitted', color: C.green  },
+            { icon: 'close-circle-outline',     val: Math.max(0, quiz.total - quiz.submissions), label: 'Missed', color: C.red },
             { icon: 'analytics-outline',        val: `${quiz.total > 0 ? Math.round((quiz.submissions/quiz.total)*100) : 0}%`, label: 'Rate', color: C.purple },
           ].map((s, i) => (
             <React.Fragment key={s.label}>
@@ -244,9 +277,14 @@ const QuizCard = ({ quiz, elapsed, onStart, onEndPress, onEdit, onResults }) => 
           </TouchableOpacity>
         )}
         {isScheduled && (
-          <TouchableOpacity style={qc.startBtn} onPress={onStart} activeOpacity={0.8}>
-            <Ionicons name="play-circle-outline" size={15} color={C.white} />
-            <Text style={qc.startBtnText}>Start Now</Text>
+          <TouchableOpacity style={[qc.startBtn, startLoading && { opacity: 0.6 }]} onPress={onStart} activeOpacity={0.8} disabled={startLoading}>
+            {startLoading
+              ? <ActivityIndicator size="small" color={C.white} />
+              : <>
+                  <Ionicons name="play-circle-outline" size={15} color={C.white} />
+                  <Text style={qc.startBtnText}>Start Now</Text>
+                </>
+            }
           </TouchableOpacity>
         )}
         <TouchableOpacity style={qc.ghostBtn} onPress={() => navigation.navigate('QuizResultScreen', { quiz })}>
@@ -266,65 +304,158 @@ const QuizCard = ({ quiz, elapsed, onStart, onEndPress, onEdit, onResults }) => 
    MAIN EXPORT
 ══════════════════════════════════════════════════════════════════════════ */
 export default function QuizSession() {
+  const { isDark } = useContext(ThemeContext);
+  const C = isDark ? C_DARK : C_LIGHT;
+  const s = makeS(C);
+  const statusColor = (status) => statusColorFn(C, status);
   const navigation = useNavigation();
   const route      = useRoute();
 
-  const [quizList,        setQuizList]        = useState(INITIAL_QUIZZES);
-  const [elapsedMap,      setElapsedMap]       = useState({ 1: 8 * 60 }); // seed quiz 1 = 8 min in
+  const [quizList,        setQuizList]        = useState([]);
+  const [loading,         setLoading]         = useState(true);
+  const [elapsedMap,      setElapsedMap]       = useState({});
   const [endModalQuizId,  setEndModalQuizId]   = useState(null);
+  const [endLoading,      setEndLoading]       = useState(false);
+  const [startLoadingId,  setStartLoadingId]   = useState(null);
 
   const intervalRefs = useRef({});
   const fadeAnim     = useRef(new Animated.Value(0)).current;
 
-  /* ── Start seed quiz 1 timer immediately ── */
-  useEffect(() => {
-    intervalRefs.current[1] = setInterval(() => {
-      setElapsedMap(prev => ({ ...prev, 1: (prev[1] ?? 0) + 1 }));
-    }, 1000);
-    return () => clearInterval(intervalRefs.current[1]);
-  }, []);
+  /* ── Fetch quizzes from backend ── */
+  const fetchQuizzes = useCallback(async () => {
+  try {
+    const { data } = await axiosInstance.get('/quiz');
 
-  /* ── Receive new quiz published from QuizBuilderScreen ── */
+    if (data.success) {
+      const quizzes = data.data;
+      setQuizList(quizzes);
+
+      // Start timers for ACTIVE quizzes
+      quizzes.forEach(q => {
+        if (q.status === 'ACTIVE') {
+
+          const startedAt = q.startedAt
+            ? new Date(q.startedAt).getTime()
+            : Date.now();
+
+          const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+
+          // duration in seconds
+          const durationSeconds = (q.duration || 0) * 60;
+
+          // If already expired → end immediately
+          if (elapsed >= durationSeconds) {
+            endQuiz(q._id);
+            return;
+          }
+
+          setElapsedMap(prev => ({
+            ...prev,
+            [q._id]: elapsed
+          }));
+
+          if (!intervalRefs.current[q._id]) {
+
+            intervalRefs.current[q._id] = setInterval(() => {
+
+              setElapsedMap(prev => {
+
+                const newElapsed = (prev[q._id] ?? elapsed) + 1;
+
+                // Check if duration completed
+                if (newElapsed >= durationSeconds) {
+
+                  clearInterval(intervalRefs.current[q._id]);
+                  delete intervalRefs.current[q._id];
+
+                  endQuiz(q._id);
+
+                  return prev;
+                }
+
+                return {
+                  ...prev,
+                  [q._id]: newElapsed
+                };
+
+              });
+
+            }, 1000);
+
+          }
+        }
+      });
+    }
+
+  } catch (err) {
+    console.error('Fetch quizzes error:', err);
+  } finally {
+    setLoading(false);
+  }
+}, []);
+
+  /* ── Reload when screen comes into focus (e.g. after publishing) ── */
+  useFocusEffect(
+    useCallback(() => {
+      fetchQuizzes();
+      // cleanup timers on blur
+      return () => {};
+    }, [fetchQuizzes])
+  );
+
+  /* ── Handle newly published quiz navigated from QuizBuilderScreen ── */
   useEffect(() => {
     if (route.params?.newQuiz) {
-      const nq = {
-        ...route.params.newQuiz,
-        id:      route.params.publishedAt ?? Date.now(),
-        subject: route.params.newQuiz.subject || 'General',
-      };
-      setQuizList(prev => [nq, ...prev]);
+      // Refetch to get the saved quiz from DB (includes _id)
+      fetchQuizzes();
     }
   }, [route.params?.publishedAt]);
-
-  /* ── Cleanup on unmount ── */
-  useEffect(() => {
-    return () => Object.values(intervalRefs.current).forEach(clearInterval);
-  }, []);
 
   /* ── Fade in screen ── */
   useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 500, useNativeDriver: true }).start();
+    return () => Object.values(intervalRefs.current).forEach(clearInterval);
   }, []);
 
-  /* ── Start quiz ── */
-  const startQuiz = useCallback((id) => {
-    setQuizList(prev =>
-      prev.map(q => q.id === id ? { ...q, status: 'ACTIVE', statusColor: C.green } : q)
-    );
-    setElapsedMap(prev => ({ ...prev, [id]: 0 }));
-    intervalRefs.current[id] = setInterval(() => {
-      setElapsedMap(prev => ({ ...prev, [id]: (prev[id] ?? 0) + 1 }));
-    }, 1000);
+  /* ── PATCH /api/quizzes/:id/start ── */
+  const startQuiz = useCallback(async (id) => {
+    setStartLoadingId(id);
+    try {
+      const { data } = await axiosInstance.patch(`/quiz/${id}/start`);
+      if (data.success) {
+        setQuizList(prev =>
+          prev.map(q => q._id === id ? { ...q, status: 'ACTIVE', startedAt: data.data.startedAt } : q)
+        );
+        setElapsedMap(prev => ({ ...prev, [id]: 0 }));
+        intervalRefs.current[id] = setInterval(() => {
+          setElapsedMap(prev => ({ ...prev, [id]: (prev[id] ?? 0) + 1 }));
+        }, 1000);
+      }
+    } catch (err) {
+      console.error('Start quiz error:', err);
+    } finally {
+      setStartLoadingId(null);
+    }
   }, []);
 
-  /* ── End quiz ── */
-  const endQuiz = useCallback((id) => {
-    clearInterval(intervalRefs.current[id]);
-    delete intervalRefs.current[id];
-    setQuizList(prev =>
-      prev.map(q => q.id === id ? { ...q, status: 'COMPLETED', statusColor: C.textMuted } : q)
-    );
-    setEndModalQuizId(null);
+  /* ── PATCH /api/quizzes/:id/end ── */
+  const endQuiz = useCallback(async (id) => {
+    setEndLoading(true);
+    try {
+      const { data } = await axiosInstance.patch(`/quiz/${id}/end`);
+      if (data.success) {
+        clearInterval(intervalRefs.current[id]);
+        delete intervalRefs.current[id];
+        setQuizList(prev =>
+          prev.map(q => q._id === id ? { ...q, status: 'COMPLETED' } : q)
+        );
+        setEndModalQuizId(null);
+      }
+    } catch (err) {
+      console.error('End quiz error:', err);
+    } finally {
+      setEndLoading(false);
+    }
   }, []);
 
   /* ── Derived KPIs ── */
@@ -332,7 +463,7 @@ export default function QuizSession() {
   const scheduledCount = quizList.filter(q => q.status === 'SCHEDULED').length;
   const completedCount = quizList.filter(q => q.status === 'COMPLETED').length;
 
-  const endingQuiz = quizList.find(q => q.id === endModalQuizId) ?? null;
+  const endingQuiz = quizList.find(q => q._id === endModalQuizId) ?? null;
 
   return (
     <View style={s.root}>
@@ -388,20 +519,38 @@ export default function QuizSession() {
             </View>
           )}
 
+          {/* ── Loading state ── */}
+          {loading && (
+            <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+              <ActivityIndicator size="large" color={C.accent} />
+              <Text style={{ color: C.textSecondary, marginTop: 12, fontSize: 13 }}>Loading quizzes…</Text>
+            </View>
+          )}
+
           {/* ── Quiz cards ── */}
-          <View style={{ paddingHorizontal: 20, gap: 14 }}>
-            {quizList.map(quiz => (
-              <QuizCard
-                key={quiz.id}
-                quiz={quiz}
-                elapsed={elapsedMap[quiz.id] ?? 0}
-                onStart={() => startQuiz(quiz.id)}
-                onEndPress={() => setEndModalQuizId(quiz.id)}
-                onEdit={() => navigation.navigate('QuizBuilderScreen')}
-              />
-              
-            ))}
-          </View>
+          {!loading && (
+            <View style={{ paddingHorizontal: 20, gap: 14 }}>
+              {quizList.length === 0 ? (
+                <View style={s.emptyState}>
+                  <Ionicons name="clipboard-outline" size={48} color={C.textMuted} />
+                  <Text style={s.emptyTitle}>No Quizzes Yet</Text>
+                  <Text style={s.emptySub}>Tap "New Quiz" to create your first quiz</Text>
+                </View>
+              ) : (
+                quizList.map(quiz => (
+                  <QuizCard
+                    key={quiz._id}
+                    quiz={quiz}
+                    elapsed={elapsedMap[quiz._id] ?? 0}
+                    onStart={() => startQuiz(quiz._id)}
+                    onEndPress={() => setEndModalQuizId(quiz._id)}
+                    onEdit={() => navigation.navigate('QuizBuilderScreen')}
+                    startLoading={startLoadingId === quiz._id}
+                  />
+                ))
+              )}
+            </View>
+          )}
 
         </Animated.View>
       </ScrollView>
@@ -413,13 +562,14 @@ export default function QuizSession() {
         elapsed={elapsedMap[endModalQuizId] ?? 0}
         onConfirm={() => endQuiz(endModalQuizId)}
         onCancel={() => setEndModalQuizId(null)}
+        loading={endLoading}
       />
     </View>
   );
 }
 
 /* ─── Main screen styles ─────────────────────────────────────────────────── */
-const s = StyleSheet.create({
+const makeS = (C) => StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
   header: {
     flexDirection: W >= 768 ? 'row' : 'column',
@@ -438,14 +588,12 @@ const s = StyleSheet.create({
     shadowColor: C.accent, shadowOpacity: 0.35, shadowRadius: 10, elevation: 5,
   },
   newBtnText: { fontSize: 13, fontWeight: '800', color: C.white },
-
   kpiCard: {
     backgroundColor: C.surface, borderRadius: 16, borderWidth: 1,
     width: 112, alignItems: 'center', paddingVertical: 14, paddingHorizontal: 8,
   },
   kpiVal:   { fontSize: 26, fontWeight: '900', fontFamily: FONTS.heading },
   kpiLabel: { fontSize: 10, color: C.textSecondary, textAlign: 'center', marginTop: 2, fontWeight: '700' },
-
   liveBanner: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     marginHorizontal: 20, marginBottom: 16,
@@ -454,10 +602,13 @@ const s = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 11,
   },
   liveBannerText: { fontSize: 13, fontWeight: '700', color: C.green, flex: 1 },
+  emptyState: { alignItems: 'center', paddingVertical: 60, gap: 10 },
+  emptyTitle: { fontSize: 18, fontWeight: '800', color: C.textSecondary },
+  emptySub:   { fontSize: 13, color: C.textMuted },
 });
 
 /* ─── Quiz card styles ───────────────────────────────────────────────────── */
-const qc = StyleSheet.create({
+const makeQc = (C) => StyleSheet.create({
   card: {
     backgroundColor: C.surface, borderRadius: 18,
     borderWidth: 1, borderColor: C.border, overflow: 'hidden',
@@ -467,7 +618,6 @@ const qc = StyleSheet.create({
     shadowColor: C.green, shadowOpacity: 0.18, shadowRadius: 18, elevation: 6,
   },
   activeBar: { height: 3, backgroundColor: C.green },
-
   titleRow:  { flexDirection: 'row', padding: 16, gap: 10, alignItems: 'flex-start' },
   title:     { fontSize: 15, fontWeight: '800', color: C.textPrimary, lineHeight: 22 },
   metaRow:   { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 4, marginTop: 3 },
@@ -476,8 +626,6 @@ const qc = StyleSheet.create({
   statusPill:{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, borderWidth: 1, alignSelf: 'flex-start' },
   statusDot: { width: 6, height: 6, borderRadius: 3 },
   statusText:{ fontSize: 10, fontWeight: '800', letterSpacing: 0.6 },
-
-  /* Live timer block */
   timerBlock: {
     flexDirection: 'row', marginHorizontal: 16, marginBottom: 14,
     backgroundColor: C.surfaceEl, borderRadius: 14,
@@ -490,8 +638,6 @@ const qc = StyleSheet.create({
   openBadge:   { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: C.greenSoft, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: C.green + '40' },
   openBadgeText: { fontSize: 12, fontWeight: '800', color: C.green },
   openSub:     { fontSize: 10, color: C.textSecondary, marginTop: 2 },
-
-  /* Progress */
   progressWrap: { paddingHorizontal: 16, marginBottom: 14 },
   progressHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 7 },
   progressLabel:  { fontSize: 12, color: C.textSecondary },
@@ -499,8 +645,6 @@ const qc = StyleSheet.create({
   track: { height: 7, backgroundColor: C.border, borderRadius: 4, overflow: 'hidden' },
   fill:  { height: '100%', borderRadius: 4, backgroundColor: C.green },
   progressPct: { fontSize: 10, color: C.textMuted, marginTop: 5, fontWeight: '700' },
-
-  /* Scheduled hint */
   hintRow: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 8,
     marginHorizontal: 16, marginBottom: 14,
@@ -509,8 +653,6 @@ const qc = StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 10,
   },
   hintText: { fontSize: 12, color: C.accent, flex: 1, lineHeight: 18 },
-
-  /* Completed stats */
   doneBlock: {
     flexDirection: 'row', alignItems: 'center',
     marginHorizontal: 16, marginBottom: 14,
@@ -521,13 +663,12 @@ const qc = StyleSheet.create({
   doneSep:   { width: 1, height: 36, backgroundColor: C.border },
   doneVal:   { fontSize: 20, fontWeight: '900', fontFamily: FONTS.heading },
   doneLabel: { fontSize: 10, color: C.textMuted, fontWeight: '700' },
-
-  /* Action buttons */
   actions: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', paddingHorizontal: 16, paddingBottom: 16 },
   startBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: C.green, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10,
     shadowColor: C.green, shadowOpacity: 0.35, shadowRadius: 8, elevation: 3,
+    minWidth: 100, justifyContent: 'center',
   },
   startBtnText: { fontSize: 13, fontWeight: '800', color: C.white },
   endBtn: {
@@ -545,7 +686,7 @@ const qc = StyleSheet.create({
 });
 
 /* ─── End modal styles ───────────────────────────────────────────────────── */
-const em = StyleSheet.create({
+const makeEm = (C) => StyleSheet.create({
   overlay:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.78)', justifyContent: 'center', alignItems: 'center', padding: 24 },
   sheet:      { backgroundColor: C.surface, borderRadius: 22, borderWidth: 1, borderColor: C.border, padding: 24, width: '100%', maxWidth: 360, alignItems: 'center', gap: 10 },
   iconWrap:   { width: 66, height: 66, borderRadius: 33, backgroundColor: C.redSoft, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },

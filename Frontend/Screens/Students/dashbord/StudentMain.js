@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,9 +13,12 @@ import {
   Alert,
   Platform,
   Modal,
+  ScrollView,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import * as ImagePicker from 'expo-image-picker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axiosInstance from '../../../Src/Axios';
 import Dashboardpage from './Dashboadpage';
 import StudentTimetable from '../Timetable/timetable';
 import StudentDoubt from '../Doubts/Doubt';
@@ -24,7 +27,8 @@ import StudentFinance from '../Finance/StudentFinance';
 import StudentExamResults from '../Exam/StudentExam';
 import StudentsNotes from '../Note/NoteSubjectList';
 import StudentQuiz from '../Quiz.js/StudentQuiz';
-import StudentAssignment from '../Assignment/Assignment'
+import StudentAssignment from '../Assignment/Assignment';
+
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const IS_DESKTOP = SCREEN_WIDTH >= 768;
 const DRAWER_WIDTH = 260;
@@ -99,21 +103,30 @@ export const LIGHT_THEME = {
 };
 
 // ─── Nav Items ───────────────────────────────────────────────────────────────
+// Keys here MUST match ALL_TABS keys in PermissionDashboard exactly
 const NAV_ITEMS = [
-  { id: 'dashboard',      label: 'Dashboard',      icon: '🏠' },
-  { id: 'assignment',      label: 'Assignment',      icon: '📊' },
-  { id: 'Notes',          label: 'Notes',           icon: '📋' },
-  { id: 'timetable',      label: 'TimeTable',       icon: '🗓️' },
-  { id: 'ai_doubts',      label: 'Doubts',          icon: '🤔' },
-  { id: 'chat',           label: 'Chat',            icon: '💬' },
-  { id: 'StudentFinance', label: 'Finance', icon: '💰' },
-  { id: 'StudentExam',    label: 'Exam',    icon: '📝' },
-  { id: 'Assignment',    label: 'Assignment',    icon: '📑' },
-  { id: 'StudentQuiz',    label: 'Quiz',    icon: '🧠' },
+  { id: 'dashboard',      label: 'Dashboard',  icon: '🏠' },
+  { id: 'Notes',          label: 'Notes',      icon: '📋' },
+  { id: 'timetable',      label: 'TimeTable',  icon: '🗓️' },
+  { id: 'ai_doubts',      label: 'Doubts',     icon: '🧐' },
+  { id: 'chat',           label: 'Chat',       icon: '💬' },
+  { id: 'StudentFinance', label: 'Finance',    icon: '💰' },
+  { id: 'StudentExam',    label: 'Exam',       icon: '📝' },
+  { id: 'Assignment',     label: 'Assignment', icon: '📑' },
+  { id: 'StudentQuiz',    label: 'Quiz',       icon: '🧠' },
 ];
 
-// ─── Avatar Fullscreen Preview Modal ─────────────────────────────────────────
-const AvatarPreviewModal = ({ visible, avatarUri, onClose, onEdit, onDelete, C }) => {
+// ─── Platform-aware "permission denied" alert ────────────────────────────────
+const showDeniedAlert = () => {
+  if (Platform.OS === 'web') {
+    window.alert('Permission denied from developers');
+  } else {
+    Alert.alert('Access Restricted', 'Permission denied from developers');
+  }
+};
+
+// ─── Avatar Fullscreen Preview Modal ────────────────────────────────────────
+const AvatarPreviewModal = ({ visible, avatarUri, onClose, onEdit, onDelete, C, user }) => {
   const scaleAnim   = useRef(new Animated.Value(0.82)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
 
@@ -171,13 +184,21 @@ const AvatarPreviewModal = ({ visible, avatarUri, onClose, onEdit, onDelete, C }
               />
             ) : (
               <View style={[styles.modalImagePlaceholder, { backgroundColor: C.accent }]}>
-                <Text style={styles.modalImagePlaceholderText}>AJ</Text>
+                <Text style={styles.modalImagePlaceholderText}>
+                  {user?.name ? user.name.charAt(0).toUpperCase() : '?'}
+                </Text>
               </View>
             )}
           </View>
 
-          <Text style={styles.modalName}>Alex Johnson</Text>
-          <Text style={styles.modalRole}>Year 3 Student</Text>
+          <Text style={styles.modalName}>{user?.name || user?.id || 'Student'}</Text>
+          <Text style={styles.modalRole}>
+            {[
+              user?.id     ? `ID: ${user.id}`      : null,
+              user?.branch ? user.branch            : null,
+              user?.year   ? `Year ${user.year}`   : null,
+            ].filter(Boolean).join('  •  ')}
+          </Text>
 
           <View style={styles.modalActions}>
             <TouchableOpacity
@@ -211,12 +232,12 @@ const UploadableAvatar = ({ avatarUri, onPress, C, size = 36 }) => {
             styles.cameraBadge,
             {
               backgroundColor: C.accent,
-              borderColor: C.sidebar,
-              width: size * 0.38,
-              height: size * 0.38,
-              borderRadius: size * 0.19,
+              borderColor:      C.sidebar,
+              width:            size * 0.38,
+              height:           size * 0.38,
+              borderRadius:     size * 0.19,
               bottom: -2,
-              right: -2,
+              right:  -2,
             },
           ]}>
             <Text style={{ fontSize: size * 0.18, lineHeight: size * 0.22 }}>📷</Text>
@@ -245,7 +266,12 @@ const NavItem = ({ item, isActive, onPress, collapsed, C }) => {
   const onPressOut = () => Animated.spring(scale, { toValue: 1,    useNativeDriver: true, speed: 50 }).start();
 
   return (
-    <TouchableOpacity activeOpacity={0.8} onPress={() => onPress(item.id)} onPressIn={onPressIn} onPressOut={onPressOut}>
+    <TouchableOpacity
+      activeOpacity={0.8}
+      onPress={() => onPress(item.id)}
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
+    >
       <Animated.View style={[
         styles.navItem,
         isActive && { backgroundColor: C.accentBg },
@@ -254,7 +280,11 @@ const NavItem = ({ item, isActive, onPress, collapsed, C }) => {
       ]}>
         <Text style={[styles.navIcon, isActive && styles.navIconActive]}>{item.icon}</Text>
         {!collapsed && (
-          <Text style={[styles.navLabel, { color: isActive ? C.accent : C.textMuted }, isActive && { fontWeight: '600' }]}>
+          <Text style={[
+            styles.navLabel,
+            { color: isActive ? C.accent : C.textMuted },
+            isActive && { fontWeight: '600' },
+          ]}>
             {item.label}
           </Text>
         )}
@@ -267,45 +297,111 @@ const NavItem = ({ item, isActive, onPress, collapsed, C }) => {
 // ─── Sidebar Content ─────────────────────────────────────────────────────────
 const SidebarContent = ({
   activeTab, collapsed, onNavPress, onToggleCollapse, showCollapseBtn,
-  C, avatarUri, onAvatarPress, onLogout,
+  C, avatarUri, onAvatarPress, onLogout, user, tabAccess,
 }) => (
   <View style={[
     styles.sidebar,
     { backgroundColor: C.sidebar, borderRightColor: C.border },
     collapsed && styles.sidebarCollapsed,
   ]}>
+    {/* Logo */}
     <View style={[styles.logoRow, collapsed && styles.logoRowCollapsed]}>
       <View style={[styles.logoIconBox, { backgroundColor: C.accent }]}>
         <Text style={styles.logoEmoji}>🎓</Text>
       </View>
-      {!collapsed && <Text style={[styles.logoText, { color: C.textPrimary }]}>Campus360</Text>}
+      {!collapsed && (
+        <Text style={[styles.logoText, { color: C.textPrimary }]}>UniVerse</Text>
+      )}
       {showCollapseBtn && (
-        <TouchableOpacity activeOpacity={0.7} style={[styles.collapseBtn, { backgroundColor: C.border }]} onPress={onToggleCollapse}>
-          <Text style={[styles.collapseBtnText, { color: C.textMuted }]}>{collapsed ? '›' : '‹'}</Text>
+        <TouchableOpacity
+          activeOpacity={0.7}
+          style={[styles.collapseBtn, { backgroundColor: C.border }]}
+          onPress={onToggleCollapse}
+        >
+          <Text style={[styles.collapseBtnText, { color: C.textMuted }]}>
+            {collapsed ? '›' : '‹'}
+          </Text>
         </TouchableOpacity>
       )}
     </View>
 
     <View style={[styles.divider, { backgroundColor: C.border }]} />
 
+    {/* Nav list */}
     <View style={styles.navList}>
-      {NAV_ITEMS.map((item) => (
-        <NavItem key={item.id} item={item} isActive={activeTab === item.id} collapsed={collapsed} onPress={onNavPress} C={C} />
-      ))}
+      {NAV_ITEMS.map((item) => {
+        // undefined = allowed; false = locked
+        const isLocked = tabAccess && tabAccess[item.id] === false;
+
+        return (
+          <TouchableOpacity
+            key={item.id}
+            style={[
+              styles.navItem,
+              activeTab === item.id && {
+                borderWidth:     2,
+                borderColor:     C.accent,
+                borderRadius:    10,
+                backgroundColor: C.accentBg,
+              },
+              isLocked && styles.navItemLocked,
+            ]}
+            onPress={() => {
+              if (isLocked) {
+                showDeniedAlert();
+              } else {
+                onNavPress(item.id);
+              }
+            }}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.navIcon}>{item.icon}</Text>
+
+            {!collapsed && (
+              <Text style={[
+                styles.navLabel,
+                isLocked
+                  ? { color: C.textMuted }
+                  : { color: activeTab === item.id ? C.accent : C.textPrimary },
+                activeTab === item.id && !isLocked && { fontWeight: '600' },
+              ]}>
+                {item.label}
+              </Text>
+            )}
+
+            {/* Lock icon */}
+            {isLocked && !collapsed && (
+              <Text style={styles.lockIcon}>🔒</Text>
+            )}
+
+            {/* Active dot */}
+            {activeTab === item.id && !isLocked && !collapsed && (
+              <View style={[styles.activeDot, { backgroundColor: C.accent }]} />
+            )}
+          </TouchableOpacity>
+        );
+      })}
     </View>
 
     <View style={{ flex: 1 }} />
     <View style={[styles.divider, { backgroundColor: C.border }]} />
 
+    {/* User footer */}
     <View style={[styles.userFooter, collapsed && styles.userFooterCollapsed]}>
       <View style={styles.avatarWrap}>
         <UploadableAvatar avatarUri={avatarUri} onPress={onAvatarPress} C={C} size={36} />
-        {!avatarUri && <View style={[styles.onlineBadge, { backgroundColor: C.green, borderColor: C.sidebar }]} />}
+        {!avatarUri && (
+          <View style={[styles.onlineBadge, { backgroundColor: C.green, borderColor: C.sidebar }]} />
+        )}
       </View>
       {!collapsed && (
         <TouchableOpacity onPress={() => onNavPress('profile')} style={styles.userMeta}>
-          <Text style={[styles.userName, { color: C.textPrimary }]}>Alex Johnson</Text>
-          <Text style={[styles.userRole,  { color: C.textMuted  }]}>Year 3 Student</Text>
+          <Text style={[styles.userName, { color: C.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">
+            {user?.name || user?.id || 'Student'}
+          </Text>
+          <Text style={[styles.userRole, { color: C.textMuted }]} numberOfLines={1} ellipsizeMode="tail">
+            {user?.branch ? `${user.branch} - Yr ${user.year}` : 'Student'}
+          </Text>
         </TouchableOpacity>
       )}
       <TouchableOpacity
@@ -321,7 +417,12 @@ const SidebarContent = ({
 
 // ─── Hamburger ───────────────────────────────────────────────────────────────
 const HamburgerIcon = ({ onPress, C }) => (
-  <TouchableOpacity activeOpacity={0.7} style={styles.hamburgerBtn} onPress={onPress} hitSlop={{ top:8,bottom:8,left:8,right:8 }}>
+  <TouchableOpacity
+    activeOpacity={0.7}
+    style={styles.hamburgerBtn}
+    onPress={onPress}
+    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+  >
     <View style={[styles.hamburgerLine, { backgroundColor: C.textPrimary }]} />
     <View style={[styles.hamburgerLine, { backgroundColor: C.textPrimary }]} />
     <View style={[styles.hamburgerLine, { backgroundColor: C.textPrimary }]} />
@@ -329,15 +430,19 @@ const HamburgerIcon = ({ onPress, C }) => (
 );
 
 // ─── Mobile Drawer ───────────────────────────────────────────────────────────
-const MobileDrawer = ({ activeTab, onNavPress, visible, onClose, C, avatarUri, onAvatarPress, onLogout }) => {
-  const translateX    = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
+const MobileDrawer = ({
+  activeTab, onNavPress, visible, onClose,
+  C, avatarUri, onAvatarPress, onLogout, user, tabAccess,
+}) => {
+  const translateX     = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const overlayOpacity = useRef(new Animated.Value(0)).current;
   const [rendered, setRendered] = useState(false);
+
   React.useEffect(() => {
     if (visible) {
       setRendered(true);
       Animated.parallel([
-        Animated.spring(translateX,     { toValue: 0,            useNativeDriver: true, bounciness: 0, speed: 20 }),
+        Animated.spring(translateX,     { toValue: 0,             useNativeDriver: true, bounciness: 0, speed: 20 }),
         Animated.timing(overlayOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
       ]).start();
     } else {
@@ -361,37 +466,89 @@ const MobileDrawer = ({ activeTab, onNavPress, visible, onClose, C, avatarUri, o
         { backgroundColor: C.sidebar, borderRightColor: C.border },
         { transform: [{ translateX }] },
       ]}>
+        {/* Drawer header */}
         <View style={styles.drawerHeader}>
           <View style={styles.mobileLogoRow}>
             <View style={[styles.logoIconBox, { backgroundColor: C.accent }]}>
               <Text style={styles.logoEmoji}>🎓</Text>
             </View>
-            <Text style={[styles.logoText, { color: C.textPrimary }]}>Campus360</Text>
+            <Text style={[styles.logoText, { color: C.textPrimary }]}>UniVerse</Text>
           </View>
-          <TouchableOpacity style={[styles.closeBtn, { backgroundColor: C.border }]} activeOpacity={0.7} onPress={onClose} hitSlop={{ top:8,bottom:8,left:8,right:8 }}>
+          <TouchableOpacity
+            style={[styles.closeBtn, { backgroundColor: C.border }]}
+            activeOpacity={0.7}
+            onPress={onClose}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
             <Text style={[styles.closeBtnText, { color: C.textMuted }]}>✕</Text>
           </TouchableOpacity>
         </View>
 
         <View style={[styles.divider, { backgroundColor: C.border }]} />
 
+        {/* Nav list with lock support */}
         <View style={styles.navList}>
-          {NAV_ITEMS.map((item) => (
-            <NavItem key={item.id} item={item} isActive={activeTab === item.id} onPress={onNavPress} collapsed={false} C={C} />
-          ))}
+          {NAV_ITEMS.map((item) => {
+            const isLocked = tabAccess && tabAccess[item.id] === false;
+            return (
+              <TouchableOpacity
+                key={item.id}
+                style={[
+                  styles.navItem,
+                  activeTab === item.id && {
+                    backgroundColor: C.accentBg,
+                    borderWidth:     1,
+                    borderColor:     C.accent,
+                    borderRadius:    10,
+                  },
+                  isLocked && styles.navItemLocked,
+                ]}
+                onPress={() => {
+                  if (isLocked) {
+                    showDeniedAlert();
+                  } else {
+                    onNavPress(item.id);
+                  }
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.navIcon}>{item.icon}</Text>
+                <Text style={[
+                  styles.navLabel,
+                  isLocked
+                    ? { color: C.textMuted }
+                    : { color: activeTab === item.id ? C.accent : C.textPrimary },
+                  activeTab === item.id && !isLocked && { fontWeight: '600' },
+                ]}>
+                  {item.label}
+                </Text>
+                {isLocked && <Text style={styles.lockIcon}>🔒</Text>}
+                {activeTab === item.id && !isLocked && (
+                  <View style={[styles.activeDot, { backgroundColor: C.accent }]} />
+                )}
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
         <View style={{ flex: 1 }} />
         <View style={[styles.divider, { backgroundColor: C.border }]} />
 
+        {/* User footer */}
         <View style={styles.userFooter}>
           <View style={styles.avatarWrap}>
             <UploadableAvatar avatarUri={avatarUri} onPress={onAvatarPress} C={C} size={36} />
-            {!avatarUri && <View style={[styles.onlineBadge, { backgroundColor: C.green, borderColor: C.sidebar }]} />}
+            {!avatarUri && (
+              <View style={[styles.onlineBadge, { backgroundColor: C.green, borderColor: C.sidebar }]} />
+            )}
           </View>
           <TouchableOpacity onPress={() => onNavPress('profile')} style={styles.userMeta}>
-            <Text style={[styles.userName, { color: C.textPrimary }]}>Alex Johnson</Text>
-            <Text style={[styles.userRole,  { color: C.textMuted  }]}>Year 3 Student</Text>
+            <Text style={[styles.userName, { color: C.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">
+              {user?.name || user?.id || 'Student'}
+            </Text>
+            <Text style={[styles.userRole, { color: C.textMuted }]} numberOfLines={1} ellipsizeMode="tail">
+              {user?.branch ? `${user.branch} - Year ${user.year}` : 'Student'}
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
             activeOpacity={0.75}
@@ -408,71 +565,171 @@ const MobileDrawer = ({ activeTab, onNavPress, visible, onClose, C, avatarUri, o
   );
 };
 
-// ─── Tab Content ─────────────────────────────────────────────────────────────
-// ↓ NEW: accepts onNavPress so Dashboard can trigger tab switches
-const TabContent = ({ activeTab, C, onThemeToggle, onNavPress }) => (
-  <>
-    <View style={{ flex: 1, display: activeTab === 'dashboard'      ? 'flex' : 'none' }}>
-      {/* ↓ pass onNavPress as onNavigateToTab so Dashboard can call it */}
-      <Dashboardpage C={C} onThemeToggle={onThemeToggle} onNavigateToTab={onNavPress} />
-    </View>
-    <View style={{ flex: 1, display: activeTab === 'analytics'      ? 'flex' : 'none' }}>
-      <View style={[styles.placeholderPage, { backgroundColor: C.bg }]}>
-        <Text style={[styles.placeholderText, { color: C.textMuted }]}>Analytics Page</Text>
-      </View>
-    </View>
-    <View style={{ flex: 1, display: activeTab === 'timetable'      ? 'flex' : 'none' }}><StudentTimetable C={C} /></View>
-    <View style={{ flex: 1, display: activeTab === 'ai_doubts'      ? 'flex' : 'none' }}><StudentDoubt C={C} /></View>
-    <View style={{ flex: 1, display: activeTab === 'chat'           ? 'flex' : 'none' }}><StudentChat C={C} /></View>
-    <View style={{ flex: 1, display: activeTab === 'StudentFinance' ? 'flex' : 'none' }}><StudentFinance C={C} /></View>
-    <View style={{ flex: 1, display: activeTab === 'StudentExam'    ? 'flex' : 'none' }}><StudentExamResults C={C} /></View>
-    <View style={{ flex: 1, display: activeTab === 'Notes'          ? 'flex' : 'none' }}><StudentsNotes C={C} /></View>
-    <View style={{ flex: 1, display: activeTab === 'StudentQuiz'    ? 'flex' : 'none' }}><StudentQuiz C={C} /></View>
-    <View style={{ flex: 1, display: activeTab === 'Assignment'     ? 'flex' : 'none' }}><StudentAssignment C={C} /></View>
-    <View style={{ flex: 1, display: activeTab === 'profile'        ? 'flex' : 'none' }}>
-      <View style={[styles.placeholderPage, { backgroundColor: C.bg }]}>
-        <Text style={[styles.placeholderText, { color: C.textMuted }]}>Profile Page</Text>
-      </View>
-    </View>
-  </>
+// ─── Locked Tab Screen ────────────────────────────────────────────────────────
+const LockedScreen = ({ C, label }) => (
+  <View style={[styles.placeholderPage, { backgroundColor: C.bg, gap: 12 }]}>
+    <Text style={{ fontSize: 48 }}>🔒</Text>
+    <Text style={{ fontSize: 18, fontWeight: '700', color: C.textPrimary }}>{label}</Text>
+    <Text style={{ fontSize: 14, color: C.textMuted, textAlign: 'center', maxWidth: 260 }}>
+      Access denied by developers
+    </Text>
+  </View>
 );
 
+// ─── Tab Content ─────────────────────────────────────────────────────────────
+const TabContent = ({ activeTab, C, onThemeToggle, onNavPress, user, tabAccess }) => {
+  // Helper: if locked, render locked screen instead
+  const renderTab = (tabId, label, component) => (
+    <View key={tabId} style={{ flex: 1, display: activeTab === tabId ? 'flex' : 'none' }}>
+      {tabAccess?.[tabId] === false
+        ? <LockedScreen C={C} label={label} />
+        : component
+      }
+    </View>
+  );
+
+  return (
+    <>
+      {renderTab('dashboard',      'Dashboard',  <Dashboardpage C={C} onThemeToggle={onThemeToggle} onNavigateToTab={onNavPress} user={user} />)}
+      {renderTab('Notes',          'Notes',       <StudentsNotes C={C} user={user} />)}
+      {renderTab('timetable',      'TimeTable',   <StudentTimetable C={C} />)}
+      {renderTab('ai_doubts',      'Doubts',      <StudentDoubt C={C} user={user} />)}
+      {renderTab('chat',           'Chat',        <StudentChat C={C} onThemeToggle={onThemeToggle} user={user} />)}
+      {renderTab('StudentFinance', 'Finance',     <StudentFinance C={C} user={user} />)}
+      {renderTab('StudentExam',    'Exam',        <StudentExamResults C={C} user={user} />)}
+      {renderTab('Assignment',     'Assignment',  <StudentAssignment C={C} user={user} />)}
+      {renderTab('StudentQuiz',    'Quiz',        <StudentQuiz C={C} user={user} />)}
+      {renderTab('analytics',      'Analytics',
+        <View style={[styles.placeholderPage, { backgroundColor: C.bg }]}>
+          <Text style={[styles.placeholderText, { color: C.textMuted }]}>Analytics Page</Text>
+        </View>
+      )}
+      {renderTab('profile',        'Profile',
+        <View style={[styles.placeholderPage, { backgroundColor: C.bg }]}>
+          <Text style={[styles.placeholderText, { color: C.textMuted }]}>Profile Page</Text>
+        </View>
+      )}
+    </>
+  );
+};
+
 // ─── Root Component ──────────────────────────────────────────────────────────
-export default function StudentMain({ onNavigate,  navigation }) {
+export default function StudentMain({ onNavigate, navigation, route }) {
+
+  // ── Tab Access ────────────────────────────────────────────────────────────
+  const [tabAccess, setTabAccess] = useState({});
+
+  useEffect(() => {
+    const fetchTabAccess = async () => {
+      try {
+        const res = await axiosInstance.get('/permissions/check/Student');
+        setTabAccess(res.data.tabAccess || {});
+      } catch (err) {
+        // If API fails, default to all allowed (empty object = no restrictions)
+        setTabAccess({});
+      }
+    };
+    fetchTabAccess();
+  }, []);
+
+  // ── User State ────────────────────────────────────────────────────────────
+  const rawUser = route?.params?.user || null;
+  const [user, setUser] = useState(
+    rawUser
+      ? { ...rawUser, id: rawUser.id || rawUser._id, _id: rawUser._id || rawUser.id }
+      : null,
+  );
+
+  console.log('📱 StudentMain user:', user ? `${user.name} (id: ${user._id})` : 'null');
+
   const [activeTab,      setActiveTab]      = useState('dashboard');
   const [mobileOpen,     setMobileOpen]     = useState(false);
   const [isDark,         setIsDark]         = useState(true);
-  const [avatarUri,      setAvatarUri]      = useState(null);
+  const [avatarUri,      setAvatarUri]      = useState(user?.profilePhoto || null);
   const [previewVisible, setPreviewVisible] = useState(false);
 
   const C = isDark ? DARK_THEME : LIGHT_THEME;
   const toggleTheme = () => setIsDark(prev => !prev);
 
-const handleLogout = () => {
-  if (Platform.OS === "web") {
-    const confirmed = window.confirm("Are you sure you want to logout?");
-    if (confirmed) {
-      navigation.reset({
-        index: 0,
-        routes: [{ name: "Login" }],
-      });
+  // If user is null (e.g. auto-restored session), load from AsyncStorage + API
+  useEffect(() => {
+    if (user) return;
+    const loadUser = async () => {
+      try {
+        const userId = await AsyncStorage.getItem('userId');
+        if (!userId) return;
+        const res = await axiosInstance.get(`/students/${userId}`);
+        const s = res.data;
+        if (s) {
+          setUser({ ...s, id: s.id || s._id, _id: s._id || s.id });
+          if (s.profilePhoto) setAvatarUri(s.profilePhoto);
+        }
+      } catch (err) {
+        console.log('Error loading user from storage:', err);
+      }
+    };
+    loadUser();
+  }, []);
+
+  // Fetch profile photo from DB
+  const fetchStudent = async () => {
+    try {
+      const res = await axiosInstance.get(`/students/${user.id}`);
+      const data = res.data;
+      if (data?.profilePhoto) setAvatarUri(data.profilePhoto);
+    } catch (err) {
+      console.log('Error fetching student:', err);
     }
-  } else {
-    Alert.alert("Logout", "Are you sure you want to logout?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Logout",
-        style: "destructive",
-        onPress: () => {
-          navigation.reset({
-            index: 0,
-            routes: [{ name: "Login" }],
-          });
-        },
-      },
-    ]);
-  }
-};
+  };
+
+  useEffect(() => {
+    if (user?.id) fetchStudent();
+  }, []);
+
+  // ── Logout ────────────────────────────────────────────────────────────────
+  const handleLogout = async () => {
+    const performLogout = async () => {
+      try {
+        const token = await AsyncStorage.getItem('authToken');
+        if (token) {
+          try {
+            await axiosInstance.post('/auth/logout', {}, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            console.log('✅ Token revoked on backend');
+          } catch (error) {
+            console.error('⚠️ Error revoking token on backend:', error.message);
+          }
+        }
+        await AsyncStorage.removeItem('authToken');
+        await AsyncStorage.removeItem('userId');
+        await AsyncStorage.removeItem('userRole');
+        await AsyncStorage.removeItem('userName');
+        await AsyncStorage.removeItem('currentScreen');
+        console.log('✅ User logged out successfully');
+        navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+      } catch (error) {
+        console.error('❌ Logout error:', error);
+        if (Platform.OS === 'web') {
+          window.alert('Error during logout. Please try again.');
+        } else {
+          Alert.alert('Error', 'Error during logout. Please try again.');
+        }
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm('Are you sure you want to logout?');
+      if (confirmed) performLogout();
+    } else {
+      Alert.alert('Logout', 'Are you sure you want to logout?', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Logout', style: 'destructive', onPress: performLogout },
+      ]);
+    }
+  };
+
+  // ── Avatar ────────────────────────────────────────────────────────────────
   const handleAvatarPress = () => {
     if (avatarUri) setPreviewVisible(true);
     else handlePickImage();
@@ -494,25 +751,49 @@ const handleLogout = () => {
         quality: 0.85,
       });
       if (!result.canceled && result.assets?.[0]?.uri) {
-        setAvatarUri(result.assets[0].uri);
+        const imageUri = result.assets[0].uri;
+        setAvatarUri(imageUri);
+        try {
+          const formData = new FormData();
+          formData.append('photo', {
+            uri:  imageUri,
+            name: 'profile.jpg',
+            type: 'image/jpeg',
+          });
+          await axiosInstance.put(`/students/upload-profile/${user.id}`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+          });
+        } catch (error) {
+          console.log('Photo upload failed', error);
+        }
         setPreviewVisible(false);
       }
     } catch {
-      Alert.alert('Error', 'Could not open image picker. Please try again.');
+      if (Platform.OS === 'web') {
+        window.alert('Could not open image picker. Please try again.');
+      } else {
+        Alert.alert('Error', 'Could not open image picker. Please try again.');
+      }
     }
   };
 
   const handleDeletePhoto = () => {
-    Alert.alert(
-      'Delete Photo',
-      'Are you sure you want to remove your profile photo?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => { setAvatarUri(null); setPreviewVisible(false); } },
-      ],
-    );
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm('Are you sure you want to remove your profile photo?');
+      if (confirmed) { setAvatarUri(null); setPreviewVisible(false); }
+    } else {
+      Alert.alert(
+        'Delete Photo',
+        'Are you sure you want to remove your profile photo?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Delete', style: 'destructive', onPress: () => { setAvatarUri(null); setPreviewVisible(false); } },
+        ],
+      );
+    }
   };
 
+  // ── Navigation ────────────────────────────────────────────────────────────
   const handleNavPress = (id) => {
     setActiveTab(id);
     onNavigate?.(id);
@@ -527,8 +808,22 @@ const handleLogout = () => {
       onEdit={handlePickImage}
       onDelete={handleDeletePhoto}
       C={C}
+      user={user}
     />
   );
+
+  const sidebarProps = {
+    activeTab,
+    collapsed: false,
+    onNavPress: handleNavPress,
+    showCollapseBtn: false,
+    C,
+    avatarUri,
+    onAvatarPress: handleAvatarPress,
+    onLogout: handleLogout,
+    user,
+    tabAccess,
+  };
 
   /* ── Desktop ─────────────────────────────────────────────────────────────── */
   if (IS_DESKTOP) {
@@ -536,14 +831,16 @@ const handleLogout = () => {
       <SafeAreaView style={[styles.safeArea, { backgroundColor: C.bg }]}>
         <StatusBar barStyle={C.statusBar} backgroundColor={C.bg} />
         <View style={styles.desktopLayout}>
-          <SidebarContent
-            activeTab={activeTab} collapsed={false} onNavPress={handleNavPress}
-            showCollapseBtn={false} C={C} avatarUri={avatarUri} onAvatarPress={handleAvatarPress}
-            onLogout={handleLogout}
-          />
+          <SidebarContent {...sidebarProps} />
           <View style={[styles.mainContent, { backgroundColor: C.bg }]}>
-            {/* ↓ pass handleNavPress so Dashboard can switch tabs */}
-            <TabContent activeTab={activeTab} C={C} onThemeToggle={toggleTheme} onNavPress={handleNavPress} />
+            <TabContent
+                  activeTab={activeTab}
+                    C={C}
+                  onThemeToggle={toggleTheme}
+                  onNavPress={handleNavPress}
+                  user={user}
+                  tabAccess={tabAccess}   
+            />
           </View>
         </View>
         {avatarModal}
@@ -562,20 +859,33 @@ const handleLogout = () => {
           <View style={[styles.logoIconBox, { backgroundColor: C.accent }]}>
             <Text style={styles.logoEmoji}>🎓</Text>
           </View>
-          <Text style={[styles.logoText, { color: C.textPrimary }]}>Campus360</Text>
+          <Text style={[styles.logoText, { color: C.textPrimary }]}>UniVerse</Text>
         </View>
         <UploadableAvatar avatarUri={avatarUri} onPress={handleAvatarPress} C={C} size={36} />
       </View>
 
       <MobileDrawer
-        activeTab={activeTab} onNavPress={handleNavPress}
-        visible={mobileOpen} onClose={() => setMobileOpen(false)}
-        C={C} avatarUri={avatarUri} onAvatarPress={handleAvatarPress}
+        activeTab={activeTab}
+        onNavPress={handleNavPress}
+        visible={mobileOpen}
+        onClose={() => setMobileOpen(false)}
+        C={C}
+        avatarUri={avatarUri}
+        onAvatarPress={handleAvatarPress}
         onLogout={handleLogout}
+        user={user}
+        tabAccess={tabAccess}
       />
+
       <View style={[styles.mainContent, { backgroundColor: C.bg }]}>
-        {/* ↓ pass handleNavPress so Dashboard can switch tabs */}
-        <TabContent activeTab={activeTab} C={C} onThemeToggle={toggleTheme} onNavPress={handleNavPress} />
+        <TabContent
+          activeTab={activeTab}
+          C={C}
+          onThemeToggle={toggleTheme}
+          onNavPress={handleNavPress}
+          user={user}
+          tabAccess={tabAccess}
+        />
       </View>
 
       {avatarModal}
@@ -602,21 +912,38 @@ const styles = StyleSheet.create({
 
   divider: { height: 1, marginVertical: 12, alignSelf: 'stretch' },
 
-  navList:          { gap: 4, paddingHorizontal: 4 },
-  navItem:          { flexDirection: 'row', alignItems: 'center', paddingVertical: 11, paddingHorizontal: 12, borderRadius: 10, gap: 12 },
-  navItemCollapsed: { justifyContent: 'center', paddingHorizontal: 0, width: 40 },
-  navIcon:          { fontSize: 17, opacity: 0.45 },
-  navIconActive:    { opacity: 1 },
-  navLabel:         { flex: 1, fontSize: 14, fontWeight: '500' },
-  activeDot:        { width: 5, height: 5, borderRadius: 3 },
+  navList: { gap: 4, paddingHorizontal: 4 },
 
-  userFooter:          { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 4, paddingHorizontal: 8, paddingBottom: 4 },
+  navItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 11,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    gap: 12,
+  },
+  navItemCollapsed: { justifyContent: 'center', paddingHorizontal: 0, width: 40 },
+
+  // Locked nav item — slightly dimmed
+  navItemLocked: {
+    opacity: 0.55,
+  },
+
+  navIcon:       { fontSize: 17, opacity: 0.45 },
+  navIconActive: { opacity: 1 },
+  navLabel:      { flex: 1, fontSize: 14, fontWeight: '500' },
+  activeDot:     { width: 5, height: 5, borderRadius: 3 },
+
+  // Lock icon in nav
+  lockIcon: { fontSize: 14, color: '#EF4444', marginLeft: 2 },
+
+  userFooter:          { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 4, paddingHorizontal: 4, paddingBottom: 4, minWidth: 0 },
   userFooterCollapsed: { justifyContent: 'center', gap: 0 },
-  avatarWrap:          { position: 'relative' },
+  avatarWrap:          { position: 'relative', flexShrink: 0 },
   onlineBadge:         { position: 'absolute', bottom: 0, right: 0, width: 10, height: 10, borderRadius: 5, borderWidth: 2 },
-  userMeta:            { flex: 1 },
-  userName:            { fontSize: 13, fontWeight: '600' },
-  userRole:            { fontSize: 11, marginTop: 1 },
+  userMeta:            { flex: 1, minWidth: 0 },
+  userName:            { fontSize: 12, fontWeight: '600' },
+  userRole:            { fontSize: 10, marginTop: 1 },
 
   avatarUploadCircle: { alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderStyle: 'dashed' },
   cameraBadge:        { position: 'absolute', alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
@@ -626,11 +953,15 @@ const styles = StyleSheet.create({
   hamburgerBtn:  { width: 40, height: 40, justifyContent: 'center', alignItems: 'flex-start', gap: 6 },
   hamburgerLine: { width: 24, height: 2.5, borderRadius: 2 },
 
-  overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.65)', zIndex: 10 },
+  overlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.65)', zIndex: 10,
+  },
   mobileDrawer: {
     position: 'absolute', top: 0, left: 0, bottom: 0, width: DRAWER_WIDTH,
     zIndex: 20, borderRightWidth: 1, paddingTop: 16, paddingHorizontal: 14,
-    shadowColor: '#000', shadowOffset: { width: 4, height: 0 }, shadowOpacity: 0.35, shadowRadius: 12, elevation: 16,
+    shadowColor: '#000', shadowOffset: { width: 4, height: 0 },
+    shadowOpacity: 0.35, shadowRadius: 12, elevation: 16,
   },
   drawerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
   closeBtn:     { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
@@ -641,8 +972,8 @@ const styles = StyleSheet.create({
   placeholderText: { fontSize: 16 },
 
   logoutBtn: {
-    width: 32, height: 32, borderRadius: 9, borderWidth: 1,
-    alignItems: 'center', justifyContent: 'center', marginLeft: 4,
+    width: 30, height: 30, borderRadius: 8, borderWidth: 1,
+    alignItems: 'center', justifyContent: 'center', marginLeft: 2, flexShrink: 0,
   },
   logoutIcon: { fontSize: 15, color: '#EF4444', fontWeight: '700' },
 
@@ -675,8 +1006,8 @@ const styles = StyleSheet.create({
   modalImage:                { width: 164, height: 164 },
   modalImagePlaceholder:     { width: 164, height: 164, alignItems: 'center', justifyContent: 'center' },
   modalImagePlaceholderText: { fontSize: 54, fontWeight: '800', color: '#FFFFFF' },
-  modalName: { fontSize: 20, fontWeight: '700', color: '#FFFFFF', letterSpacing: 0.2, marginBottom: 4 },
-  modalRole: { fontSize: 13, color: 'rgba(255,255,255,0.5)', marginBottom: 28 },
+  modalName:  { fontSize: 20, fontWeight: '700', color: '#FFFFFF', letterSpacing: 0.2, marginBottom: 4 },
+  modalRole:  { fontSize: 13, color: 'rgba(255,255,255,0.5)', marginBottom: 28, textAlign: 'center' },
   modalActions:    { flexDirection: 'row', gap: 12, width: '100%' },
   modalActionBtn:  { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 13, borderRadius: 14 },
   modalDeleteBtn:  { backgroundColor: 'rgba(239,68,68,0.15)', borderWidth: 1, borderColor: 'rgba(239,68,68,0.4)' },

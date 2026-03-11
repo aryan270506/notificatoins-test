@@ -29,7 +29,7 @@ const initSocket = (server) => {
       // Save user session with socket ID to database
       try {
         // ✅ Use 127.0.0.1 (localhost) to register session
-        const response = await axios.post("http://127.0.0.1:5001/api/users/register-session", {
+        const response = await axios.post("http://127.0.0.1:5000/api/users/register-session", {
           userId: userData._id,
           socketId: socket.id,
           name: userData.name,
@@ -56,7 +56,7 @@ const initSocket = (server) => {
       
       // Remove session from database
       try {
-        await axios.post("http://127.0.0.1:5001/api/users/remove-session", {
+        await axios.post("http://127.0.0.1:5000/api/users/remove-session", {
           socketId: socket.id
         });
         console.log("✅ Session removed from database");

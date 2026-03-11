@@ -1,166 +1,163 @@
+/**
+ * ╔══════════════════════════════════════════════════════╗
+ * ║  SCREEN 1 — Assignment.js                           ║
+ * ║  Pick Year & Division → goes to AssignmentStudentList║
+ * ╚══════════════════════════════════════════════════════╝
+ */
+
 import React, { useState, useRef, useEffect, useContext } from 'react';
 import {
-  View,
-  Text,
-  TouchableOpacity,
-  ScrollView,
-  StyleSheet,
-  Dimensions,
-  Animated,
-  StatusBar,
+  View, Text, TouchableOpacity, ScrollView,
+  StyleSheet, Animated, StatusBar,
 } from 'react-native';
-import AssignmentStudentListScreen from './AssigenmentStudentList';
+
 import { ThemeContext } from '../dashboard/AdminDashboard';
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+import AssignmentStudentList from './AssignmentStudentList';
+
+// ─── Data ─────────────────────────────────────────────────────────────────────
 
 const YEARS = [
-  { label: '1st Year', short: '1st', color: '#4FC3F7', bg: '#051520', icon: '🎓' },
-  { label: '2nd Year', short: '2nd', color: '#66BB6A', bg: '#051505', icon: '📚' },
-  { label: '3rd Year', short: '3rd', color: '#FFA726', bg: '#150A00', icon: '🔬' },
-  { label: '4th Year', short: '4th', color: '#CE93D8', bg: '#0F0515', icon: '🏆' },
+  { label: '1st Year', short: '1st', color: '#4FC3F7', bg: '#0d2a3d', icon: '🎓' },
+  { label: '2nd Year', short: '2nd', color: '#66BB6A', bg: '#0d2a14', icon: '📚' },
+  { label: '3rd Year', short: '3rd', color: '#FFA726', bg: '#2a1a05', icon: '🔬' },
+  { label: '4th Year', short: '4th', color: '#CE93D8', bg: '#1e0d2a', icon: '🏆' },
 ];
-
 const DIVS = ['A', 'B', 'C'];
 
-export default function Assignment({ onBack, onConfirm }) {
+// ─── Component ────────────────────────────────────────────────────────────────
+
+export default function Assignment({ onBack }) {
+  // ✅ FIXED: Correctly destructure { isDark, colors } from ThemeContext
   const { isDark, colors } = useContext(ThemeContext);
+  const C = colors;
+
   const [selectedYear, setSelectedYear] = useState(null);
-  const [selectedDiv, setSelectedDiv] = useState(null);
-  const [showStudentList, setShowStudentList] = useState(false);
+  const [selectedDiv,  setSelectedDiv]  = useState(null);
+  const [goNext,       setGoNext]       = useState(false);
 
-  // Themed color shortcuts
-  const C = {
-    bg:        colors.bg,
-    surface:   colors.surface,
-    surfaceAlt:colors.surfaceAlt,
-    border:    colors.border,
-    textPrim:  colors.textPrim,
-    textSec:   colors.textSec,
-    textMuted: colors.textMuted,
-  };
-
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(30)).current;
+  const fadeAnim     = useRef(new Animated.Value(0)).current;
+  const slideAnim    = useRef(new Animated.Value(30)).current;
   const confirmScale = useRef(new Animated.Value(1)).current;
-  const divFade = useRef(new Animated.Value(0)).current;
-  const divSlide = useRef(new Animated.Value(10)).current;
+  const divFade      = useRef(new Animated.Value(0)).current;
+  const divSlide     = useRef(new Animated.Value(10)).current;
 
   useEffect(() => {
     Animated.parallel([
-      Animated.timing(fadeAnim, { toValue: 1, duration: 500, useNativeDriver: true }),
+      Animated.timing(fadeAnim,  { toValue: 1, duration: 500, useNativeDriver: true }),
       Animated.timing(slideAnim, { toValue: 0, duration: 500, useNativeDriver: true }),
     ]).start();
   }, []);
 
-  // Animate div section in when year is selected
   useEffect(() => {
     if (selectedYear) {
-      divFade.setValue(0);
-      divSlide.setValue(10);
+      divFade.setValue(0); divSlide.setValue(10);
       Animated.parallel([
-        Animated.timing(divFade, { toValue: 1, duration: 350, useNativeDriver: true }),
+        Animated.timing(divFade,  { toValue: 1, duration: 350, useNativeDriver: true }),
         Animated.timing(divSlide, { toValue: 0, duration: 350, useNativeDriver: true }),
       ]).start();
     }
   }, [selectedYear]);
 
-  const handleYearSelect = (year) => {
-    setSelectedYear(year);
-    setSelectedDiv(null); // reset div on year change
-  };
-
-  const handleConfirm = () => {
-    if (!selectedYear || !selectedDiv) return;
-    Animated.sequence([
-      Animated.timing(confirmScale, { toValue: 0.95, duration: 100, useNativeDriver: true }),
-      Animated.timing(confirmScale, { toValue: 1, duration: 100, useNativeDriver: true }),
-    ]).start(() => {
-       if (!canConfirm) return;
-  setShowStudentList(true);
-    });
-  };
-
-  const canConfirm = selectedYear && selectedDiv;
+  const canConfirm  = !!(selectedYear && selectedDiv);
   const accentColor = selectedYear ? selectedYear.color : '#4FC3F7';
 
-  if (showStudentList) {
-  return (
-    <AssignmentStudentListScreen
-      selectedYear={selectedYear}
-      selectedDivision={selectedDiv}
-      onBack={() => setShowStudentList(false)}
-    />
-  );
-}
+  const handleYearSelect = (year) => { setSelectedYear(year); setSelectedDiv(null); };
+
+  const handleConfirm = () => {
+    if (!canConfirm) return;
+    Animated.sequence([
+      Animated.timing(confirmScale, { toValue: 0.95, duration: 100, useNativeDriver: true }),
+      Animated.timing(confirmScale, { toValue: 1,    duration: 100, useNativeDriver: true }),
+    ]).start(() => setGoNext(true));
+  };
+
+  if (goNext) {
+    return (
+      <AssignmentStudentList
+        selectedYear={selectedYear}
+        selectedDivision={selectedDiv}
+        onBack={() => setGoNext(false)}
+      />
+    );
+  }
 
   return (
-    <View style={[styles.container, { backgroundColor: C.bg }]}>
-      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={C.bg} />
+    <View style={[s.container, { backgroundColor: C.bg }]}>
+      <StatusBar
+        barStyle={isDark ? 'light-content' : 'dark-content'}
+        backgroundColor={C.bg}
+      />
 
       {/* Header */}
-      <View style={[styles.header, { borderBottomColor: C.border }]}>
-        <TouchableOpacity onPress={onBack} style={[styles.backBtn, { backgroundColor: C.surface, borderColor: C.border }]}>
-          <Text style={[styles.backArrow, { color: C.textSec }]}>←</Text>
+      <View style={[s.header, { borderBottomColor: C.border }]}>
+        <TouchableOpacity
+          onPress={onBack}
+          style={[s.backBtn, { backgroundColor: C.surface, borderColor: C.border }]}
+        >
+          <Text style={[s.backArrow, { color: C.textSec }]}>←</Text>
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <Text style={[styles.headerTitle, { color: C.textPrim }]}>Select Year & Division</Text>
-          <Text style={[styles.headerSub, { color: C.textMuted }]}>Filter attendance report by class</Text>
+          <Text style={[s.headerTitle, { color: C.textPrim }]}>Select Year & Division</Text>
+          <Text style={[s.headerSub,   { color: C.textSec }]}>Filter assignment report by class</Text>
         </View>
         {canConfirm && (
-          <View style={[styles.selectionBadge, { backgroundColor: accentColor + '20', borderColor: accentColor + '40' }]}>
-            <Text style={[styles.selectionBadgeText, { color: accentColor }]}>
-              {selectedYear.short} · Div {selectedDiv}
-            </Text>
+          <View style={[s.badge, { backgroundColor: accentColor + '30', borderColor: accentColor + '60' }]}>
+            <Text style={[s.badgeText, { color: accentColor }]}>{selectedYear.short} · Div {selectedDiv}</Text>
           </View>
         )}
       </View>
 
-      <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
+      {/* Scrollable content */}
+      <ScrollView
+        style={s.scroll}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 130 }}
+      >
         <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
 
-          {/* Step 1 — Year */}
-          <View style={styles.stepRow}>
-            <View style={[styles.stepNumber, { backgroundColor: accentColor + '20', borderColor: accentColor + '40' }]}>
-              <Text style={[styles.stepNumberText, { color: accentColor }]}>1</Text>
-            </View>
-            <Text style={[styles.stepTitle, { color: C.textSec }]}>Choose Academic Year</Text>
-          </View>
+          {/* Step 1 */}
+          <StepLabel number="1" label="Choose Academic Year" accent={accentColor} textColor={C.textPrim} />
 
-          <View style={styles.yearGrid}>
+          <View style={s.yearGrid}>
             {YEARS.map((year) => {
               const isActive = selectedYear?.short === year.short;
+              // ✅ FIXED: In light mode use C.surface instead of dark year.bg
+              const cardBg = isActive
+                ? (isDark ? year.bg : accentColor + '18')
+                : C.surface;
+
               return (
                 <TouchableOpacity
                   key={year.short}
                   onPress={() => handleYearSelect(year)}
                   activeOpacity={0.8}
                   style={[
-                    styles.yearCard,
+                    s.yearCard,
                     {
-                      backgroundColor: isActive ? year.bg : C.surface,
-                      borderColor: isActive ? year.color : C.border,
-                      borderWidth: isActive ? 1.5 : 1,
+                      backgroundColor: cardBg,
+                      borderColor:     isActive ? year.color : C.border,
+                      borderWidth:     isActive ? 2 : 1,
                     },
                   ]}
                 >
-                  {/* Glow bar at top */}
-                  <View style={[styles.yearCardBar, { backgroundColor: isActive ? year.color : C.border }]} />
+                  {/* Accent top bar */}
+                  <View style={[s.yearBar, { backgroundColor: isActive ? year.color : year.color + '55' }]} />
 
-                  <View style={styles.yearCardInner}>
-                    <Text style={styles.yearCardIcon}>{year.icon}</Text>
+                  <View style={s.yearInner}>
+                    <Text style={s.yearIcon}>{year.icon}</Text>
                     <View style={{ flex: 1 }}>
-                      <Text style={[styles.yearCardLabel, { color: isActive ? year.color : C.textMuted }]}>
+                      <Text style={[s.yearLabel, { color: isActive ? year.color : C.textPrim }]}>
                         {year.label}
                       </Text>
-                      <Text style={[styles.yearCardSub, { color: C.textMuted }]}>
-                        {year.short === '1st' ? '~3,200 students' : year.short === '2nd' ? '~3,050 students' : year.short === '3rd' ? '~3,100 students' : '~3,130 students'}
+                      <Text style={[s.yearSub, { color: C.textSec }]}>
+                        {year.short === '1st' ? '~3,200 students'
+                          : year.short === '2nd' ? '~3,050 students'
+                          : year.short === '3rd' ? '~3,100 students'
+                          : '~3,130 students'}
                       </Text>
                     </View>
-                    <View style={[
-                      styles.radioOuter,
-                      { borderColor: isActive ? year.color : C.border },
-                    ]}>
-                      {isActive && <View style={[styles.radioInner, { backgroundColor: year.color }]} />}
+                    <View style={[s.radioOuter, { borderColor: isActive ? year.color : C.border }]}>
+                      {isActive && <View style={[s.radioInner, { backgroundColor: year.color }]} />}
                     </View>
                   </View>
                 </TouchableOpacity>
@@ -168,17 +165,18 @@ export default function Assignment({ onBack, onConfirm }) {
             })}
           </View>
 
-          {/* Step 2 — Division (shown after year selected) */}
+          {/* Step 2 */}
           {selectedYear && (
             <Animated.View style={{ opacity: divFade, transform: [{ translateY: divSlide }] }}>
-              <View style={[styles.stepRow, { marginTop: 28 }]}>
-                <View style={[styles.stepNumber, { backgroundColor: accentColor + '20', borderColor: accentColor + '40' }]}>
-                  <Text style={[styles.stepNumberText, { color: accentColor }]}>2</Text>
-                </View>
-                <Text style={[styles.stepTitle, { color: C.textSec }]}>Choose Division</Text>
-              </View>
+              <StepLabel
+                number="2"
+                label="Choose Division"
+                accent={accentColor}
+                textColor={C.textPrim}
+                style={{ marginTop: 28 }}
+              />
 
-              <View style={styles.divRow}>
+              <View style={s.divRow}>
                 {DIVS.map((div) => {
                   const isActive = selectedDiv === div;
                   return (
@@ -187,29 +185,31 @@ export default function Assignment({ onBack, onConfirm }) {
                       onPress={() => setSelectedDiv(div)}
                       activeOpacity={0.8}
                       style={[
-                        styles.divCard,
+                        s.divCard,
                         {
-                          backgroundColor: isActive ? accentColor + '15' : C.surface,
-                          borderColor: isActive ? accentColor : C.border,
-                          borderWidth: isActive ? 1.5 : 1,
+                          // ✅ FIXED: theme-aware background
+                          backgroundColor: isActive ? accentColor + '22' : C.surface,
+                          borderColor:     isActive ? accentColor : C.border,
+                          borderWidth:     isActive ? 2 : 1,
                         },
                       ]}
                     >
-                      <View style={[styles.divCircle, {
-                        backgroundColor: isActive ? accentColor + '25' : C.surfaceAlt,
-                        borderColor: isActive ? accentColor + '60' : C.border,
-                      }]}>
-                        <Text style={[styles.divLetter, { color: isActive ? accentColor : C.textMuted }]}>
+                      <View style={[
+                        s.divCircle,
+                        {
+                          backgroundColor: isActive ? accentColor + '30' : C.surfaceAlt,
+                          borderColor:     isActive ? accentColor : C.border,
+                        },
+                      ]}>
+                        <Text style={[s.divLetter, { color: isActive ? accentColor : C.textPrim }]}>
                           {div}
                         </Text>
                       </View>
-                      <Text style={[styles.divLabel, { color: isActive ? accentColor + 'CC' : C.textMuted }]}>
-                        Division
-                      </Text>
-                      <Text style={[styles.divStudents, { color: C.textMuted }]}>~1,050</Text>
+                      <Text style={[s.divLabel2,   { color: isActive ? accentColor : C.textSec }]}>Division</Text>
+                      <Text style={[s.divStudents, { color: C.textSec }]}>~1,050</Text>
                       {isActive && (
-                        <View style={[styles.divCheck, { backgroundColor: accentColor }]}>
-                          <Text style={styles.divCheckText}>✓</Text>
+                        <View style={[s.divCheck, { backgroundColor: accentColor }]}>
+                          <Text style={s.divCheckText}>✓</Text>
                         </View>
                       )}
                     </TouchableOpacity>
@@ -217,19 +217,22 @@ export default function Assignment({ onBack, onConfirm }) {
                 })}
               </View>
 
-              {/* Summary card */}
               {selectedDiv && (
-                <Animated.View
-                  style={[styles.summaryCard, { borderColor: accentColor + '40', backgroundColor: accentColor + '08' }]}
-                >
-                  <Text style={[styles.summaryLabel, { color: C.textMuted }]}>SELECTED CLASS</Text>
-                  <Text style={[styles.summaryValue, { color: accentColor }]}>
+                <View style={[
+                  s.summaryCard,
+                  {
+                    borderColor:     accentColor + '60',
+                    backgroundColor: accentColor + '12',
+                  },
+                ]}>
+                  <Text style={[s.summaryLabel, { color: C.textSec }]}>SELECTED CLASS</Text>
+                  <Text style={[s.summaryValue, { color: accentColor }]}>
                     {selectedYear.label} · Division {selectedDiv}
                   </Text>
-                  <Text style={[styles.summarySub, { color: C.textSec }]}>
-                    Viewing monthly attendance data for this group
+                  <Text style={[s.summarySub, { color: C.textSec }]}>
+                    Tap the button below to view students
                   </Text>
-                </Animated.View>
+                </View>
               )}
             </Animated.View>
           )}
@@ -237,28 +240,31 @@ export default function Assignment({ onBack, onConfirm }) {
         </Animated.View>
       </ScrollView>
 
-      {/* Confirm Button — Fixed at bottom */}
-      <View style={[styles.bottomBar, { backgroundColor: C.bg, borderTopColor: C.border }]}>
+      {/* Confirm button */}
+      <View style={[s.bottomBar, { backgroundColor: C.bg, borderTopColor: C.border }]}>
         <Animated.View style={{ transform: [{ scale: confirmScale }], flex: 1 }}>
           <TouchableOpacity
             onPress={handleConfirm}
             disabled={!canConfirm}
             activeOpacity={0.85}
             style={[
-              styles.confirmBtn,
+              s.confirmBtn,
               {
                 backgroundColor: canConfirm ? accentColor : C.surface,
-                borderColor: canConfirm ? accentColor : C.border,
+                borderColor:     canConfirm ? accentColor : C.border,
                 opacity: canConfirm ? 1 : 0.5,
               },
             ]}
           >
-            <Text style={[styles.confirmBtnText, { color: canConfirm ? C.bg : C.textMuted }]}>
+            {/* ✅ FIXED: text color works on both light and dark */}
+            <Text style={[s.confirmBtnText, { color: canConfirm ? (isDark ? '#0d1117' : '#fff') : C.textSec }]}>
               {canConfirm
-                ? `View Report · ${selectedYear.short} Year Div ${selectedDiv}`
+                ? `View Students · ${selectedYear.short} Year Div ${selectedDiv}`
                 : 'Select Year & Division to Continue'}
             </Text>
-            {canConfirm && <Text style={[styles.confirmArrow, { color: C.bg }]}>→</Text>}
+            {canConfirm && (
+              <Text style={[s.confirmArrow, { color: isDark ? '#0d1117' : '#fff' }]}>→</Text>
+            )}
           </TouchableOpacity>
         </Animated.View>
       </View>
@@ -266,94 +272,70 @@ export default function Assignment({ onBack, onConfirm }) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
+// ─── Step label sub-component ─────────────────────────────────────────────────
 
-  // Header
+function StepLabel({ number, label, accent, textColor, style }) {
+  return (
+    <View style={[s.stepRow, style]}>
+      <View style={[s.stepNum, { backgroundColor: accent + '25', borderColor: accent + '60' }]}>
+        <Text style={[s.stepNumText, { color: accent }]}>{number}</Text>
+      </View>
+      {/* ✅ FIXED: uses passed textColor (C.textPrim) directly */}
+      <Text style={[s.stepTitle, { color: textColor }]}>{label}</Text>
+    </View>
+  );
+}
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
+const s = StyleSheet.create({
+  container:   { flex: 1 },
   header: {
     paddingTop: 52, paddingHorizontal: 16, paddingBottom: 14,
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    borderBottomWidth: 1,
+    flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: 1,
   },
-  backBtn: {
-    width: 38, height: 38, borderRadius: 10,
-    alignItems: 'center', justifyContent: 'center', borderWidth: 1,
-  },
-  backArrow: { fontSize: 18, fontWeight: '700' },
+  backBtn:     { width: 38, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  backArrow:   { fontSize: 18, fontWeight: '700' },
   headerTitle: { fontSize: 16, fontWeight: '700' },
-  headerSub: { fontSize: 11, marginTop: 1 },
-  selectionBadge: {
-    borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1,
-  },
-  selectionBadgeText: { fontSize: 11, fontWeight: '700' },
+  headerSub:   { fontSize: 11, marginTop: 1 },
+  badge:       { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1 },
+  badgeText:   { fontSize: 11, fontWeight: '700' },
 
-  // Scroll
   scroll: { paddingHorizontal: 16, paddingTop: 24 },
 
-  // Step indicator
-  stepRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14,
-  },
-  stepNumber: {
-    width: 26, height: 26, borderRadius: 13, alignItems: 'center',
-    justifyContent: 'center', borderWidth: 1,
-  },
-  stepNumberText: { fontSize: 12, fontWeight: '800' },
-  stepTitle: { fontSize: 13, fontWeight: '700', letterSpacing: 0.3 },
+  stepRow:     { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
+  stepNum:     { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5 },
+  stepNumText: { fontSize: 13, fontWeight: '800' },
+  stepTitle:   { fontSize: 14, fontWeight: '700', letterSpacing: 0.3 },
 
-  // Year cards
-  yearGrid: { gap: 10 },
-  yearCard: {
-    borderRadius: 14, overflow: 'hidden',
-  },
-  yearCardBar: { height: 3, width: '100%' },
-  yearCardInner: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    padding: 16,
-  },
-  yearCardIcon: { fontSize: 22 },
-  yearCardLabel: { fontSize: 14, fontWeight: '700' },
-  yearCardSub: { fontSize: 11, marginTop: 2 },
-  radioOuter: {
-    width: 20, height: 20, borderRadius: 10, borderWidth: 2,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  radioInner: { width: 10, height: 10, borderRadius: 5 },
+  yearGrid:  { gap: 10 },
+  yearCard:  { borderRadius: 14, overflow: 'hidden' },
+  yearBar:   { height: 4 },
+  yearInner: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 },
+  yearIcon:  { fontSize: 24 },
+  yearLabel: { fontSize: 15, fontWeight: '700' },
+  yearSub:   { fontSize: 12, marginTop: 2 },
+  radioOuter: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  radioInner: { width: 11, height: 11, borderRadius: 6 },
 
-  // Division cards
-  divRow: { flexDirection: 'row', gap: 12 },
-  divCard: {
-    flex: 1, borderRadius: 14, padding: 16, alignItems: 'center',
-    position: 'relative',
-  },
-  divCircle: {
-    width: 60, height: 60, borderRadius: 30, alignItems: 'center',
-    justifyContent: 'center', borderWidth: 1, marginBottom: 8,
-  },
-  divLetter: { fontSize: 28, fontWeight: '800' },
-  divLabel: { fontSize: 11, fontWeight: '600' },
-  divStudents: { fontSize: 10, marginTop: 2 },
-  divCheck: {
-    position: 'absolute', top: 10, right: 10,
-    width: 18, height: 18, borderRadius: 9,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  divCheckText: { fontSize: 10, fontWeight: '900' },
+  divRow:     { flexDirection: 'row', gap: 12 },
+  divCard:    { flex: 1, borderRadius: 14, padding: 16, alignItems: 'center', position: 'relative' },
+  divCircle:  { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, marginBottom: 8 },
+  divLetter:  { fontSize: 30, fontWeight: '800' },
+  divLabel2:  { fontSize: 12, fontWeight: '600' },
+  divStudents: { fontSize: 11, marginTop: 3 },
+  divCheck:   { position: 'absolute', top: 10, right: 10, width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  divCheckText: { fontSize: 11, fontWeight: '900', color: '#fff' },
 
-  // Summary card
-  summaryCard: {
-    marginTop: 16, borderRadius: 14, borderWidth: 1, padding: 16,
-  },
+  summaryCard:  { marginTop: 16, borderRadius: 14, borderWidth: 1.5, padding: 16 },
   summaryLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 1, marginBottom: 4 },
   summaryValue: { fontSize: 18, fontWeight: '800', marginBottom: 4 },
-  summarySub: { fontSize: 12 },
+  summarySub:   { fontSize: 12 },
 
-  // Bottom confirm bar
   bottomBar: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    paddingHorizontal: 16, paddingBottom: 34, paddingTop: 12,
-    borderTopWidth: 1,
-    flexDirection: 'row',
+    paddingHorizontal: 16, paddingBottom: 36, paddingTop: 12,
+    borderTopWidth: 1, flexDirection: 'row',
   },
   confirmBtn: {
     borderRadius: 14, paddingVertical: 16, paddingHorizontal: 20,
@@ -361,5 +343,5 @@ const styles = StyleSheet.create({
     borderWidth: 1, gap: 8,
   },
   confirmBtnText: { fontSize: 14, fontWeight: '800' },
-  confirmArrow: { fontSize: 16, fontWeight: '900' },
+  confirmArrow:   { fontSize: 16, fontWeight: '900' },
 });

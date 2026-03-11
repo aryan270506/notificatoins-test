@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import axiosInstance from '../../../Src/Axios';
 import {
   View,
   Text,
@@ -9,187 +10,208 @@ import {
   StatusBar,
   Platform,
   useWindowDimensions,
+  ActivityIndicator,
+  Alert,
+  Linking,
 } from 'react-native';
 
-// ─── Mock Notes Data ───────────────────────────────────────────────────────────
-const NOTES_DATA = {
-  CS201: [
-    {
-      id: 'n1',
-      title: 'Introduction to Arrays & Big-O',
-      type: 'Lecture',
-      pages: 12,
-      date: 'Jan 10, 2025',
-      tag: 'Week 1',
-      preview:
-        'Overview of array data structures, time-space complexity, and the Big-O notation system used throughout the course.',
-    },
-    {
-      id: 'n2',
-      title: 'Linked Lists – Singly & Doubly',
-      type: 'Lecture',
-      pages: 18,
-      date: 'Jan 17, 2025',
-      tag: 'Week 2',
-      preview:
-        'Node-based storage, pointer manipulation, insertion/deletion at head, tail and mid-list for both singly and doubly linked variants.',
-    },
-    {
-      id: 'n3',
-      title: 'Stacks & Queues',
-      type: 'Lecture',
-      pages: 10,
-      date: 'Jan 24, 2025',
-      tag: 'Week 3',
-      preview:
-        'LIFO and FIFO principles, array vs linked-list implementations, monotonic stack tricks and circular queue optimisation.',
-    },
-    {
-      id: 'n4',
-      title: 'Trees: BST, AVL, Red-Black',
-      type: 'Lecture',
-      pages: 24,
-      date: 'Feb 3, 2025',
-      tag: 'Week 5',
-      preview:
-        'Binary Search Trees, self-balancing AVL rotations, Red-Black tree colouring rules and amortised complexity guarantees.',
-    },
-    {
-      id: 'n5',
-      title: 'Graph Algorithms – BFS & DFS',
-      type: 'Lab Sheet',
-      pages: 8,
-      date: 'Feb 14, 2025',
-      tag: 'Week 6',
-      preview:
-        'Adjacency list vs matrix representation, breadth-first and depth-first traversal, cycle detection, and topological sort.',
-    },
-    {
-      id: 'n6',
-      title: 'Sorting: Merge, Quick & Heap',
-      type: 'Lecture',
-      pages: 20,
-      date: 'Feb 21, 2025',
-      tag: 'Week 7',
-      preview:
-        'Divide-and-conquer approaches, pivot selection strategies, in-place vs out-of-place sorting and comparison-based lower bounds.',
-    },
-    {
-      id: 'n7',
-      title: 'Dynamic Programming Basics',
-      type: 'Tutorial',
-      pages: 14,
-      date: 'Mar 3, 2025',
-      tag: 'Week 9',
-      preview:
-        'Memoisation vs tabulation, overlapping subproblems, optimal substructure and classic DP problems: knapsack, LCS, LIS.',
-    },
-    {
-      id: 'n8',
-      title: 'Hashing & Hash Tables',
-      type: 'Lecture',
-      pages: 11,
-      date: 'Mar 10, 2025',
-      tag: 'Week 10',
-      preview:
-        'Hash functions, collision handling via chaining and open addressing, load factor, rehashing and amortised O(1) guarantees.',
-    },
-  ],
-  CS202: [
-    { id: 'n1', title: 'Process & Thread Concepts', type: 'Lecture', pages: 16, date: 'Jan 12, 2025', tag: 'Week 1', preview: 'Processes vs threads, PCB structure, context switching overhead and multithreading models.' },
-    { id: 'n2', title: 'CPU Scheduling Algorithms', type: 'Lecture', pages: 14, date: 'Jan 20, 2025', tag: 'Week 2', preview: 'FCFS, SJF, Round Robin, Priority scheduling — Gantt charts and response/turnaround time calculations.' },
-    { id: 'n3', title: 'Deadlocks & Synchronisation', type: 'Lecture', pages: 18, date: 'Jan 28, 2025', tag: 'Week 3', preview: 'Mutex, semaphores, monitors, Banker\'s algorithm, deadlock detection and prevention strategies.' },
-    { id: 'n4', title: 'Memory Management & Paging', type: 'Lecture', pages: 22, date: 'Feb 6, 2025', tag: 'Week 5', preview: 'Segmentation, paging, TLBs, page-replacement algorithms: FIFO, LRU, Optimal and Clock.' },
-    { id: 'n5', title: 'File System Internals', type: 'Lab Sheet', pages: 9, date: 'Feb 18, 2025', tag: 'Week 7', preview: 'Inodes, FAT, directory structures, file allocation: contiguous, linked, indexed and journaling.' },
-    { id: 'n6', title: 'Shell Scripting & System Calls', type: 'Tutorial', pages: 11, date: 'Mar 5, 2025', tag: 'Week 9', preview: 'Bash scripting, fork/exec/wait system calls, pipes, signals and inter-process communication.' },
-    { id: 'n7', title: 'Virtual Memory & Demand Paging', type: 'Lecture', pages: 15, date: 'Mar 12, 2025', tag: 'Week 10', preview: 'Working set model, thrashing, demand paging mechanics and performance tuning.' },
-    { id: 'n8', title: 'I/O Systems & Device Drivers', type: 'Lecture', pages: 10, date: 'Mar 19, 2025', tag: 'Week 11', preview: 'I/O hardware, polling vs interrupts, DMA, disk scheduling: FCFS, SSTF, SCAN and C-SCAN.' },
-  ],
-  CS203: [
-    { id: 'n1', title: 'Relational Model & ER Diagrams', type: 'Lecture', pages: 20, date: 'Jan 11, 2025', tag: 'Week 1', preview: 'Entity-relationship modelling, crow\'s-foot notation, cardinalities and converting ER to relational schema.' },
-    { id: 'n2', title: 'SQL – DDL & DML', type: 'Lecture', pages: 18, date: 'Jan 19, 2025', tag: 'Week 2', preview: 'CREATE, ALTER, DROP, INSERT, UPDATE, DELETE; constraints: PRIMARY KEY, FOREIGN KEY, UNIQUE, CHECK.' },
-    { id: 'n3', title: 'Advanced SQL Queries', type: 'Lecture', pages: 16, date: 'Jan 26, 2025', tag: 'Week 3', preview: 'Joins (inner, outer, cross), subqueries, CTEs, window functions, GROUP BY and HAVING clauses.' },
-    { id: 'n4', title: 'Normalisation: 1NF to BCNF', type: 'Lecture', pages: 24, date: 'Feb 5, 2025', tag: 'Week 5', preview: 'Functional dependencies, closure, canonical cover, decomposition, lossless join and dependency preservation.' },
-    { id: 'n5', title: 'Indexing & Query Optimisation', type: 'Lecture', pages: 19, date: 'Feb 17, 2025', tag: 'Week 7', preview: 'B+ trees, hash indexes, query execution plans, cost estimation, join ordering and materialisation.' },
-    { id: 'n6', title: 'Transactions & ACID Properties', type: 'Tutorial', pages: 13, date: 'Mar 3, 2025', tag: 'Week 9', preview: 'Atomicity, consistency, isolation, durability; concurrency control: 2PL, timestamp ordering, MVCC.' },
-    { id: 'n7', title: 'NoSQL & Document Stores', type: 'Lecture', pages: 15, date: 'Mar 11, 2025', tag: 'Week 10', preview: 'CAP theorem, MongoDB document model, Redis key-value, Cassandra wide-column and graph databases.' },
-  ],
-  CS205: [
-    { id: 'n1', title: 'Finite Automata & Regular Languages', type: 'Lecture', pages: 18, date: 'Jan 13, 2025', tag: 'Week 1', preview: 'DFA, NFA, ε-NFA, subset construction, minimisation and equivalence to regular expressions.' },
-    { id: 'n2', title: 'Context-Free Grammars', type: 'Lecture', pages: 20, date: 'Jan 22, 2025', tag: 'Week 3', preview: 'Derivations, parse trees, ambiguity, CNF, CYK parsing and pushdown automata.' },
-    { id: 'n3', title: 'Turing Machines', type: 'Lecture', pages: 22, date: 'Feb 4, 2025', tag: 'Week 5', preview: 'Standard TM model, multi-tape TMs, non-determinism, Church-Turing thesis and universal TMs.' },
-    { id: 'n4', title: 'Decidability & Reducibility', type: 'Lecture', pages: 17, date: 'Feb 19, 2025', tag: 'Week 7', preview: 'Halting problem, Rice\'s theorem, mapping reductions, Post Correspondence Problem and undecidability proofs.' },
-    { id: 'n5', title: 'Complexity Classes P vs NP', type: 'Tutorial', pages: 15, date: 'Mar 7, 2025', tag: 'Week 9', preview: 'Polynomial-time verifiers, NP-completeness, Cook-Levin theorem, SAT, 3-SAT, and approximation algorithms.' },
-  ],
-  CS301: [
-    { id: 'n1', title: 'Introduction to ML & Linear Regression', type: 'Lecture', pages: 22, date: 'Jan 10, 2025', tag: 'Week 1', preview: 'Supervised vs unsupervised, gradient descent, MSE cost function, feature scaling and normal equations.' },
-    { id: 'n2', title: 'Logistic Regression & Classification', type: 'Lecture', pages: 18, date: 'Jan 18, 2025', tag: 'Week 2', preview: 'Sigmoid function, binary cross-entropy, decision boundary, multi-class via softmax and one-vs-rest.' },
-    { id: 'n3', title: 'Decision Trees & Random Forests', type: 'Lecture', pages: 20, date: 'Jan 27, 2025', tag: 'Week 3', preview: 'Information gain, Gini impurity, pruning, bagging, bootstrap sampling and feature importance.' },
-    { id: 'n4', title: 'Neural Networks & Backpropagation', type: 'Lecture', pages: 28, date: 'Feb 7, 2025', tag: 'Week 5', preview: 'MLP architecture, activation functions, forward pass, chain rule backprop, vanishing gradients and Adam optimiser.' },
-    { id: 'n5', title: 'CNNs for Image Recognition', type: 'Lab Sheet', pages: 16, date: 'Feb 18, 2025', tag: 'Week 7', preview: 'Convolution, pooling, LeNet, VGG, ResNet skip connections and transfer learning with fine-tuning.' },
-    { id: 'n6', title: 'Clustering: K-Means & DBSCAN', type: 'Lecture', pages: 14, date: 'Mar 4, 2025', tag: 'Week 9', preview: 'Lloyd\'s algorithm, elbow method, silhouette score, density-based clustering and noise handling.' },
-    { id: 'n7', title: 'Model Evaluation & Cross-Validation', type: 'Tutorial', pages: 12, date: 'Mar 12, 2025', tag: 'Week 10', preview: 'Confusion matrix, ROC-AUC, precision-recall, k-fold CV, bias-variance tradeoff and regularisation.' },
-  ],
-  CS302: [
-    { id: 'n1', title: 'Cloud Fundamentals & IaaS/PaaS/SaaS', type: 'Lecture', pages: 16, date: 'Jan 11, 2025', tag: 'Week 1', preview: 'Cloud service models, deployment types (public, private, hybrid), AWS global infrastructure overview.' },
-    { id: 'n2', title: 'AWS Core Services', type: 'Lecture', pages: 20, date: 'Jan 20, 2025', tag: 'Week 2', preview: 'EC2, S3, RDS, IAM, VPC, Route 53, CloudFront and cost optimisation with Reserved vs Spot instances.' },
-    { id: 'n3', title: 'Docker & Containerisation', type: 'Lab Sheet', pages: 14, date: 'Feb 3, 2025', tag: 'Week 4', preview: 'Dockerfile authoring, image layers, volumes, networking, Docker Compose multi-service orchestration.' },
-    { id: 'n4', title: 'Kubernetes Orchestration', type: 'Lecture', pages: 24, date: 'Feb 17, 2025', tag: 'Week 6', preview: 'Pods, deployments, services, ingress, ConfigMaps, secrets, horizontal pod autoscaler and Helm charts.' },
-    { id: 'n5', title: 'Serverless & Lambda', type: 'Tutorial', pages: 11, date: 'Mar 5, 2025', tag: 'Week 9', preview: 'Event-driven architecture, cold starts, API Gateway integration, Step Functions and cost modelling.' },
-  ],
-  CS303: [
-    { id: 'n1', title: 'Cryptography Fundamentals', type: 'Lecture', pages: 22, date: 'Jan 12, 2025', tag: 'Week 1', preview: 'Symmetric & asymmetric encryption, AES, RSA, elliptic curve cryptography, digital signatures and certificates.' },
-    { id: 'n2', title: 'Network Security & Firewalls', type: 'Lecture', pages: 18, date: 'Jan 21, 2025', tag: 'Week 2', preview: 'OSI security architecture, packet filtering, stateful inspection, IDS/IPS, DMZ design and VPNs.' },
-    { id: 'n3', title: 'Web Application Security (OWASP Top 10)', type: 'Lecture', pages: 20, date: 'Feb 4, 2025', tag: 'Week 4', preview: 'SQL injection, XSS, CSRF, SSRF, insecure deserialization, broken auth and security misconfigurations.' },
-    { id: 'n4', title: 'Penetration Testing Methodology', type: 'Lab Sheet', pages: 16, date: 'Feb 19, 2025', tag: 'Week 7', preview: 'Reconnaissance, scanning (Nmap), exploitation (Metasploit), post-exploitation and reporting standards.' },
-    { id: 'n5', title: 'Incident Response & Forensics', type: 'Tutorial', pages: 12, date: 'Mar 10, 2025', tag: 'Week 10', preview: 'IR lifecycle, chain of custody, memory/disk forensics, log analysis and SIEM/SOAR platforms.' },
-  ],
-  CS204: [
-    { id: 'n1', title: 'OSI & TCP/IP Models', type: 'Lab Sheet', pages: 14, date: 'Jan 13, 2025', tag: 'Week 1', preview: 'Seven OSI layers vs TCP/IP four-layer model, encapsulation, PDU types and protocol mapping.' },
-    { id: 'n2', title: 'IP Addressing & Subnetting', type: 'Lab Sheet', pages: 16, date: 'Jan 22, 2025', tag: 'Week 2', preview: 'IPv4 classes, CIDR notation, subnet mask calculation, VLSM, IPv6 addressing and address translation.' },
-    { id: 'n3', title: 'Routing Algorithms: RIP, OSPF, BGP', type: 'Lecture', pages: 20, date: 'Feb 5, 2025', tag: 'Week 4', preview: 'Distance-vector vs link-state routing, Dijkstra SPF, autonomous systems and BGP path attributes.' },
-    { id: 'n4', title: 'Transport Layer: TCP vs UDP', type: 'Lab Sheet', pages: 12, date: 'Feb 19, 2025', tag: 'Week 6', preview: 'Three-way handshake, flow control, congestion control (CUBIC), reliability vs low-latency trade-offs.' },
-    { id: 'n5', title: 'Network Security Principles', type: 'Lecture', pages: 15, date: 'Mar 6, 2025', tag: 'Week 9', preview: 'TLS/SSL, SSH, IPsec, firewall rules, NAT traversal and zero-trust network architecture.' },
-  ],
-  MA104: [
-    { id: 'n1', title: 'Set Theory & Logic', type: 'Lecture', pages: 16, date: 'Jan 10, 2025', tag: 'Week 1', preview: 'Naive set theory, Venn diagrams, propositional logic, truth tables, equivalences and inference rules.' },
-    { id: 'n2', title: 'Proof Techniques', type: 'Lecture', pages: 14, date: 'Jan 19, 2025', tag: 'Week 2', preview: 'Direct proof, proof by contradiction, contrapositive, mathematical induction and strong induction.' },
-    { id: 'n3', title: 'Relations & Functions', type: 'Lecture', pages: 18, date: 'Jan 28, 2025', tag: 'Week 3', preview: 'Equivalence relations, partial orders, Hasse diagrams, injections, surjections and bijections.' },
-    { id: 'n4', title: 'Graph Theory Fundamentals', type: 'Lab Sheet', pages: 22, date: 'Feb 10, 2025', tag: 'Week 5', preview: 'Graph types, Euler/Hamiltonian paths, planarity, graph colouring, chromatic number and four-colour theorem.' },
-    { id: 'n5', title: 'Combinatorics & Counting', type: 'Lecture', pages: 20, date: 'Feb 24, 2025', tag: 'Week 7', preview: 'Permutations, combinations, pigeonhole principle, inclusion-exclusion, generating functions and recurrences.' },
-    { id: 'n6', title: 'Number Theory & Cryptography', type: 'Tutorial', pages: 15, date: 'Mar 10, 2025', tag: 'Week 9', preview: 'Modular arithmetic, GCD/Euclidean algorithm, Fermat\'s little theorem, RSA key generation walkthrough.' },
-  ],
-  CS401: [
-    { id: 'n1', title: 'Agile & Scrum Methodology', type: 'Lab Sheet', pages: 14, date: 'Jan 11, 2025', tag: 'Week 1', preview: 'Sprint planning, daily standups, sprint reviews, retrospectives, velocity tracking and product backlog refinement.' },
-    { id: 'n2', title: 'Git & Version Control', type: 'Lab Sheet', pages: 12, date: 'Jan 20, 2025', tag: 'Week 2', preview: 'Branching strategies (Gitflow, trunk-based), rebasing, merge conflicts, tagging and GitHub collaboration workflows.' },
-    { id: 'n3', title: 'CI/CD Pipelines with GitHub Actions', type: 'Lab Sheet', pages: 16, date: 'Feb 3, 2025', tag: 'Week 4', preview: 'YAML workflow syntax, build/test/deploy stages, secrets management, Docker image publishing and rollback strategies.' },
-    { id: 'n4', title: 'Software Testing: Unit & Integration', type: 'Tutorial', pages: 14, date: 'Feb 18, 2025', tag: 'Week 6', preview: 'TDD with Jest/PyTest, mocking, test coverage metrics, integration testing and end-to-end testing with Cypress.' },
-    { id: 'n5', title: 'System Design & Architecture', type: 'Lecture', pages: 20, date: 'Mar 5, 2025', tag: 'Week 9', preview: 'Microservices vs monolith, REST API design, load balancing, caching strategies and scalability patterns.' },
-    { id: 'n6', title: 'Code Review & Documentation', type: 'Tutorial', pages: 10, date: 'Mar 17, 2025', tag: 'Week 11', preview: 'Effective PR reviews, JSDoc/Sphinx documentation, README standards, API docs with Swagger/OpenAPI.' },
-  ],
-};
+// Native-only imports — wrapped so web bundler doesn't crash
+let FileSystem, IntentLauncher, Sharing;
+if (Platform.OS !== 'web') {
+  FileSystem     = require('expo-file-system');
+  IntentLauncher = require('expo-intent-launcher');
+  Sharing        = require('expo-sharing');
+}
 
-// Type badge colors — kept fixed (they look good on both themes)
+const BASE_URL = axiosInstance.defaults.baseURL.replace(/\/api$/, '');
+
+// ─── Type badge colours ───────────────────────────────────────────────────────
 const TYPE_COLORS = {
   Lecture:     { bg: '#1E3A5F', text: '#60A5FA', border: '#2563AB' },
   'Lab Sheet': { bg: '#1A3D2E', text: '#34D399', border: '#059669' },
   Tutorial:    { bg: '#3B2A1A', text: '#FB923C', border: '#C2410C' },
+  Link:        { bg: '#2A1A55', text: '#B06EFF', border: '#7C3AED' },
 };
 
+// ─── iOS UTI map ──────────────────────────────────────────────────────────────
+function mimeTypeToUTI(mime = '') {
+  const map = {
+    'application/pdf': 'com.adobe.pdf',
+    'image/jpeg':      'public.jpeg',
+    'image/png':       'public.png',
+    'image/gif':       'com.compuserve.gif',
+    'video/mp4':       'public.mpeg-4',
+    'video/quicktime': 'com.apple.quicktime-movie',
+    'application/vnd.ms-powerpoint': 'com.microsoft.powerpoint.ppt',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation':
+      'org.openxmlformats.presentationml.presentation',
+    'application/msword': 'com.microsoft.word.doc',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+      'org.openxmlformats.wordprocessingml.document',
+    'application/vnd.ms-excel': 'com.microsoft.excel.xls',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
+      'org.openxmlformats.spreadsheetml.sheet',
+    'application/zip': 'public.zip-archive',
+  };
+  return map[mime] || 'public.data';
+}
+
+// ─── File type helpers ────────────────────────────────────────────────────────
+function getFileIcon(mimeType = '', fileName = '') {
+  const n = fileName.toLowerCase();
+  if (mimeType === 'application/pdf' || n.endsWith('.pdf'))                  return '📄';
+  if (mimeType.startsWith('image/') || /\.(png|jpg|jpeg|gif|webp)/.test(n)) return '🖼️';
+  if (mimeType.startsWith('video/') || /\.(mp4|mov|avi)/.test(n))           return '🎬';
+  if (/ppt|pptx/.test(mimeType)    || /\.(ppt|pptx)/.test(n))              return '📊';
+  if (/word|doc/.test(mimeType)    || /\.(doc|docx)/.test(n))              return '📝';
+  if (/excel|sheet|csv/.test(mimeType) || /\.(xls|xlsx|csv)/.test(n))      return '📊';
+  if (/zip|rar|tar/.test(mimeType) || /\.(zip|rar|gz)/.test(n))            return '🗜️';
+  return '📎';
+}
+
+// What renderer to use for web inline preview
+function getWebViewerType(mimeType = '', fileName = '') {
+  const n = fileName.toLowerCase();
+  if (mimeType === 'application/pdf' || n.endsWith('.pdf'))                  return 'pdf';
+  if (mimeType.startsWith('image/') || /\.(png|jpg|jpeg|gif|webp)/.test(n)) return 'image';
+  if (mimeType.startsWith('video/') || /\.(mp4|mov|avi|webm)/.test(n))      return 'video';
+  if (/word|doc|excel|sheet|ppt|presentation/.test(mimeType) ||
+      /\.(doc|docx|xls|xlsx|ppt|pptx)/.test(n))                             return 'office';
+  return 'other';
+}
+
+// ─── Web File Viewer (pure DOM — rendered outside RN tree via dangerouslySetInnerHTML trick)
+// We render a fixed-position div directly so it sits on top of everything.
+function WebFileViewer({ visible, url, mimeType, fileName, onClose }) {
+  if (!visible || Platform.OS !== 'web') return null;
+
+  const viewerType = getWebViewerType(mimeType, fileName);
+  const iframeSrc  = viewerType === 'office'
+    ? `https://docs.google.com/viewer?url=${encodeURIComponent(url)}&embedded=true`
+    : url;
+
+  // Render using React DOM elements (valid in RNW / Expo web)
+  return (
+    <div style={ws.overlay}>
+      {/* Header */}
+      <div style={ws.header}>
+        <div style={ws.headerLeft}>
+          <span style={{ fontSize: 20 }}>{getFileIcon(mimeType, fileName)}</span>
+          <span style={ws.fileName}>{fileName}</span>
+        </div>
+        <div style={ws.headerRight}>
+          <a href={url} download={fileName} style={ws.dlBtn}>⬇ Download</a>
+          <button onClick={onClose} style={ws.closeBtn}>✕</button>
+        </div>
+      </div>
+
+      {/* Body */}
+      <div style={ws.body}>
+        {(viewerType === 'pdf' || viewerType === 'office') && (
+          <iframe src={iframeSrc} style={ws.iframe} title={fileName} allowFullScreen />
+        )}
+
+        {viewerType === 'image' && (
+          <div style={ws.imgWrap}>
+            <img src={url} alt={fileName} style={ws.img} />
+          </div>
+        )}
+
+        {viewerType === 'video' && (
+          <div style={ws.videoWrap}>
+            <video src={url} controls style={ws.video} />
+          </div>
+        )}
+
+        {viewerType === 'other' && (
+          <div style={ws.unsupported}>
+            <span style={{ fontSize: 48 }}>📎</span>
+            <p style={{ color: '#8B98C8', marginTop: 16, fontSize: 15 }}>
+              This file type cannot be previewed inline.
+            </p>
+            <a href={url} download={fileName} style={ws.dlBtnLg}>⬇ Download File</a>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Plain-object styles for web DOM elements
+const ws = {
+  overlay:   { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(6,9,18,0.97)', zIndex: 9999, display: 'flex', flexDirection: 'column' },
+  header:    { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', backgroundColor: '#0C1221', borderBottom: '1px solid #1C2640', flexShrink: 0 },
+  headerLeft:{ display: 'flex', alignItems: 'center', gap: 10, overflow: 'hidden' },
+  fileName:  { color: '#F1F5FF', fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '60vw' },
+  headerRight:{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 },
+  dlBtn:     { padding: '7px 14px', borderRadius: 20, border: '1px solid #3B82F6', backgroundColor: 'rgba(59,130,246,0.15)', color: '#3B82F6', fontSize: 13, fontWeight: 700, textDecoration: 'none', cursor: 'pointer' },
+  closeBtn:  { width: 36, height: 36, borderRadius: '50%', border: '1px solid #1C2640', backgroundColor: '#111827', color: '#8B98C8', fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  body:      { flex: 1, overflow: 'hidden', display: 'flex' },
+  iframe:    { width: '100%', height: '100%', border: 'none', flex: 1 },
+  imgWrap:   { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto', padding: 20, backgroundColor: '#060912' },
+  img:       { maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 8 },
+  videoWrap: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#000' },
+  video:     { maxWidth: '100%', maxHeight: '100%' },
+  unsupported:{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' },
+  dlBtnLg:   { marginTop: 20, padding: '12px 28px', borderRadius: 12, border: '1px solid #3B82F6', backgroundColor: 'rgba(59,130,246,0.2)', color: '#3B82F6', fontSize: 15, fontWeight: 700, textDecoration: 'none', cursor: 'pointer' },
+};
+
+// ─── Native file opener ───────────────────────────────────────────────────────
+async function openNative(url, mimeType, fileName, setLoading) {
+  try {
+    setLoading(true);
+    const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const localUri = FileSystem.cacheDirectory + safeName;
+    const { uri }  = await FileSystem.downloadAsync(url, localUri);
+
+    if (Platform.OS === 'android') {
+      const contentUri = await FileSystem.getContentUriAsync(uri);
+      await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+        data:  contentUri,
+        flags: 1,
+        type:  mimeType,
+      });
+    } else {
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(uri, {
+          mimeType,
+          UTI:         mimeTypeToUTI(mimeType),
+          dialogTitle: fileName,
+        });
+      } else {
+        Alert.alert('Cannot Open', 'No app available to open this file type.');
+      }
+    }
+  } catch (err) {
+    console.error('openNative error:', err);
+    Alert.alert('Error', 'Could not open file: ' + err.message);
+  } finally {
+    setLoading(false);
+  }
+}
+
 // ─── NoteCard ─────────────────────────────────────────────────────────────────
-const NoteCard = ({ note, accentColor, onPress, C }) => {
+const NoteCard = ({ note, accentColor, C, onOpen }) => {
   const typeStyle = TYPE_COLORS[note.type] ?? TYPE_COLORS.Lecture;
+  const hasUrl    = !!note.url;
+  const fileIcon  = note.type === 'Link' ? '🔗' : getFileIcon(note.mimeType, note.fileName);
 
   return (
     <TouchableOpacity
       style={[styles.noteCard, { backgroundColor: C.card, borderColor: C.border }]}
-      onPress={onPress}
+      onPress={() => onOpen(note)}
       activeOpacity={0.8}
     >
       {/* Top row */}
       <View style={styles.noteTop}>
-        <View style={[styles.typeBadge, { backgroundColor: typeStyle.bg, borderColor: typeStyle.border }]}>
-          <Text style={[styles.typeBadgeText, { color: typeStyle.text }]}>{note.type}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <View style={[styles.fileIconBadge, { backgroundColor: typeStyle.bg }]}>
+            <Text style={styles.fileIconEmoji}>{fileIcon}</Text>
+          </View>
+          <View style={[styles.typeBadge, { backgroundColor: typeStyle.bg, borderColor: typeStyle.border }]}>
+            <Text style={[styles.typeBadgeText, { color: typeStyle.text }]}>{note.type}</Text>
+          </View>
         </View>
         <Text style={[styles.noteTag, { color: C.textMuted }]}>{note.tag}</Text>
       </View>
@@ -197,24 +219,37 @@ const NoteCard = ({ note, accentColor, onPress, C }) => {
       {/* Title */}
       <Text style={[styles.noteTitle, { color: C.textPrimary }]}>{note.title}</Text>
 
-      {/* Preview */}
-      <Text style={[styles.notePreview, { color: C.textSub ?? C.textMuted }]} numberOfLines={2}>
-        {note.preview}
-      </Text>
+      {/* Description preview */}
+      {!!note.preview && note.preview !== note.title && (
+        <Text style={[styles.notePreview, { color: C.textSub ?? C.textMuted }]} numberOfLines={2}>
+          {note.preview}
+        </Text>
+      )}
 
       {/* Footer */}
       <View style={styles.noteFooter}>
-        <Text style={[styles.noteMeta, { color: C.textMuted }]}>📄 {note.pages} pages</Text>
+        {note.type !== 'Link' && (
+          <Text style={[styles.noteMeta, { color: C.textMuted }]}>
+            {note.pages > 0 ? `~${note.pages} pages` : 'File'}
+          </Text>
+        )}
         <Text style={[styles.noteMeta, { color: C.textMuted }]}>{note.date}</Text>
+
         <TouchableOpacity
           style={[
-            styles.downloadBtn,
-            { backgroundColor: accentColor + '22', borderColor: accentColor + '66' },
+            styles.openBtn,
+            {
+              backgroundColor: hasUrl ? accentColor + '22' : '#88888822',
+              borderColor:     hasUrl ? accentColor + '66' : '#88888844',
+            },
           ]}
-          onPress={onPress}
+          onPress={() => onOpen(note)}
           activeOpacity={0.75}
+          disabled={!hasUrl}
         >
-          <Text style={[styles.downloadBtnText, { color: accentColor }]}>↓ PDF</Text>
+          <Text style={[styles.openBtnText, { color: hasUrl ? accentColor : '#888' }]}>
+            {note.type === 'Link' ? '↗ Open' : '▶ Open'}
+          </Text>
         </TouchableOpacity>
       </View>
     </TouchableOpacity>
@@ -222,29 +257,124 @@ const NoteCard = ({ note, accentColor, onPress, C }) => {
 };
 
 // ─── Main NotesData Screen ────────────────────────────────────────────────────
-export default function NotesData({ course, onBack, C, onThemeToggle }) {
+export default function NotesData({ course, onBack, C, onThemeToggle, user }) {
+  const [notes,         setNotes]         = useState([]);
+  const [loading,       setLoading]       = useState(true);
+  const [viewerNote,    setViewerNote]    = useState(null);  // web viewer state
+  const [nativeLoading, setNativeLoading] = useState(false); // native loading overlay
+
   const { width } = useWindowDimensions();
   const isWide = width >= 768;
-  const notes = NOTES_DATA[course.id] ?? [];
+
+  useEffect(() => {
+    if (!user?.id || !course?.title) return;
+
+    const fetchNotes = async () => {
+      setLoading(true);
+      try {
+        const subjectName = encodeURIComponent(course.title);
+        const res  = await axiosInstance.get(
+          `/lesson-planner/student/${user.id}/subject/${subjectName}`
+        );
+        const json = res.data;
+
+        if (json.success && json.resources?.length > 0) {
+          setNotes(
+            json.resources.map((r, i) => ({
+              id:       r.id || r._id || `note-${i}`,
+              title:    r.name,
+              fileName: r.name,
+              mimeType: r.mimeType || 'application/octet-stream',
+              type:     r.type === 'link'
+                ? 'Link'
+                : course.type === 'Lab' ? 'Lab Sheet' : 'Lecture',
+              pages:    r.size ? Math.ceil(r.size / 50000) : 0,
+              date:     r.uploadedAt
+                ? new Date(r.uploadedAt).toLocaleDateString('en-IN', {
+                    day: 'numeric', month: 'short', year: 'numeric',
+                  })
+                : '',
+              tag:      json.topics?.[i]?.unit  || '',
+              preview:  r.description || json.topics?.[i]?.title || '',
+              url: r.type === 'link'
+                ? (r.uri || r.url || '')
+                : (r.url ? `${BASE_URL}${r.url}` : ''),
+            }))
+          );
+        } else {
+          setNotes([]);
+        }
+      } catch (err) {
+        console.log('Error fetching notes:', err);
+        Alert.alert('Error', 'Could not load notes. Please try again.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchNotes();
+  }, [user, course]);
+
+  // ── Open handler ─────────────────────────────────────────────────────────
+  const handleOpen = (note) => {
+    if (!note.url) {
+      Alert.alert('Unavailable', 'No file attached to this note.');
+      return;
+    }
+
+    // External links → browser on all platforms
+    if (note.type === 'Link') {
+      Linking.openURL(note.url).catch(() =>
+        Alert.alert('Error', 'Could not open link.')
+      );
+      return;
+    }
+
+    if (Platform.OS === 'web') {
+      // Show in-app iframe/image/video viewer
+      setViewerNote(note);
+    } else {
+      // Android/iOS: download to cache then hand off to native viewer
+      openNative(note.url, note.mimeType, note.fileName, setNativeLoading);
+    }
+  };
+
+  const fileCount = notes.filter(n => n.type !== 'Link').length;
+  const linkCount = notes.filter(n => n.type === 'Link').length;
+  const pageCount = notes.reduce((s, n) => s + n.pages, 0);
 
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: C.bg }]}>
-      <StatusBar
-        barStyle={C.statusBar ?? 'light-content'}
-        backgroundColor={C.bg}
-      />
+      <StatusBar barStyle={C.statusBar ?? 'light-content'} backgroundColor={C.bg} />
+
+      {/* ── Web in-app viewer (fixed overlay, rendered as plain DOM) ── */}
+      {Platform.OS === 'web' && (
+        <WebFileViewer
+          visible={!!viewerNote}
+          url={viewerNote?.url}
+          mimeType={viewerNote?.mimeType}
+          fileName={viewerNote?.fileName}
+          onClose={() => setViewerNote(null)}
+        />
+      )}
+
+      {/* ── Native opening overlay ── */}
+      {nativeLoading && (
+        <View style={styles.nativeOverlay}>
+          <View style={styles.nativeCard}>
+            <ActivityIndicator size="large" color="#3B82F6" />
+            <Text style={styles.nativeCardText}>Opening file…</Text>
+          </View>
+        </View>
+      )}
 
       {/* ── Header ── */}
       <View style={[styles.header, isWide && styles.headerWide, { backgroundColor: C.card }]}>
-
-        {/* Top row: Back + Theme toggle */}
         <View style={styles.headerTopRow}>
           <TouchableOpacity style={styles.backBtn} onPress={onBack} activeOpacity={0.8}>
             <Text style={[styles.backArrow, { color: C.textMuted }]}>←</Text>
-            <Text style={[styles.backLabel, { color: C.textMuted }]}>Back</Text>
+            <Text style={[styles.backLabel,  { color: C.textMuted }]}>Back</Text>
           </TouchableOpacity>
-
-          {/* Theme Toggle */}
           {onThemeToggle && (
             <TouchableOpacity
               activeOpacity={0.75}
@@ -256,7 +386,6 @@ export default function NotesData({ course, onBack, C, onThemeToggle }) {
           )}
         </View>
 
-        {/* Course info */}
         <View style={styles.headerBody}>
           <View style={[styles.headerIcon, { backgroundColor: course.bg }]}>
             <Text style={[styles.headerIconText, { color: course.color }]}>{course.icon}</Text>
@@ -269,267 +398,119 @@ export default function NotesData({ course, onBack, C, onThemeToggle }) {
           </View>
         </View>
 
-        {/* Stats bar */}
         <View style={styles.statsRow}>
           <View style={[styles.statPill, { borderColor: course.color + '44', backgroundColor: C.bg }]}>
-            <Text style={[styles.statNum, { color: course.color }]}>{notes.length}</Text>
-            <Text style={[styles.statLabel, { color: C.textMuted }]}> Topics</Text>
+            <Text style={[styles.statNum,   { color: course.color }]}>{fileCount}</Text>
+            <Text style={[styles.statLabel, { color: C.textMuted }]}> Files</Text>
           </View>
           <View style={[styles.statPill, { borderColor: course.color + '44', backgroundColor: C.bg }]}>
-            <Text style={[styles.statNum, { color: course.color }]}>
-              {notes.reduce((s, n) => s + n.pages, 0)}
-            </Text>
+            <Text style={[styles.statNum,   { color: course.color }]}>{pageCount}</Text>
             <Text style={[styles.statLabel, { color: C.textMuted }]}> Pages</Text>
           </View>
           <View style={[styles.statPill, { borderColor: course.color + '44', backgroundColor: C.bg }]}>
-            <Text style={[styles.statNum, { color: course.color }]}>{course.files}</Text>
-            <Text style={[styles.statLabel, { color: C.textMuted }]}> PDFs</Text>
+            <Text style={[styles.statNum,   { color: course.color }]}>{linkCount}</Text>
+            <Text style={[styles.statLabel, { color: C.textMuted }]}> Links</Text>
           </View>
         </View>
       </View>
 
-      {/* Accent divider */}
       <View style={[styles.accentLine, { backgroundColor: course.color }]} />
 
-      {/* ── Section Header ── */}
       <View style={styles.sectionHeader}>
         <Text style={[styles.sectionTitle, { color: C.textPrimary }]}>All Notes</Text>
-        <Text style={[styles.sectionCount, { color: C.textMuted }]}>{notes.length} topics</Text>
+        <Text style={[styles.sectionCount, { color: C.textMuted }]}>{notes.length} items</Text>
       </View>
 
-      {/* ── Notes List ── */}
-      <ScrollView
-        contentContainerStyle={[styles.notesList, isWide && styles.notesListWide]}
-        showsVerticalScrollIndicator={false}
-      >
-        {notes.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyIcon}>📭</Text>
-            <Text style={[styles.emptyText, { color: C.textMuted }]}>
-              No notes available for this course.
-            </Text>
-          </View>
-        ) : (
-          notes.map(note => (
-            <NoteCard
-              key={note.id}
-              note={note}
-              accentColor={course.color}
-              onPress={() => console.log('Open note:', note.title)}
-              C={C}
-            />
-          ))
-        )}
-
-        <View style={{ height: 40 }} />
-      </ScrollView>
+      {loading ? (
+        <View style={styles.loadingState}>
+          <ActivityIndicator size="large" color={course.color} />
+          <Text style={[styles.emptyText, { color: C.textMuted }]}>Loading notes…</Text>
+        </View>
+      ) : (
+        <ScrollView
+          contentContainerStyle={[styles.notesList, isWide && styles.notesListWide]}
+          showsVerticalScrollIndicator={false}
+        >
+          {notes.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyIcon}>📭</Text>
+              <Text style={[styles.emptyText, { color: C.textMuted }]}>
+                No notes available for this course yet.
+              </Text>
+            </View>
+          ) : (
+            notes.map(note => (
+              <NoteCard
+                key={note.id}
+                note={note}
+                accentColor={course.color}
+                C={C}
+                onOpen={handleOpen}
+              />
+            ))
+          )}
+          <View style={{ height: 40 }} />
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-  },
+  root: { flex: 1 },
 
-  // ── Header ──
-  header: {
-    paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'android' ? 20 : 12,
-    paddingBottom: 16,
-  },
-  headerWide: {
-    paddingHorizontal: 36,
-  },
-  headerTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  backBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  backArrow: {
-    fontSize: 20,
-    lineHeight: 22,
-  },
-  backLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  iconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  iconBtnText: {
-    fontSize: 16,
-  },
-  headerBody: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    marginBottom: 16,
-  },
-  headerIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerIconText: {
-    fontSize: 24,
-    fontWeight: '700',
-  },
-  courseIdLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-    marginBottom: 4,
-  },
-  courseTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    letterSpacing: -0.4,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  statPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    borderWidth: 1,
-  },
-  statNum: {
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  statLabel: {
-    fontSize: 13,
-    fontWeight: '500',
-  },
+  header:         { paddingHorizontal: 20, paddingTop: Platform.OS === 'android' ? 20 : 12, paddingBottom: 16 },
+  headerWide:     { paddingHorizontal: 36 },
+  headerTopRow:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  backBtn:        { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  backArrow:      { fontSize: 20, lineHeight: 22 },
+  backLabel:      { fontSize: 14, fontWeight: '600' },
+  iconBtn:        { width: 40, height: 40, borderRadius: 20, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  iconBtnText:    { fontSize: 16 },
+  headerBody:     { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 16 },
+  headerIcon:     { width: 52, height: 52, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  headerIconText: { fontSize: 24, fontWeight: '700' },
+  courseIdLabel:  { fontSize: 11, fontWeight: '700', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 4 },
+  courseTitle:    { fontSize: 20, fontWeight: '800', letterSpacing: -0.4 },
+  statsRow:       { flexDirection: 'row', gap: 10 },
+  statPill:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1 },
+  statNum:        { fontSize: 14, fontWeight: '800' },
+  statLabel:      { fontSize: 13, fontWeight: '500' },
 
-  accentLine: {
-    height: 2,
-    opacity: 0.7,
-  },
+  accentLine:    { height: 2, opacity: 0.7 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 10 },
+  sectionTitle:  { fontSize: 16, fontWeight: '700', letterSpacing: -0.2 },
+  sectionCount:  { fontSize: 12, fontWeight: '500' },
 
-  // ── Section Header ──
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 10,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    letterSpacing: -0.2,
-  },
-  sectionCount: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
+  loadingState:  { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, paddingTop: 60 },
+  emptyState:    { alignItems: 'center', paddingTop: 60, gap: 12 },
+  emptyIcon:     { fontSize: 40 },
+  emptyText:     { fontSize: 15, fontWeight: '500', textAlign: 'center', paddingHorizontal: 30 },
 
-  // ── Note Cards ──
-  notesList: {
-    paddingHorizontal: 16,
-    gap: 12,
-    paddingTop: 4,
-  },
-  notesListWide: {
-    paddingHorizontal: 36,
-  },
+  notesList:     { paddingHorizontal: 16, gap: 12, paddingTop: 4 },
+  notesListWide: { paddingHorizontal: 36 },
+
   noteCard: {
-    borderRadius: 14,
-    padding: 16,
-    borderWidth: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 4,
+    borderRadius: 14, padding: 16, borderWidth: 1,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.15, shadowRadius: 6, elevation: 4, overflow: 'hidden',
   },
-  noteTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  typeBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 20,
-    borderWidth: 1,
-  },
-  typeBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.3,
-  },
-  noteTag: {
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-  },
-  noteTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    marginBottom: 6,
-    letterSpacing: -0.2,
-  },
-  notePreview: {
-    fontSize: 13,
-    lineHeight: 19,
-    marginBottom: 14,
-  },
-  noteFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  noteMeta: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  downloadBtn: {
-    marginLeft: 'auto',
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 20,
-    borderWidth: 1,
-  },
-  downloadBtnText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
+  noteTop:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  fileIconBadge: { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  fileIconEmoji: { fontSize: 16 },
+  typeBadge:     { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, borderWidth: 1 },
+  typeBadgeText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.3 },
+  noteTag:       { fontSize: 11, fontWeight: '600', letterSpacing: 0.5 },
+  noteTitle:     { fontSize: 15, fontWeight: '700', marginBottom: 6, letterSpacing: -0.2 },
+  notePreview:   { fontSize: 13, lineHeight: 19, marginBottom: 14 },
+  noteFooter:    { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  noteMeta:      { fontSize: 12, fontWeight: '500' },
+  openBtn:       { marginLeft: 'auto', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, borderWidth: 1, minWidth: 70, alignItems: 'center' },
+  openBtnText:   { fontSize: 12, fontWeight: '700' },
 
-  // ── Empty ──
-  emptyState: {
-    alignItems: 'center',
-    paddingTop: 60,
-    gap: 12,
-  },
-  emptyIcon: {
-    fontSize: 40,
-  },
-  emptyText: {
-    fontSize: 15,
-    fontWeight: '500',
-  },
+  // Native overlay
+  nativeOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 999, alignItems: 'center', justifyContent: 'center' },
+  nativeCard:    { backgroundColor: '#0C1221', borderRadius: 16, borderWidth: 1, borderColor: '#1C2640', padding: 28, alignItems: 'center', gap: 14 },
+  nativeCardText:{ color: '#F1F5FF', fontSize: 15, fontWeight: '600' },
 });

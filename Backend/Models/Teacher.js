@@ -24,10 +24,16 @@ const teacherSchema = new mongoose.Schema(
 
     course_codes: {
       year1: [String],
+      year2: [String],
+      year3: [String],
+      year4: [String],
     },
 
     subjects: {
       year1: [String],
+      year2: [String],
+      year3: [String],
+      year4: [String],
     },
 
     // ✅ Profile Image (Saved Here)

@@ -14,7 +14,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
   Dimensions,
@@ -26,6 +26,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  ActivityIndicator,
 } from 'react-native';
 import Svg, {
   Circle,
@@ -35,6 +36,7 @@ import Svg, {
   Stop,
   Rect,
 } from 'react-native-svg';
+import axiosInstance from '../../../Src/Axios';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const { width } = Dimensions.get('window');
@@ -176,7 +178,7 @@ const D_STROKE = 16;
 const D_CX     = D_SIZE / 2;
 const D_CY     = D_SIZE / 2;
 
-function DonutChart() {
+function DonutChart({ totalValue = '0' }) {
   const path = arcPath(D_CX, D_CY, D_R, 120, 420); // 300° arc
 
   return (
@@ -206,7 +208,7 @@ function DonutChart() {
         />
       </Svg>
       <View style={s.donutCenter}>
-        <Text style={s.donutValue}>13.5k</Text>
+        <Text style={s.donutValue}>{totalValue}</Text>
         <Text style={s.donutSub}>TOTAL</Text>
       </View>
     </View>
@@ -258,7 +260,7 @@ function ActivityRow({ av, avBg, name, role, action, time, status, isLast }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // QUICK ACTION BUTTON
 // ═══════════════════════════════════════════════════════════════════════════════
-function QBtn({ emoji, label, primary }) {
+function QBtn({ emoji, label, primary, onPress }) {
   const btnW = isMobile ? '48%' : (SCREEN_W - 16 * 2 - 32 - 10) / 2;
 
   return (
@@ -268,7 +270,8 @@ function QBtn({ emoji, label, primary }) {
         { width: btnW },
         primary && { backgroundColor: C.blue, borderColor: C.blue },
       ]}
-      android_ripple={{ color: '#ffffff22' }}>
+      android_ripple={{ color: '#ffffff22' }}
+      onPress={onPress}>
       <Text style={s.qBtnEmoji}>{emoji}</Text>
       <Text style={[s.qBtnLabel, primary && { color: C.white }]}>{label}</Text>
     </Pressable>
@@ -325,7 +328,108 @@ function Card({ children, style }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN SCREEN
 // ═══════════════════════════════════════════════════════════════════════════════
-export default function CommitteeDash() {
+export default function CommitteeDash({ onNavigate }) {
+  const nav = (screen) => { if (onNavigate) onNavigate(screen); };
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState(STATS);
+  const [activities, setActivities] = useState(ACTIVITIES);
+  const [health, setHealth] = useState(HEALTH_ITEMS);
+  const [totalUsers, setTotalUsers] = useState('0');
+  const [distData, setDistData] = useState([
+    { label: 'Students', pct: '0%', color: C.blue },
+    { label: 'Faculty', pct: '0%', color: C.purple },
+    { label: 'Parents', pct: '0%', color: C.pink },
+  ]);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [studentsRes, teachersRes, parentsRes, adminsRes, logsRes, activeRes] = await Promise.all([
+          axiosInstance.get('/students/').catch(() => ({ data: { data: [], count: 0 } })),
+          axiosInstance.get('/teachers/all').catch(() => ({ data: { data: [] } })),
+          axiosInstance.get('/parents/').catch(() => ({ data: { data: [], count: 0 } })),
+          axiosInstance.get('/admins/').catch(() => ({ data: { data: [], count: 0 } })),
+          axiosInstance.get('/admins/security-logs?type=Auth').catch(() => ({ data: { logs: [] } })),
+          axiosInstance.get('/users/active-users').catch(() => ({ data: { users: [] } })),
+        ]);
+
+        const studentCount = studentsRes.data?.count || studentsRes.data?.data?.length || 0;
+        const teacherCount = teachersRes.data?.data?.length || 0;
+        const parentCount = parentsRes.data?.count || parentsRes.data?.data?.length || 0;
+        const adminCount = adminsRes.data?.count || adminsRes.data?.data?.length || 0;
+        const activeUsersData = activeRes.data?.users || [];
+        const activeCount = activeUsersData.length || activeRes.data?.count || 0;
+        const total = studentCount + teacherCount + parentCount + adminCount;
+
+        // Count by role from active users
+        const activeStudents = activeUsersData.filter(u => u.role === 'student').length;
+        const activeTeachers = activeUsersData.filter(u => u.role === 'teacher').length;
+        const activeParents = activeUsersData.filter(u => u.role === 'parent').length;
+        const activeAdmins = activeUsersData.filter(u => u.role === 'admin').length;
+
+        setTotalUsers(total >= 1000 ? `${(total / 1000).toFixed(1)}k` : String(total));
+
+        setStats([
+          { emoji: '👥', iconBg: '#1e2d6b', label: 'TOTAL USERS', value: String(total), change: '', up: null },
+          { emoji: '🔑', iconBg: '#0d2820', label: 'ADMINS', value: String(adminCount), change: `${activeAdmins} online`, up: true },
+          { emoji: '🎓', iconBg: '#1a1e60', label: 'STUDENTS', value: String(studentCount), change: `${activeStudents} online`, up: true },
+          { emoji: '📋', iconBg: '#2e1550', label: 'FACULTY', value: String(teacherCount), change: `${activeTeachers} online`, up: true },
+          { emoji: '👪', iconBg: '#2e1800', label: 'PARENTS', value: String(parentCount), change: `${activeParents} online`, up: true },
+          { emoji: '🖥️', iconBg: '#1f0f30', label: 'ACTIVE\nSESSIONS', value: String(activeCount), change: 'LIVE', up: null },
+        ]);
+
+        // Distribution
+        const distTotal = total || 1;
+        const sPct = Math.round((studentCount / distTotal) * 100);
+        const tPct = Math.round((teacherCount / distTotal) * 100);
+        const pPct = Math.round((parentCount / distTotal) * 100);
+        const aPct = Math.round((adminCount / distTotal) * 100);
+        setDistData([
+          { label: 'Students', pct: `${sPct}%`, color: C.blue },
+          { label: 'Faculty', pct: `${tPct}%`, color: C.purple },
+          { label: 'Parents', pct: `${pPct}%`, color: C.pink },
+          { label: 'Admins', pct: `${aPct}%`, color: C.teal },
+        ]);
+
+        // Recent activity from security logs
+        const logs = logsRes.data?.logs || [];
+        if (logs.length > 0) {
+          setActivities(logs.slice(0, 4).map(log => ({
+            av: (log.actor || 'S').charAt(0).toUpperCase() + ((log.actor || '').charAt(1) || '').toUpperCase(),
+            avBg: '#374151',
+            name: log.actor || 'Unknown',
+            role: log.type || 'System',
+            action: log.action || '-',
+            time: new Date(log.createdAt).toLocaleString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
+            status: log.status === 'Success' ? 'COMPLETED' : log.status === 'Warning' ? 'UPDATED' : 'ACTIVE',
+          })));
+        }
+
+        setHealth([
+          { iconBg: '#0d2918', emoji: '⚡', label: 'ACTIVE NOW', value: String(activeCount), badge: null, showBars: true },
+          { iconBg: '#0d2820', emoji: '🔑', label: 'ADMINS', value: String(adminCount), badge: null, showBars: false },
+          { iconBg: '#101b36', emoji: '🎓', label: 'STUDENTS', value: String(studentCount), badge: null, showBars: false },
+          { iconBg: '#2e1550', emoji: '📋', label: 'TEACHERS', value: String(teacherCount), badge: null, showBars: false },
+          { iconBg: '#2e1800', emoji: '👪', label: 'PARENTS', value: String(parentCount), badge: null, showBars: false },
+        ]);
+      } catch (err) {
+        console.error('Dashboard fetch error:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
+
+  if (loading) {
+    return (
+      <View style={[s.root, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={C.blue} />
+        <Text style={{ color: C.muted, marginTop: 12 }}>Loading dashboard...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={s.root}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
@@ -352,8 +456,8 @@ export default function CommitteeDash() {
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={s.statScroll}>
-          {STATS.map((stat) => (
-            <StatCard key={stat.label} {...stat} />
+          {stats.map((stat, i) => (
+            <StatCard key={i} {...stat} />
           ))}
         </ScrollView>
 
@@ -382,12 +486,8 @@ export default function CommitteeDash() {
         {/* ── USER DISTRIBUTION ──────────────────────────────────────────── */}
         <Card style={s.mb14}>
           <Text style={s.cardTitle}>User Distribution</Text>
-          <DonutChart />
-          {[
-            { label: 'Students', pct: '75%', color: C.blue   },
-            { label: 'Faculty',  pct: '15%', color: C.purple },
-            { label: 'Parents',  pct: '10%', color: C.pink   },
-          ].map(({ label, pct, color }) => (
+          <DonutChart totalValue={totalUsers} />
+          {distData.map(({ label, pct, color }) => (
             <View key={label} style={s.distRow}>
               <View style={[s.distDot, { backgroundColor: color }]} />
               <Text style={s.distLabel}>{label}</Text>
@@ -416,11 +516,11 @@ export default function CommitteeDash() {
             <Text style={[s.actHeadTxt, { flex: 1.8, textAlign: 'right' }]}>STATUS</Text>
           </View>
 
-          {ACTIVITIES.map((a, i) => (
+          {activities.map((a, i) => (
             <ActivityRow
               key={i}
               {...a}
-              isLast={i === ACTIVITIES.length - 1}
+              isLast={i === activities.length - 1}
             />
           ))}
         </Card>
@@ -429,24 +529,24 @@ export default function CommitteeDash() {
         <Card style={s.mb14}>
           <Text style={s.cardTitle}>Quick Actions</Text>
           <View style={s.qGrid}>
-            <QBtn emoji="👤" label="Add User"    primary />
-            <QBtn emoji="📄" label="Add Faculty" />
-            <QBtn emoji="🔑" label="Roles"       />
-            <QBtn emoji="💾" label="Backup"      />
+            <QBtn emoji="👤" label="Students"    primary onPress={() => nav('students')} />
+            <QBtn emoji="📄" label="Faculty" onPress={() => nav('faculty')} />
+            <QBtn emoji="👨‍👩‍👧" label="Parents" onPress={() => nav('parents')} />
+            <QBtn emoji="📅" label="Attendance" onPress={() => nav('attendance')} />
           </View>
-          <TouchableOpacity style={s.generateBtn} activeOpacity={0.85}>
-            <Text style={s.generateTxt}>📄  Generate Monthly Report</Text>
+          <TouchableOpacity style={s.generateBtn} activeOpacity={0.85} onPress={() => nav('permission')}>
+            <Text style={s.generateTxt}>🔑  Permissions &amp; Access</Text>
           </TouchableOpacity>
         </Card>
 
         {/* ── SYSTEM HEALTH ──────────────────────────────────────────────── */}
         <Card style={s.mb14}>
           <Text style={[s.cardTitle, { marginBottom: 4 }]}>System Health</Text>
-          {HEALTH_ITEMS.map((h, i) => (
+          {health.map((h, i) => (
             <HealthRow
               key={i}
               {...h}
-              isLast={i === HEALTH_ITEMS.length - 1}
+              isLast={i === health.length - 1}
             />
           ))}
         </Card>

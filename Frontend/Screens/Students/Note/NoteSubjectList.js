@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,127 +10,29 @@ import {
   Dimensions,
   Platform,
   useWindowDimensions,
+  ActivityIndicator,
 } from 'react-native';
 import NotesData from './NoteData';
+import axiosInstance from '../../../Src/Axios';
 
-const { width } = Dimensions.get('window');
-const isTabletOrDesktop = width >= 768;
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const isTabletOrDesktop = SCREEN_WIDTH >= 768;
 
-// ─── Data ─────────────────────────────────────────────────────────────────────
-
-const TABS = ['Theory', 'Electives', 'Lab Materials'];
-
-const COURSES = {
-  Theory: [
-    {
-      id: 'CS201',
-      title: 'Data Structures & Algorithms',
-      description:
-        'Advanced concepts of arrays, linked lists, trees, and algorithm complexity analysis.',
-      files: 15,
-      icon: '⊞',
-      color: '#5B7FFF',
-      bg: '#1E2A6E',
-    },
-    {
-      id: 'CS202',
-      title: 'Operating Systems',
-      description:
-        'Process management, memory allocation, file systems and shell scripting essentials.',
-      files: 8,
-      icon: '⬡',
-      color: '#B06EFF',
-      bg: '#2A1A55',
-    },
-    {
-      id: 'CS203',
-      title: 'Database Management',
-      description:
-        'Relational algebra, SQL queries, normalization, and transaction management protocols.',
-      files: 20,
-      icon: '◉',
-      color: '#F5A623',
-      bg: '#3A2800',
-    },
-    {
-      id: 'CS205',
-      title: 'Theory of Computation',
-      description:
-        'Automata theory, formal languages, Turing machines, and decidability problems.',
-      files: 5,
-      icon: '◎',
-      color: '#00D4AA',
-      bg: '#003D32',
-    },
-  ],
-  Electives: [
-    {
-      id: 'CS301',
-      title: 'Machine Learning',
-      description:
-        'Supervised and unsupervised learning, neural networks, and model evaluation techniques.',
-      files: 18,
-      icon: '◈',
-      color: '#FF6B9D',
-      bg: '#3D0020',
-    },
-    {
-      id: 'CS302',
-      title: 'Cloud Computing',
-      description:
-        'AWS, GCP, containerization with Docker, Kubernetes orchestration, and serverless architecture.',
-      files: 12,
-      icon: '◇',
-      color: '#00B4FF',
-      bg: '#001A3D',
-    },
-    {
-      id: 'CS303',
-      title: 'Cybersecurity',
-      description:
-        'Cryptography, ethical hacking, network security, and penetration testing fundamentals.',
-      files: 9,
-      icon: '⬟',
-      color: '#FF8C42',
-      bg: '#3D1900',
-    },
-  ],
-  'Lab Materials': [
-    {
-      id: 'CS204',
-      title: 'Computer Networks',
-      description:
-        'OSI model layers, TCP/IP protocols, routing algorithms and network security principles.',
-      files: 10,
-      icon: '⊕',
-      color: '#3DD68C',
-      bg: '#003320',
-    },
-    {
-      id: 'MA104',
-      title: 'Discrete Mathematics',
-      description:
-        'Set theory, logic, graph theory, and combinatorics for computer science applications.',
-      files: 12,
-      icon: 'Σ',
-      color: '#FF5C5C',
-      bg: '#3D0000',
-    },
-    {
-      id: 'CS401',
-      title: 'Software Engineering Lab',
-      description:
-        'Agile methodology, version control, CI/CD pipelines, and team project management.',
-      files: 7,
-      icon: '⬡',
-      color: '#C875FF',
-      bg: '#2D0050',
-    },
-  ],
-};
+// ─── Subject colour palette ───────────────────────────────────────────────────
+const SUBJECT_COLORS = [
+  { icon: '⊞', color: '#5B7FFF', bg: '#1E2A6E' },
+  { icon: '⬡', color: '#B06EFF', bg: '#2A1A55' },
+  { icon: '◉', color: '#F5A623', bg: '#3A2800' },
+  { icon: '◎', color: '#00D4AA', bg: '#003D32' },
+  { icon: '◈', color: '#FF6B9D', bg: '#3D0020' },
+  { icon: '◇', color: '#00B4FF', bg: '#001A3D' },
+  { icon: '⬟', color: '#FF8C42', bg: '#3D1900' },
+  { icon: '⊕', color: '#3DD68C', bg: '#003320' },
+  { icon: 'Σ', color: '#FF5C5C', bg: '#3D0000' },
+  { icon: '⬡', color: '#C875FF', bg: '#2D0050' },
+];
 
 // ─── CourseCard ───────────────────────────────────────────────────────────────
-
 const CourseCard = ({ course, onPress, C }) => {
   const { width } = useWindowDimensions();
   const isWide = width >= 768;
@@ -152,21 +54,21 @@ const CourseCard = ({ course, onPress, C }) => {
       </View>
 
       <Text style={[styles.cardTitle, { color: C.textPrimary }]}>{course.title}</Text>
-      <Text style={[styles.cardDesc, { color: C.textMuted }]}>{course.description}</Text>
+      <Text style={[styles.cardDesc,  { color: C.textMuted  }]}>{course.description}</Text>
 
       <View style={styles.cardFooter}>
-        <Text style={[styles.fileCount, { color: C.textSub ?? C.textMuted }]}>
-          📄 {course.files} PDF Files
-        </Text>
+        {/* Type badge */}
+        <View style={[
+          styles.typeBadge,
+          { backgroundColor: course.color + '18', borderColor: course.color + '44' },
+        ]}>
+          <Text style={[styles.typeBadgeText, { color: course.color }]}>
+            {course.type === 'Lab' ? '🧪 Lab' : '📖 Theory'}
+          </Text>
+        </View>
 
         <TouchableOpacity
-          style={[
-            styles.viewBtn,
-            {
-              backgroundColor: course.color + '22',
-              borderColor: course.color + '55',
-            },
-          ]}
+          style={[styles.viewBtn, { backgroundColor: course.color + '22', borderColor: course.color + '55' }]}
           onPress={onPress}
           activeOpacity={0.75}
         >
@@ -178,17 +80,64 @@ const CourseCard = ({ course, onPress, C }) => {
 };
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
-
-export default function StudentsNotes({ C, onThemeToggle }) {
-  const [activeTab, setActiveTab] = useState('Theory');
+export default function StudentsNotes({ C, onThemeToggle, user }) {
   const [selectedCourse, setSelectedCourse] = useState(null);
+  const [subjects,       setSubjects]       = useState([]);
+  const [loading,        setLoading]        = useState(true);
+  const [activeTab,      setActiveTab]      = useState('All');
 
-  const courses = COURSES[activeTab] ?? [];
+  const TABS = ['All', 'Theory', 'Lab'];
+
   const { width } = useWindowDimensions();
-  const isWide = width >= 768;
+  const isWide     = width >= 768;
   const numColumns = isWide ? 2 : 1;
 
-  // ── If a course is selected, show the NotesData screen ──
+  // ── Build course objects from subjects ──
+  const courses = subjects.map((subject, index) => {
+    const sc   = SUBJECT_COLORS[index % SUBJECT_COLORS.length];
+    const name = typeof subject === 'string' ? subject : (subject.name || '');
+    // If backend sends { name, type } honour it; otherwise default Theory
+    const type = typeof subject === 'object' && subject.type
+      ? subject.type
+      : 'Theory';
+
+    return {
+      id:          name.substring(0, 6).toUpperCase() || `SUB${index}`,
+      title:       name,
+      description: 'Course materials and notes',
+      files:       typeof subject === 'object' ? (subject.resourceCount || 0) : 0,
+      icon:        sc.icon,
+      color:       sc.color,
+      bg:          sc.bg,
+      type,
+    };
+  });
+
+  // ── Filter by active tab (case-insensitive, default Theory) ──
+  const filteredCourses = activeTab === 'All'
+    ? courses
+    : courses.filter(c =>
+        (c.type || 'Theory').toLowerCase() === activeTab.toLowerCase()
+      );
+
+  // ── Fetch subjects ──
+  useEffect(() => {
+    const fetchSubjects = async () => {
+      try {
+        const res  = await axiosInstance.get(`/students/subjects/${user.id}`);
+        const data = res.data;
+        setSubjects(data.subjects || []);
+      } catch (error) {
+        console.log('Error fetching subjects:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (user?.id) fetchSubjects();
+  }, [user]);
+
+  // ── If a course is selected, render NotesData ──
   if (selectedCourse) {
     return (
       <NotesData
@@ -196,24 +145,25 @@ export default function StudentsNotes({ C, onThemeToggle }) {
         onBack={() => setSelectedCourse(null)}
         C={C}
         onThemeToggle={onThemeToggle}
+        user={user}
       />
     );
   }
 
+  // ── Subject list ──
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: C.bg }]}>
       <StatusBar barStyle={C.statusBar ?? 'light-content'} backgroundColor={C.bg} />
 
-      {/* ── Header ── */}
+      {/* Header */}
       <View style={[styles.header, { borderBottomColor: C.border }]}>
         <View style={{ flex: 1 }}>
           <Text style={[styles.headerTitle, { color: C.textPrimary }]}>My Study Materials</Text>
-          <Text style={[styles.headerSub, { color: C.textMuted }]}>
+          <Text style={[styles.headerSub,   { color: C.textMuted  }]}>
             Access and download semester-wise academic resources and lecture notes.
           </Text>
         </View>
 
-        {/* Theme Toggle */}
         {onThemeToggle && (
           <TouchableOpacity
             activeOpacity={0.75}
@@ -225,13 +175,12 @@ export default function StudentsNotes({ C, onThemeToggle }) {
         )}
       </View>
 
-      {/* ── Tabs ── */}
+      {/* Tabs */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.tabsContainer}
-        // Ensure the scroll view does not clip content on mobile
-        bounces={true}
+        bounces
         decelerationRate="fast"
       >
         {TABS.map(tab => (
@@ -259,45 +208,53 @@ export default function StudentsNotes({ C, onThemeToggle }) {
         ))}
       </ScrollView>
 
-      {/* ── Divider ── */}
+      {/* Divider */}
       <View style={[styles.divider, { backgroundColor: C.border }]} />
 
-      {/* ── Course Grid ── */}
+      {/* Course grid */}
       <ScrollView
         contentContainerStyle={[styles.grid, isWide && styles.gridDesktop]}
         showsVerticalScrollIndicator={false}
       >
-        {numColumns === 2
-          ? chunk(courses, 2).map((row, ri) => (
-              <View key={ri} style={styles.row}>
-                {row.map(course => (
-                  <CourseCard
-                    key={course.id}
-                    course={course}
-                    onPress={() => setSelectedCourse(course)}
-                    C={C}
-                  />
-                ))}
-                {row.length === 1 && (
-                  <View
-                    style={[
-                      styles.card,
-                      styles.cardDesktop,
-                      styles.invisible,
-                      { backgroundColor: C.card, borderColor: C.border },
-                    ]}
-                  />
-                )}
-              </View>
-            ))
-          : courses.map(course => (
-              <CourseCard
-                key={course.id}
-                course={course}
-                onPress={() => setSelectedCourse(course)}
-                C={C}
-              />
-            ))}
+        {loading ? (
+          <View style={styles.emptyState}>
+            <ActivityIndicator size="large" color="#5B7FFF" style={{ marginBottom: 12 }} />
+            <Text style={[styles.emptyText, { color: C.textMuted }]}>Loading subjects…</Text>
+          </View>
+        ) : filteredCourses.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Text style={{ fontSize: 40, marginBottom: 10 }}>📭</Text>
+            <Text style={[styles.emptyText, { color: C.textMuted }]}>
+              No subjects found for your class.
+            </Text>
+          </View>
+        ) : numColumns === 2 ? (
+          chunk(filteredCourses, 2).map((row, ri) => (
+            <View key={ri} style={styles.row}>
+              {row.map(course => (
+                <CourseCard
+                  key={course.id}
+                  course={course}
+                  onPress={() => setSelectedCourse(course)}
+                  C={C}
+                />
+              ))}
+              {/* Ghost card to keep grid even */}
+              {row.length === 1 && (
+                <View style={[styles.card, styles.cardDesktop, styles.invisible]} />
+              )}
+            </View>
+          ))
+        ) : (
+          filteredCourses.map(course => (
+            <CourseCard
+              key={course.id}
+              course={course}
+              onPress={() => setSelectedCourse(course)}
+              C={C}
+            />
+          ))
+        )}
 
         <View style={{ height: 40 }} />
       </ScrollView>
@@ -307,24 +264,18 @@ export default function StudentsNotes({ C, onThemeToggle }) {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function chunk(arr, size) {
-  if (size <= 0) throw new Error('Size must be greater than 0');
   const result = [];
-  for (let i = 0; i < arr.length; i += size) {
-    result.push(arr.slice(i, i + size));
-  }
+  for (let i = 0; i < arr.length; i += size) result.push(arr.slice(i, i + size));
   return result;
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-
 const CARD_RADIUS = 16;
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-  },
+  root: { flex: 1 },
 
-  // ── Header ──
+  // Header
   header: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -342,86 +293,46 @@ const styles = StyleSheet.create({
   headerSub: {
     fontSize: 13,
     marginTop: 4,
-    maxWidth: isTabletOrDesktop ? 480 : width * 0.7,
+    maxWidth: isTabletOrDesktop ? 480 : SCREEN_WIDTH * 0.7,
     lineHeight: 18,
   },
   iconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 4,
+    width: 40, height: 40, borderRadius: 20, borderWidth: 1,
+    alignItems: 'center', justifyContent: 'center', marginTop: 4,
   },
-  iconBtnText: {
-    fontSize: 16,
-  },
+  iconBtnText: { fontSize: 16 },
 
-  // ── Tabs ──
+  // Tabs
   tabsContainer: {
     paddingHorizontal: 20,
-    // KEY FIX: use gap instead of relying on margins, and ensure right padding
-    // so the last tab ("Lab Materials") is fully visible before scrolling ends
+    paddingRight: 20,
     gap: 10,
     flexDirection: 'row',
     paddingBottom: 4,
-    // Add right padding so last tab is never clipped
-    paddingRight: 20,
     alignItems: 'center',
   },
   tab: {
-    // KEY FIX: Remove any fixed width. Use paddingHorizontal + let content
-    // determine width naturally. Also ensure text cannot be clipped.
     paddingHorizontal: 18,
     paddingVertical: 9,
     borderRadius: 30,
     borderWidth: 1,
-    // Prevent the tab from shrinking below its content size
     flexShrink: 0,
-    // Ensure the tab always fits its label text
     alignItems: 'center',
     justifyContent: 'center',
   },
-  tabActive: {
-    backgroundColor: '#1E3A8A',
-    borderColor: '#3B6FDB',
-  },
-  tabText: {
-    fontSize: 14,
-    fontWeight: '600',
-    // KEY FIX: never allow text to be truncated inside the tab pill
-    includeFontPadding: false,
-    // Prevent wrapping — each tab is a single line
-    flexShrink: 0,
-  },
-  tabTextActive: {
-    color: '#FFFFFF',
-  },
+  tabActive:     { backgroundColor: '#1E3A8A', borderColor: '#3B6FDB' },
+  tabText:       { fontSize: 14, fontWeight: '600', includeFontPadding: false, flexShrink: 0 },
+  tabTextActive: { color: '#FFFFFF' },
 
-  // ── Divider ──
-  divider: {
-    height: 1,
-    marginTop: 14,
-    marginBottom: 16,
-    marginHorizontal: 20,
-  },
+  // Divider
+  divider: { height: 1, marginTop: 14, marginBottom: 16, marginHorizontal: 20 },
 
-  // ── Grid ──
-  grid: {
-    paddingHorizontal: 16,
-    paddingBottom: 40,
-    gap: 14,
-  },
-  gridDesktop: {
-    paddingHorizontal: 24,
-  },
-  row: {
-    flexDirection: 'row',
-    gap: 14,
-  },
+  // Grid
+  grid:        { paddingHorizontal: 16, paddingBottom: 40, gap: 14 },
+  gridDesktop: { paddingHorizontal: 24 },
+  row:         { flexDirection: 'row', gap: 14 },
 
-  // ── Card ──
+  // Card
   card: {
     borderRadius: CARD_RADIUS,
     padding: 18,
@@ -432,64 +343,45 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 5,
   },
-  cardDesktop: {
-    flex: 1,
-  },
-  invisible: {
-    opacity: 0,
-    elevation: 0,
-    shadowOpacity: 0,
-  },
+  cardDesktop: { flex: 1 },
+  invisible:   { opacity: 0, elevation: 0, shadowOpacity: 0 },
+
   courseId: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-    marginBottom: 12,
-    alignSelf: 'flex-end',
+    fontSize: 11, fontWeight: '700', letterSpacing: 1,
+    textTransform: 'uppercase', marginBottom: 12, alignSelf: 'flex-end',
   },
   iconWrapper: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 14,
+    width: 48, height: 48, borderRadius: 14,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 14,
   },
-  iconText: {
-    fontSize: 22,
-    fontWeight: '700',
-  },
+  iconText:  { fontSize: 22, fontWeight: '700' },
   cardTitle: {
     fontSize: isTabletOrDesktop ? 17 : 15,
-    fontWeight: '700',
-    marginBottom: 8,
-    letterSpacing: -0.3,
+    fontWeight: '700', marginBottom: 8, letterSpacing: -0.3,
   },
-  cardDesc: {
-    fontSize: 13,
-    lineHeight: 19,
-    marginBottom: 16,
-    flex: 1,
-  },
+  cardDesc: { fontSize: 13, lineHeight: 19, marginBottom: 16, flex: 1 },
   cardFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 'auto',
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'center', marginTop: 'auto',
   },
-  fileCount: {
-    fontSize: 12,
-    fontWeight: '500',
+
+  // Type badge on card
+  typeBadge: {
+    paddingHorizontal: 10, paddingVertical: 4,
+    borderRadius: 20, borderWidth: 1,
   },
+  typeBadgeText: { fontSize: 11, fontWeight: '700' },
+
   viewBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 20,
-    borderWidth: 1,
+    paddingHorizontal: 14, paddingVertical: 7,
+    borderRadius: 20, borderWidth: 1,
   },
-  viewBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
+  viewBtnText: { fontSize: 13, fontWeight: '700' },
+
+  // Empty / loading
+  emptyState: {
+    alignItems: 'center', justifyContent: 'center',
+    paddingVertical: 60, width: '100%',
   },
+  emptyText: { fontSize: 14, textAlign: 'center' },
 });

@@ -1,675 +1,962 @@
-// Screens/Teacher/LessonPlanner.js
+// Screens/Teacher/LessonPlannerScreen.js
+// ═══════════════════════════════════════════════════════════════════════════════
+//  Campus360 — Lesson Planner  (Teacher View)
+//
+//  FLOW:
+//  SubjectListView  →  tap subject  →  SubjectDetailView
+//    SubjectDetailView shows all uploaded resources + FAB → AddResourceModal
+//    AddResourceModal has two tabs: "Document" (file upload) | "Link" (URL)
+//
+//  APIs:
+//  • GET  /api/timetable/teacher/:id         → years, divisions, subjects
+//  • POST /api/lesson-planner                → upsert plan
+//  • GET  /api/lesson-planner/:id            → fetch single plan (for resources)
+//  • POST /api/lesson-planner/:id/resources/upload  → file upload
+//  • POST /api/lesson-planner/:id/resources         → add link
+//  • DELETE /api/lesson-planner/:id/resources/:rid  → remove resource
+// ═══════════════════════════════════════════════════════════════════════════════
 
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Animated, Platform, StatusBar, Linking, Alert, Modal, TextInput,
+  ActivityIndicator, Alert, Animated, Dimensions, Linking, Modal,
+  Platform, RefreshControl, ScrollView, StatusBar, StyleSheet,
+  Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useNavigation } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
+import axiosInstance from '../../Src/Axios';
 
-/* ─── Constants ──────────────────────────────────────────────────────────── */
-const COLORS = {
-  bg:          '#080B12',
-  surface:     '#10141F',
-  surfaceEl:   '#181D2E',
-  border:      '#1E2440',
-  accent:      '#8B5CF6',
-  accentSoft:  'rgba(139,92,246,0.15)',
-  green:       '#10B981',
-  greenSoft:   'rgba(16,185,129,0.12)',
-  red:         '#EF4444',
-  redSoft:     'rgba(239,68,68,0.12)',
-  blue:        '#3B82F6',
-  blueSoft:    'rgba(59,130,246,0.12)',
-  textPrimary:   '#E2E8F0',
-  textSecondary: '#94A3B8',
-  textMuted:     '#475569',
-};
-const SERIF = Platform.OS === 'ios' ? 'Georgia' : 'serif';
-
-const CLASSES   = ['FY', 'SY', 'TY'];
-const DIVISIONS = { FY: ['A', 'B', 'C'], SY: ['A', 'B'], TY: ['A', 'B', 'C', 'D'] };
-
-/* ─── Syllabus data per type ─────────────────────────────────────────────── */
-const SYLLABUS = {
-  Theory: [
-    {
-      id: 1,
-      unit: 'Unit 1',
-      title: 'Introduction to Quantum Mechanics',
-      subtopics: [
-        'Wave-particle duality',
-        'Photoelectric effect',
-        'De Broglie hypothesis',
-        'Davisson–Germer experiment',
-      ],
-    },
-    {
-      id: 2,
-      unit: 'Unit 2',
-      title: "Schrödinger's Wave Equation",
-      subtopics: [
-        'Time-dependent Schrödinger equation',
-        'Time-independent Schrödinger equation',
-        'Wave function and its interpretation',
-        'Probability density and normalisation',
-      ],
-    },
-    {
-      id: 3,
-      unit: 'Unit 3',
-      title: "Heisenberg's Uncertainty Principle",
-      subtopics: [
-        'Position–momentum uncertainty',
-        'Energy–time uncertainty',
-        'Thought experiments',
-        'Practical implications',
-      ],
-    },
-    {
-      id: 4,
-      unit: 'Unit 4',
-      title: 'Quantum Tunnelling',
-      subtopics: [
-        'Barrier penetration concept',
-        'Tunnel diode operation',
-        'Scanning tunnelling microscope',
-        'Nuclear fusion via tunnelling',
-      ],
-    },
-  ],
-  Lab: [
-    {
-      id: 5,
-      unit: 'Lab 1',
-      title: 'Photoelectric Effect Experiment',
-      subtopics: [
-        'Apparatus setup and calibration',
-        'Measuring stopping potential',
-        'Frequency vs stopping voltage graph',
-        "Calculating Planck's constant",
-      ],
-    },
-    {
-      id: 6,
-      unit: 'Lab 2',
-      title: 'Electron Diffraction',
-      subtopics: [
-        'Electron gun operation',
-        'Crystal lattice targets',
-        'Diffraction pattern analysis',
-        'Calculating de Broglie wavelength',
-      ],
-    },
-    {
-      id: 7,
-      unit: 'Lab 3',
-      title: 'Emission Spectral Analysis',
-      subtopics: [
-        'Hydrogen emission spectrum',
-        'Spectrometer operation',
-        'Identifying spectral lines',
-        'Rydberg formula verification',
-      ],
-    },
-  ],
+/* ─── Palette ────────────────────────────────────────────────────────────── */
+const P = {
+  bg: '#060912', panel: '#0C1221', card: '#111827', border: '#1C2640',
+  blue: '#3B82F6', blueMid: '#2563EB', blueSoft: 'rgba(59,130,246,0.14)',
+  teal: '#14B8A6', tealSoft: 'rgba(20,184,166,0.14)',
+  violet: '#8B5CF6', violetSoft: 'rgba(139,92,246,0.14)',
+  amber: '#F59E0B', amberSoft: 'rgba(245,158,11,0.14)',
+  green: '#22C55E', greenSoft: 'rgba(34,197,94,0.14)',
+  red: '#EF4444', redSoft: 'rgba(239,68,68,0.14)',
+  cyan: '#06B6D4', cyanSoft: 'rgba(6,182,212,0.14)',
+  t1: '#F1F5FF', t2: '#8B98C8', t3: '#3D4F7A', t4: '#1E2D50',
 };
 
-/* ═══════════════════════════════════════════════════════════════════════════ */
-export default function LessonPlanner({ navigation }) {
-  const fadeAnim = useRef(new Animated.Value(0)).current;
+const { width: SW } = Dimensions.get('window');
+const IS_TABLET = SW >= 768;
+const SAFE_T = Platform.OS === 'ios' ? 52 : (StatusBar.currentHeight || 0) + 10;
+const SAFE_B = Platform.OS === 'ios' ? 28 : 16;
 
-  /* ── Selection state ── */
-  const [selClass,    setSelClass]    = useState('SY');
-  const [selDivision, setSelDivision] = useState('A');
-  const [selType,     setSelType]     = useState('Theory'); // 'Theory' | 'Lab'
+/* ─── Colour palette ─────────────────────────────────────────────────────── */
+const PALETTE = [
+  { text: P.blue,   bg: P.blueSoft   },
+  { text: P.violet, bg: P.violetSoft },
+  { text: P.cyan,   bg: P.cyanSoft   },
+  { text: P.teal,   bg: P.tealSoft   },
+  { text: P.amber,  bg: P.amberSoft  },
+  { text: P.green,  bg: P.greenSoft  },
+  { text: P.red,    bg: P.redSoft    },
+];
 
-  /* ── Syllabus expansion ── */
-  const [expanded, setExpanded] = useState({});
-  const toggleExpanded = (id) =>
-    setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
+const buildColorMap = (subjects) => {
+  const m = {};
+  subjects.forEach((s, i) => { m[s.toLowerCase()] = PALETTE[i % PALETTE.length]; });
+  return m;
+};
 
-  /* ── Update Syllabus modal ── */
-  const [syllabusModal,  setSyllabusModal]  = useState(false);
-  const [newTopicTitle,  setNewTopicTitle]  = useState('');
-  const [newSubtopics,   setNewSubtopics]   = useState('');
+const getSubColor = (subject = '', map) => {
+  const k = subject.toLowerCase().trim();
+  if (map[k]) return map[k];
+  const hit = Object.keys(map).find(key => k.includes(key) || key.includes(k));
+  if (hit) return map[hit];
+  let h = 0;
+  for (let i = 0; i < subject.length; i++) h = (h * 31 + subject.charCodeAt(i)) >>> 0;
+  return PALETTE[h % PALETTE.length];
+};
 
-  /* ── Resource state ── */
-  const [uploadedNotes,    setUploadedNotes]    = useState([]);
-  const [linkModalVisible, setLinkModalVisible] = useState(false);
-  const [linkInput,        setLinkInput]        = useState('');
-
-  useEffect(() => {
-    Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }).start();
-  }, []);
-
-  /* ── Helpers ── */
-  const formatBytes = (bytes) => {
-    if (!bytes) return 'Unknown size';
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / 1048576).toFixed(1)} MB`;
-  };
-
-  /* ── Document picker ── */
-  const handlePickDocument = async () => {
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: '*/*', copyToCacheDirectory: true, multiple: true,
-      });
-      if (result.canceled) return;
-      const files = result.assets ?? [];
-      if (!files.length) return;
-      setUploadedNotes(prev => [
-        ...prev,
-        ...files.map(f => ({
-          id: `${f.name}-${Date.now()}-${Math.random()}`,
-          name: f.name, size: formatBytes(f.size), uri: f.uri,
-        })),
-      ]);
-      Alert.alert(
-        'Notes Uploaded',
-        files.length === 1
-          ? `"${files[0].name}" has been added to your Resource Library.`
-          : `${files.length} files have been added to your Resource Library.`,
-      );
-    } catch {
-      Alert.alert('Error', 'Failed to pick documents. Please try again.');
-    }
-  };
-
-  const handleRemoveNote = (id) =>
-    setUploadedNotes(prev => prev.filter(n => n.id !== id));
-
-  /* ── External link ── */
-  const handleOpenExternalLink = () => { setLinkInput(''); setLinkModalVisible(true); };
-  const handleLaunchLink = async () => {
-    const url = linkInput.trim();
-    if (!url) { Alert.alert('No URL', 'Please enter a link to open.'); return; }
-    const full = url.startsWith('http') ? url : `https://${url}`;
-    setLinkModalVisible(false);
-    try {
-      if (await Linking.canOpenURL(full)) await Linking.openURL(full);
-      else Alert.alert('Cannot Open', `Unable to open: ${full}`);
-    } catch { Alert.alert('Error', 'Something went wrong while opening the link.'); }
-  };
-
-  /* ── Save new topic ── */
-  const handleSaveTopic = () => {
-    if (!newTopicTitle.trim()) {
-      Alert.alert('Required', 'Please enter a topic title.'); return;
-    }
-    Alert.alert('✅ Saved', `"${newTopicTitle}" added to the ${selType} syllabus for ${selClass}-${selDivision}.`);
-    setNewTopicTitle(''); setNewSubtopics(''); setSyllabusModal(false);
-  };
-
-  /* ── Resources list ── */
-  const resources = [
-    {
-      id: 'notes',
-      icon: uploadedNotes.length > 0 ? 'checkmark-circle-outline' : 'cloud-upload-outline',
-      name: uploadedNotes.length > 0
-        ? `${uploadedNotes.length} Note${uploadedNotes.length > 1 ? 's' : ''} Uploaded`
-        : 'Upload Notes',
-      size: uploadedNotes.length > 0 ? 'Tap to add more' : 'Tap to upload',
-      color: COLORS.red, bg: COLORS.redSoft,
-      onPress: handlePickDocument,
-    },
-    {
-      id: 'external',
-      icon: 'link-outline',
-      name: 'External Resource',
-      size: 'YouTube / Browser',
-      color: COLORS.green, bg: COLORS.greenSoft,
-      onPress: handleOpenExternalLink,
-    },
-  ];
-
-  const syllabus = SYLLABUS[selType] || [];
-
-  /* ═══════════════════════════════════════════════════════════════════════ */
+/* ─── Chip row ───────────────────────────────────────────────────────────── */
+function ChipRow({ items, selected, onSelect, color = P.blue, soft }) {
+  const bg = soft || (color + '22');
   return (
-    <View style={s.wrapper}>
-      <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} />
+    <ScrollView horizontal showsHorizontalScrollIndicator={false}
+      contentContainerStyle={{ gap: 8, paddingVertical: 2 }}>
+      {items.map((item) => {
+        const key   = typeof item === 'string' ? item : item.key;
+        const label = typeof item === 'string' ? item : item.label;
+        const active = selected === key;
+        return (
+          <TouchableOpacity key={key} onPress={() => onSelect(key)}
+            style={[ch.base, active && { backgroundColor: bg, borderColor: color }]}>
+            <Text style={[ch.txt, active && { color }]}>{label}</Text>
+          </TouchableOpacity>
+        );
+      })}
+    </ScrollView>
+  );
+}
+const ch = StyleSheet.create({
+  base: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, borderWidth: 1.5, borderColor: P.border, backgroundColor: P.card },
+  txt:  { fontSize: 13, fontWeight: '600', color: P.t2 },
+});
 
-      {/* ── External Link Modal ────────────────────────────────────────── */}
-      <Modal visible={linkModalVisible} transparent animationType="fade"
-        onRequestClose={() => setLinkModalVisible(false)}>
-        <View style={s.modalOverlay}>
-          <View style={s.modalBox}>
-            <Text style={s.modalTitle}>Open External Resource</Text>
-            <Text style={s.modalSub}>Paste a YouTube link, website URL, or any browser link.</Text>
-            <TextInput
-              style={s.modalInput}
-              placeholder="https://youtube.com/watch?v=..."
-              placeholderTextColor={COLORS.textMuted}
-              value={linkInput} onChangeText={setLinkInput}
-              autoCapitalize="none" keyboardType="url"
-            />
-            <View style={s.modalActions}>
-              <TouchableOpacity style={s.modalCancel} onPress={() => setLinkModalVisible(false)}>
-                <Text style={s.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={s.modalConfirm} onPress={handleLaunchLink}>
-                <Text style={s.modalConfirmText}>Open</Text>
-              </TouchableOpacity>
-            </View>
+/* ─── Helpers ────────────────────────────────────────────────────────────── */
+const formatSize = (bytes) => {
+  if (!bytes) return '';
+  if (bytes < 1024)        return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const fileIcon = (name = '', type = 'file') => {
+  if (type === 'link') return 'link-outline';
+  const n = name.toLowerCase();
+  if (n.endsWith('.pdf'))                      return 'document-text-outline';
+  if (/\.(png|jpg|jpeg|gif|webp)/.test(n))    return 'image-outline';
+  if (/\.(mp4|mov|avi)/.test(n))              return 'videocam-outline';
+  if (/\.(ppt|pptx)/.test(n))                return 'easel-outline';
+  if (/\.(doc|docx)/.test(n))                return 'reader-outline';
+  if (/\.(xls|xlsx|csv)/.test(n))             return 'grid-outline';
+  if (/\.(zip|rar|tar|gz)/.test(n))           return 'archive-outline';
+  return 'attach-outline';
+};
+
+const relativeTime = (d) => {
+  if (!d) return '';
+  const s = Math.floor((Date.now() - new Date(d)) / 1000);
+  if (s < 60)    return 'just now';
+  if (s < 3600)  return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ *  ADD RESOURCE MODAL
+ *  Two tabs: Document (file) | Link (URL)
+ * ═══════════════════════════════════════════════════════════════════════════ */
+function AddResourceModal({ visible, subject, onClose, onSaveFile, onSaveLink, saving }) {
+  const [tab,         setTab]         = useState('document'); // 'document' | 'link'
+  const [description, setDescription] = useState('');
+  const [pickedFile,  setPickedFile]  = useState(null);
+  const [linkUrl,     setLinkUrl]     = useState('');
+  const [linkName,    setLinkName]    = useState('');
+
+  const reset = () => {
+    setTab('document');
+    setDescription('');
+    setPickedFile(null);
+    setLinkUrl('');
+    setLinkName('');
+  };
+
+  const handleClose = () => { reset(); onClose(); };
+
+ const pickFile = async () => {
+  try {
+    const result = await DocumentPicker.getDocumentAsync({
+      type: "*/*",
+      copyToCacheDirectory: true,
+    });
+
+    if (!result.canceled) {
+      const asset = result.assets[0];
+
+      if (Platform.OS === "web") {
+        setPickedFile(asset.file); // important
+      } else {
+        setPickedFile(asset);
+      }
+    }
+  } catch (err) {
+    Alert.alert("Error", "Could not open file picker.");
+  }
+};
+
+  const handleSave = () => {
+  if (!description.trim()) { Alert.alert('Required', 'Please add a description.'); return; }
+
+  if (tab === 'document') {
+    if (!pickedFile) { Alert.alert('Required', 'Please select a file.'); return; }
+    
+    // Pass the raw pickedFile — handleSaveFile will handle platform differences
+    onSaveFile({ description: description.trim(), file: pickedFile });
+    reset();
+  } else {
+    if (!linkUrl.trim()) { Alert.alert('Required', 'Please enter a URL.'); return; }
+    const name = linkName.trim() || linkUrl.trim();
+    onSaveLink({ description: description.trim(), name, uri: linkUrl.trim() });
+    reset();
+  }
+};
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
+      <View style={am.overlay}>
+        <View style={am.sheet}>
+
+          {/* Handle */}
+          <View style={{ alignItems: 'center', marginBottom: 18 }}>
+            <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: P.t4 }} />
           </View>
-        </View>
-      </Modal>
 
-      {/* ── Update Syllabus Modal ──────────────────────────────────────── */}
-      <Modal visible={syllabusModal} transparent animationType="slide"
-        onRequestClose={() => setSyllabusModal(false)}>
-        <View style={s.modalOverlay}>
-          <View style={s.modalBox}>
-            {/* Header */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-              <Text style={s.modalTitle}>Update Syllabus</Text>
-              <TouchableOpacity
-                onPress={() => setSyllabusModal(false)}
-                style={s.modalCloseBtn}>
-                <Ionicons name="close" size={18} color={COLORS.textSecondary} />
-              </TouchableOpacity>
+          {/* Header */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+            <View style={[am.iconBox, { backgroundColor: P.blueSoft }]}>
+              <Ionicons name="add-circle-outline" size={20} color={P.blue} />
             </View>
-
-            <Text style={s.modalSub}>
-              Add a new topic to {selClass}-{selDivision} · {selType}
-            </Text>
-
-            <Text style={s.inputLabel}>Topic Title</Text>
-            <TextInput
-              style={s.modalInput}
-              placeholder="e.g. Wave Functions"
-              placeholderTextColor={COLORS.textMuted}
-              value={newTopicTitle} onChangeText={setNewTopicTitle}
-            />
-
-            <Text style={s.inputLabel}>
-              Subtopics{'  '}
-              <Text style={{ fontWeight: '400', color: COLORS.textMuted }}>(one per line)</Text>
-            </Text>
-            <TextInput
-              style={[s.modalInput, { minHeight: 90, textAlignVertical: 'top', paddingTop: 12 }]}
-              placeholder={'Introduction\nMath formulation\nApplications'}
-              placeholderTextColor={COLORS.textMuted}
-              value={newSubtopics} onChangeText={setNewSubtopics}
-              multiline
-            />
-
-            <View style={s.modalActions}>
-              <TouchableOpacity style={s.modalCancel} onPress={() => setSyllabusModal(false)}>
-                <Text style={s.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={s.modalConfirm} onPress={handleSaveTopic}>
-                <Text style={s.modalConfirmText}>Save Topic</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* ── Main scroll ───────────────────────────────────────────────── */}
-      <ScrollView
-        style={s.container}
-        contentContainerStyle={{ paddingBottom: 48 }}
-        showsVerticalScrollIndicator={false}>
-
-        <Animated.View style={{ opacity: fadeAnim }}>
-
-          {/* ── Header ── */}
-          <View style={s.header}>
             <View style={{ flex: 1 }}>
-              <Text style={s.breadcrumb}>Dashboard  ›  Lesson Planner</Text>
-              <Text style={s.screenTitle}>Lesson Planner</Text>
-              <Text style={s.screenSub}>Manage your curriculum for {selClass}-{selDivision}</Text>
+              <Text style={am.title}>Add Resource</Text>
+              {!!subject && <Text style={am.subtitle}>{subject}</Text>}
             </View>
-            <TouchableOpacity
-              style={s.updateBtn}
-              onPress={() => setSyllabusModal(true)}
-              activeOpacity={0.85}>
-              <Ionicons name="create-outline" size={16} color="#fff" />
-              <Text style={s.updateBtnText}>Update Syllabus</Text>
+            <TouchableOpacity onPress={handleClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="close" size={20} color={P.t2} />
             </TouchableOpacity>
           </View>
 
-          {/* ── Class chips ── */}
-          <View style={s.sectionBlock}>
-            <Text style={s.sectionLabel}>Class</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}
-              contentContainerStyle={s.chipScroll}>
-              {CLASSES.map(cls => (
-                <TouchableOpacity
-                  key={cls}
-                  onPress={() => {
-                    setSelClass(cls);
-                    setSelDivision(DIVISIONS[cls][0]);
-                    setExpanded({});
-                  }}
-                  style={[s.chip, selClass === cls && s.chipActive]}
-                  activeOpacity={0.8}>
-                  <Text style={[s.chipText, selClass === cls && s.chipTextActive]}>{cls}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+          {/* ── Tab switcher ── */}
+          <View style={am.tabRow}>
+            <TouchableOpacity
+              onPress={() => setTab('document')}
+              style={[am.tabBtn, tab === 'document' && am.tabBtnActive]}
+            >
+              <Ionicons name="document-attach-outline" size={15}
+                color={tab === 'document' ? P.blue : P.t3} />
+              <Text style={[am.tabTxt, tab === 'document' && { color: P.blue }]}>Document</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setTab('link')}
+              style={[am.tabBtn, tab === 'link' && am.tabBtnActive]}
+            >
+              <Ionicons name="link-outline" size={15}
+                color={tab === 'link' ? P.teal : P.t3} />
+              <Text style={[am.tabTxt, tab === 'link' && { color: P.teal }]}>Link</Text>
+            </TouchableOpacity>
           </View>
 
-          {/* ── Division chips ── */}
-          <View style={s.sectionBlock}>
-            <Text style={s.sectionLabel}>Division</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}
-              contentContainerStyle={s.chipScroll}>
-              {DIVISIONS[selClass].map(div => (
-                <TouchableOpacity
-                  key={div}
-                  onPress={() => { setSelDivision(div); setExpanded({}); }}
-                  style={[s.chip, selDivision === div && s.chipActive]}
-                  activeOpacity={0.8}>
-                  <Text style={[s.chipText, selDivision === div && s.chipTextActive]}>
-                    Division {div}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
+          {/* ── Description (shared) ── */}
+          <Text style={am.label}>Description</Text>
+          <TextInput
+            style={am.textArea}
+            value={description}
+            onChangeText={setDescription}
+            placeholder="e.g. Chapter 3 notes — Newton's Laws and derivations"
+            placeholderTextColor={P.t3}
+            multiline
+            numberOfLines={3}
+            textAlignVertical="top"
+          />
 
-          {/* ── Theory / Lab toggle ── */}
-          <View style={s.typeToggleWrap}>
-            {['Theory', 'Lab'].map(type => (
-              <TouchableOpacity
-                key={type}
-                onPress={() => { setSelType(type); setExpanded({}); }}
-                style={[s.typeBtn, selType === type && s.typeBtnActive]}
-                activeOpacity={0.8}>
-                <Ionicons
-                  name={type === 'Theory' ? 'book-outline' : 'flask-outline'}
-                  size={18}
-                  color={selType === type ? COLORS.accent : COLORS.textMuted}
-                />
-                <Text style={[s.typeBtnText, selType === type && s.typeBtnTextActive]}>
-                  {type}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {/* ── Context banner ── */}
-          <View style={s.contextBanner}>
-            <View style={[s.contextDot, { backgroundColor: selType === 'Theory' ? COLORS.accent : COLORS.green }]} />
-            <Text style={s.contextText}>
-              {selClass}-{selDivision}  ·  {selType}  ·  {syllabus.length} {syllabus.length === 1 ? 'unit' : 'units'}
-            </Text>
-          </View>
-
-          {/* ── Syllabus accordion ── */}
-          <View style={s.syllabusWrap}>
-            {syllabus.map((topic, idx) => {
-              const isOpen = !!expanded[topic.id];
-              const typeColor = selType === 'Theory' ? COLORS.accent : COLORS.green;
-              return (
-                <View key={topic.id} style={[s.topicCard, { borderLeftColor: typeColor }]}>
-                  <TouchableOpacity
-                    style={s.topicRow}
-                    onPress={() => toggleExpanded(topic.id)}
-                    activeOpacity={0.8}>
-                    {/* Index badge */}
-                    <View style={[s.indexBadge, { backgroundColor: typeColor + '20' }]}>
-                      <Text style={[s.indexText, { color: typeColor }]}>
-                        {String(idx + 1).padStart(2, '0')}
-                      </Text>
-                    </View>
-
-                    {/* Title block */}
-                    <View style={{ flex: 1 }}>
-                      <Text style={[s.unitLabel, { color: typeColor }]}>{topic.unit}</Text>
-                      <Text style={s.topicTitle}>{topic.title}</Text>
-                    </View>
-
-                    {/* Subtopic count */}
-                    <View style={[s.countPill, { backgroundColor: typeColor + '20' }]}>
-                      <Text style={[s.countText, { color: typeColor }]}>{topic.subtopics.length}</Text>
-                    </View>
-
-                    <Ionicons
-                      name={isOpen ? 'chevron-up' : 'chevron-down'}
-                      size={16} color={COLORS.textMuted}
-                      style={{ marginLeft: 8 }}
-                    />
-                  </TouchableOpacity>
-
-                  {/* Subtopics */}
-                  {isOpen && (
-                    <View style={s.subtopicWrap}>
-                      {topic.subtopics.map((sub, si) => (
-                        <View key={si} style={s.subtopicRow}>
-                          <View style={[s.subtopicDot, { backgroundColor: typeColor }]} />
-                          <Text style={s.subtopicText}>{sub}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-                </View>
-              );
-            })}
-          </View>
-
-          {/* ── Resource Library ── */}
-          <View style={[s.card, { marginHorizontal: 20, marginTop: 6 }]}>
-            <View style={s.cardHeader}>
-              <Ionicons name="library-outline" size={16} color={COLORS.accent} />
-              <Text style={s.cardTitle}>Resource Library</Text>
-            </View>
-
-            <View style={s.resourceGrid}>
-              {resources.map(res => (
-                <TouchableOpacity
-                  key={res.id}
-                  style={[s.resourceItem, { backgroundColor: res.bg, borderColor: res.color + '30' }]}
-                  onPress={res.onPress}
-                  activeOpacity={0.75}>
-                  <Ionicons name={res.icon} size={26} color={res.color} />
-                  <Text style={s.resourceName} numberOfLines={2}>{res.name}</Text>
-                  <Text style={s.resourceSize}>{res.size}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* Uploaded notes list */}
-            {uploadedNotes.length > 0 && (
-              <View style={s.notesList}>
-                <Text style={s.notesListTitle}>Uploaded Notes</Text>
-                {uploadedNotes.map(note => (
-                  <View key={note.id} style={s.noteRow}>
-                    <Ionicons name="document-text-outline" size={16} color={COLORS.red} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.noteRowName} numberOfLines={1}>{note.name}</Text>
-                      <Text style={s.noteRowSize}>{note.size}</Text>
-                    </View>
-                    <TouchableOpacity
-                      onPress={() => handleRemoveNote(note.id)}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                      <Ionicons name="close-circle-outline" size={18} color={COLORS.textMuted} />
-                    </TouchableOpacity>
+          {/* ── Document tab ── */}
+          {tab === 'document' && (
+            <>
+              <Text style={[am.label, { marginTop: 18 }]}>File</Text>
+              {!pickedFile ? (
+                <TouchableOpacity onPress={pickFile} style={am.pickArea} activeOpacity={0.8}>
+                  <View style={[am.pickIconBox, { backgroundColor: P.blueSoft }]}>
+                    <Ionicons name="cloud-upload-outline" size={26} color={P.blue} />
                   </View>
-                ))}
-              </View>
-            )}
+                  <Text style={am.pickTitle}>Tap to choose a file</Text>
+                  <Text style={am.pickSub}>PDF · Word · PPT · Image · Video · up to 20 MB</Text>
+                </TouchableOpacity>
+              ) : (
+                <View style={am.filePreview}>
+                  <View style={[am.fileIconBox, { backgroundColor: P.blueSoft }]}>
+                    <Ionicons name={fileIcon(pickedFile.name)} size={20} color={P.blue} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={am.fileName} numberOfLines={1}>{pickedFile.name}</Text>
+                    <Text style={am.fileMeta}>{formatSize(pickedFile.size)}</Text>
+                  </View>
+                  <TouchableOpacity onPress={() => setPickedFile(null)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Ionicons name="close-circle" size={20} color={P.t3} />
+                  </TouchableOpacity>
+                </View>
+              )}
+            </>
+          )}
+
+          {/* ── Link tab ── */}
+          {tab === 'link' && (
+            <>
+              <Text style={[am.label, { marginTop: 18 }]}>URL</Text>
+              <TextInput
+                style={am.input}
+                value={linkUrl}
+                onChangeText={setLinkUrl}
+                placeholder="https://drive.google.com/..."
+                placeholderTextColor={P.t3}
+                autoCapitalize="none"
+                keyboardType="url"
+              />
+              <Text style={[am.label, { marginTop: 14 }]}>Display Name (optional)</Text>
+              <TextInput
+                style={am.input}
+                value={linkName}
+                onChangeText={setLinkName}
+                placeholder="e.g. Google Drive — Unit 3 Slides"
+                placeholderTextColor={P.t3}
+              />
+            </>
+          )}
+
+          {/* ── Actions ── */}
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 24 }}>
+            <TouchableOpacity onPress={handleClose}
+              style={[am.btn, { flex: 1, borderColor: P.border, backgroundColor: P.card }]}>
+              <Text style={{ color: P.t2, fontWeight: '600', fontSize: 14 }}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleSave}
+              disabled={saving}
+              style={[am.btn, {
+                flex: 2,
+                backgroundColor: tab === 'document' ? P.blueMid : P.teal,
+                borderColor:     tab === 'document' ? P.blueMid : P.teal,
+                opacity: saving ? 0.6 : 1,
+              }]}
+            >
+              {saving
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <>
+                    <Ionicons
+                      name={tab === 'document' ? 'cloud-upload-outline' : 'link-outline'}
+                      size={15} color="#fff"
+                    />
+                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>
+                      {tab === 'document' ? 'Upload' : 'Save Link'}
+                    </Text>
+                  </>
+              }
+            </TouchableOpacity>
           </View>
 
-        </Animated.View>
-      </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const am = StyleSheet.create({
+  overlay:     { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' },
+  sheet:       { backgroundColor: P.panel, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 22, paddingBottom: SAFE_B + 16, borderWidth: 1, borderBottomWidth: 0, borderColor: P.border },
+  iconBox:     { width: 42, height: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  title:       { fontSize: 17, fontWeight: '800', color: P.t1 },
+  subtitle:    { fontSize: 12, color: P.t3, marginTop: 2 },
+  tabRow:      { flexDirection: 'row', backgroundColor: P.card, borderRadius: 12, borderWidth: 1, borderColor: P.border, padding: 4, gap: 4, marginBottom: 20 },
+  tabBtn:      { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 9, borderRadius: 9 },
+  tabBtnActive:{ backgroundColor: P.panel },
+  tabTxt:      { fontSize: 13, fontWeight: '700', color: P.t3 },
+  label:       { fontSize: 11, fontWeight: '700', color: P.t3, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
+  textArea:    { backgroundColor: P.card, borderWidth: 1, borderColor: P.border, borderRadius: 12, padding: 13, fontSize: 14, color: P.t1, minHeight: 80, textAlignVertical: 'top' },
+  input:       { backgroundColor: P.card, borderWidth: 1, borderColor: P.border, borderRadius: 12, padding: 13, fontSize: 14, color: P.t1 },
+  pickArea:    { borderWidth: 1.5, borderColor: P.border, borderRadius: 14, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', paddingVertical: 26, gap: 7 },
+  pickIconBox: { width: 52, height: 52, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  pickTitle:   { fontSize: 14, fontWeight: '700', color: P.t2 },
+  pickSub:     { fontSize: 11, color: P.t3, textAlign: 'center' },
+  filePreview: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: P.card, borderRadius: 12, borderWidth: 1, borderColor: P.border, padding: 12 },
+  fileIconBox: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  fileName:    { fontSize: 13, fontWeight: '700', color: P.t1 },
+  fileMeta:    { fontSize: 11, color: P.t3, marginTop: 2 },
+  btn:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderWidth: 1, borderRadius: 12, paddingVertical: 13 },
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ *  RESOURCE CARD
+ * ═══════════════════════════════════════════════════════════════════════════ */
+function ResourceCard({ resource: r, onDelete }) {
+  const isLink  = r.type === 'link';
+  const accent  = isLink ? P.teal : P.blue;
+  const accentSoft = isLink ? P.tealSoft : P.blueSoft;
+
+  return (
+    <View style={rc.card}>
+      {/* Left icon */}
+      <View style={[rc.iconBox, { backgroundColor: accentSoft }]}>
+        <Ionicons name={fileIcon(r.name, r.type)} size={20} color={accent} />
+      </View>
+
+      {/* Body */}
+      <View style={{ flex: 1, gap: 3 }}>
+        {/* Type badge + time */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <View style={[rc.typeBadge, { backgroundColor: accentSoft }]}>
+            <Text style={[rc.typeTxt, { color: accent }]}>{isLink ? 'LINK' : 'FILE'}</Text>
+          </View>
+          <Text style={rc.time}>{relativeTime(r.uploadedAt || r.createdAt)}</Text>
+        </View>
+
+        {/* Name */}
+        <Text style={rc.name} numberOfLines={1}>{r.name}</Text>
+
+        {/* Description */}
+        {!!r.description && (
+          <Text style={rc.desc} numberOfLines={2}>{r.description}</Text>
+        )}
+
+        {/* Size or URL */}
+        {r.size
+          ? <Text style={rc.meta}>{formatSize(r.size)}</Text>
+          : isLink
+            ? <Text style={rc.meta} numberOfLines={1}>{r.uri}</Text>
+            : null
+        }
+      </View>
+
+      {/* Actions */}
+      <View style={{ gap: 6 }}>
+        {isLink && (
+          <TouchableOpacity
+            onPress={() => Linking.openURL(r.uri).catch(() => Alert.alert('Error', 'Could not open link.'))}
+            style={[rc.actionBtn, { backgroundColor: P.tealSoft }]}
+          >
+            <Ionicons name="open-outline" size={15} color={P.teal} />
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity
+          onPress={onDelete}
+          style={[rc.actionBtn, { backgroundColor: P.redSoft }]}
+        >
+          <Ionicons name="trash-outline" size={15} color={P.red} />
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
 
-/* ─── Styles ─────────────────────────────────────────────────────────────── */
-const CARD_BASE = {
-  backgroundColor: COLORS.surface,
-  borderRadius: 16, borderWidth: 1, borderColor: COLORS.border, padding: 16,
+const rc = StyleSheet.create({
+  card:      { flexDirection: 'row', alignItems: 'flex-start', gap: 12, backgroundColor: P.card, borderRadius: 14, borderWidth: 1, borderColor: P.border, padding: 14 },
+  iconBox:   { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginTop: 2 },
+  typeBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },
+  typeTxt:   { fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
+  time:      { fontSize: 11, color: P.t3 },
+  name:      { fontSize: 14, fontWeight: '700', color: P.t1 },
+  desc:      { fontSize: 12, color: P.t2, lineHeight: 17 },
+  meta:      { fontSize: 11, color: P.t3 },
+  actionBtn: { width: 32, height: 32, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ *  SUBJECT DETAIL VIEW  (shown when a subject is tapped)
+ * ═══════════════════════════════════════════════════════════════════════════ */
+function SubjectDetailView({ subject, plan, sc, onBack, onResourceAdded }) {
+  const [resources,    setResources]    = useState(plan?.resources || []);
+  const [loadingPlan,  setLoadingPlan]  = useState(!plan);
+  const [planId,       setPlanId]       = useState(plan?._id || null);
+  const [showAdd,      setShowAdd]      = useState(false);
+  const [saving,       setSaving]       = useState(false);
+  const [refreshing,   setRefreshing]   = useState(false);
+
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
+    if (plan?._id) {
+      setPlanId(plan._id);
+      setResources(plan.resources || []);
+      setLoadingPlan(false);
+    }
+  }, [plan]);
+
+  const refreshPlan = useCallback(async () => {
+    if (!planId) return;
+    try {
+      const res = await axiosInstance.get(`/lesson-planner/${planId}`);
+      if (res.data?.success) setResources(res.data.data?.resources || []);
+    } catch (e) {
+      console.warn('refreshPlan:', e.message);
+    }
+  }, [planId]);
+
+  const onRefresh = async () => { setRefreshing(true); await refreshPlan(); setRefreshing(false); };
+
+  /* Upload file */
+const handleSaveFile = async ({ description, file }) => {
+  const formData = new FormData();
+
+  if (Platform.OS === "web") {
+    // On web, file is already a browser File object — append directly
+    formData.append("resource", file, file.name);
+  } else {
+    // On native, file is { uri, name, mimeType }
+    formData.append("resource", {
+      uri: file.uri,
+      name: file.name,
+      type: file.mimeType || "application/octet-stream",
+    });
+  }
+
+  formData.append("description", description);
+
+  setSaving(true);
+  try {
+    const res = await axiosInstance.post(
+      `/lesson-planner/${planId}/resources/upload`,
+      formData,
+      {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      }
+    );
+
+    if (res.data?.success) {
+      await refreshPlan();
+      setShowAdd(false);
+      onResourceAdded?.();
+    }
+  } catch (err) {
+    Alert.alert("Error", err.response?.data?.message || "Could not upload file.");
+    console.log("Upload error:", err.response?.data);
+  } finally {
+    setSaving(false);
+  }
 };
 
+  /* Save link */
+  const handleSaveLink = useCallback(async ({ description, name, uri }) => {
+    if (!planId) return;
+    setSaving(true);
+    try {
+      const res = await axiosInstance.post(`/lesson-planner/${planId}/resources`, { name, uri, description });
+      if (res.data?.success) {
+        await refreshPlan();
+        setShowAdd(false);
+        onResourceAdded?.();
+      }
+    } catch (e) {
+      Alert.alert('Error', e?.response?.data?.message || 'Could not save link.');
+    } finally {
+      setSaving(false);
+    }
+  }, [planId, refreshPlan]);
+
+  /* Delete resource */
+  const handleDelete = (rid) => {
+    Alert.alert('Remove Resource', 'Are you sure you want to delete this resource?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive', onPress: async () => {
+          try {
+            await axiosInstance.delete(`/lesson-planner/${planId}/resources/${rid}`);
+            setResources(prev => prev.filter(r => r._id !== rid));
+          } catch (e) {
+            Alert.alert('Error', 'Could not delete resource.');
+          }
+        },
+      },
+    ]);
+  };
+
+  const fileResources = resources.filter(r => r.type === 'file');
+  const linkResources = resources.filter(r => r.type === 'link');
+
+  return (
+    <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
+      {/* Sub-header */}
+      <View style={[dv.subHeader, { borderBottomColor: sc.text + '33' }]}>
+        <TouchableOpacity onPress={onBack} style={s.backBtn} activeOpacity={0.78}>
+          <Ionicons name="chevron-back" size={20} color={P.t2} />
+        </TouchableOpacity>
+        <View style={[dv.subjectPill, { backgroundColor: sc.bg, borderColor: sc.text + '44' }]}>
+          <Text style={[dv.subjectPillTxt, { color: sc.text }]}>{subject}</Text>
+        </View>
+        <Text style={dv.countTxt}>{resources.length} resource{resources.length !== 1 ? 's' : ''}</Text>
+      </View>
+
+      {loadingPlan ? (
+        <View style={s.center}>
+          <ActivityIndicator size="large" color={P.blue} />
+          <Text style={s.mutedTxt}>Loading resources…</Text>
+        </View>
+      ) : (
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={P.blue} colors={[P.blue]} />}
+          contentContainerStyle={{ paddingHorizontal: IS_TABLET ? 32 : 16, paddingTop: 18, paddingBottom: 100, gap: 20 }}
+        >
+
+          {/* Empty state */}
+          {resources.length === 0 && (
+            <View style={s.center}>
+              <View style={[s.emptyIcon, { backgroundColor: sc.bg }]}>
+                <Ionicons name="folder-open-outline" size={30} color={sc.text} />
+              </View>
+              <Text style={s.emptyTitle}>No Resources Yet</Text>
+              <Text style={s.mutedTxt}>Tap the button below to add your first document or link.</Text>
+            </View>
+          )}
+
+          {/* Documents section */}
+          {fileResources.length > 0 && (
+            <View style={{ gap: 10 }}>
+              <View style={dv.sectionHead}>
+                <Ionicons name="document-attach-outline" size={14} color={P.blue} />
+                <Text style={[dv.sectionTitle, { color: P.blue }]}>Documents</Text>
+                <Text style={dv.sectionCount}>{fileResources.length}</Text>
+              </View>
+              {fileResources.map(r => (
+                <ResourceCard key={r._id} resource={r} onDelete={() => handleDelete(r._id)} />
+              ))}
+            </View>
+          )}
+
+          {/* Links section */}
+          {linkResources.length > 0 && (
+            <View style={{ gap: 10 }}>
+              <View style={dv.sectionHead}>
+                <Ionicons name="link-outline" size={14} color={P.teal} />
+                <Text style={[dv.sectionTitle, { color: P.teal }]}>Links</Text>
+                <Text style={dv.sectionCount}>{linkResources.length}</Text>
+              </View>
+              {linkResources.map(r => (
+                <ResourceCard key={r._id} resource={r} onDelete={() => handleDelete(r._id)} />
+              ))}
+            </View>
+          )}
+
+        </ScrollView>
+      )}
+
+      {/* FAB */}
+      <View style={dv.fab}>
+        <TouchableOpacity onPress={() => setShowAdd(true)} style={[dv.fabBtn, { backgroundColor: sc.text }]} activeOpacity={0.88}>
+          <Ionicons name="add" size={20} color="#fff" />
+          <Text style={dv.fabTxt}>Add Resource</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Add modal */}
+      <AddResourceModal
+        visible={showAdd}
+        subject={subject}
+        onClose={() => setShowAdd(false)}
+        onSaveFile={handleSaveFile}
+        onSaveLink={handleSaveLink}
+        saving={saving}
+      />
+    </Animated.View>
+  );
+}
+
+const dv = StyleSheet.create({
+  subHeader:     { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1 },
+  subjectPill:   { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, borderWidth: 1.5 },
+  subjectPillTxt:{ fontSize: 13, fontWeight: '800' },
+  countTxt:      { marginLeft: 'auto', fontSize: 12, color: P.t3, fontWeight: '500' },
+  sectionHead:   { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  sectionTitle:  { fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4 },
+  sectionCount:  { fontSize: 11, color: P.t3, marginLeft: 2 },
+  fab:           { position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: IS_TABLET ? 32 : 16, paddingBottom: SAFE_B + 8, paddingTop: 12, backgroundColor: P.panel + 'f0', borderTopWidth: 1, borderTopColor: P.border },
+  fabBtn:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, borderRadius: 14, paddingVertical: 15 },
+  fabTxt:        { fontSize: 14, fontWeight: '800', color: '#fff' },
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ *  MAIN SCREEN
+ * ═══════════════════════════════════════════════════════════════════════════ */
+export default function LessonPlannerScreen() {
+  const navigation = useNavigation();
+
+  const [teacherId,   setTeacherId]   = useState(null);
+  const [teacherName, setTeacherName] = useState('Teacher');
+
+  /* Timetable-derived */
+  const [years,     setYears]     = useState([]);
+  const [divisions, setDivisions] = useState([]);
+  const [subjects,  setSubjects]  = useState([]);
+  const [colorMap,  setColorMap]  = useState({});
+
+  /* Filters */
+  const [selYear, setSelYear] = useState(null);
+  const [selDiv,  setSelDiv]  = useState(null);
+  const [selType, setSelType] = useState('theory');
+
+  /* Navigation state: null = subject list, else = { subject, plan } */
+  const [activeSubject, setActiveSubject] = useState(null);
+  const [activePlan,    setActivePlan]    = useState(null);
+
+  const [ttLoading,  setTtLoading]  = useState(true);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fadeAnim  = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(24)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim,  { toValue: 1, duration: 400, useNativeDriver: true }),
+      Animated.spring(slideAnim, { toValue: 0, tension: 80, friction: 14, useNativeDriver: true }),
+    ]).start();
+    initLoad();
+  }, []);
+
+  const initLoad = async () => {
+    try {
+      const id   = await AsyncStorage.getItem('teacherId');
+      const name = await AsyncStorage.getItem('teacherName');
+      if (id)   setTeacherId(id);
+      if (name) setTeacherName(name);
+      if (id)   await fetchTimetable(id);
+    } catch (e) {
+      console.warn('LessonPlanner initLoad:', e.message);
+    }
+  };
+
+  /* GET /api/timetable/teacher/:id — same as DoubtSessionScreen */
+  const fetchTimetable = useCallback(async (id) => {
+    if (!id) return;
+    setTtLoading(true);
+    try {
+      const res = await axiosInstance.get(`/timetable/teacher/${id}`);
+      if (res.data?.success && Array.isArray(res.data.data)) {
+        const rows = res.data.data;
+        const uniqueYears = [...new Set(rows.map(r => String(r.year)).filter(Boolean))].sort();
+        setYears(uniqueYears);
+        setSelYear(prev => prev || uniqueYears[0] || null);
+        const uniqueDivs = [...new Set(rows.map(r => r.division).filter(Boolean))].sort();
+        setDivisions(uniqueDivs);
+        setSelDiv(prev => prev || uniqueDivs[0] || null);
+        const uniqueSubs = [...new Set(rows.map(r => r.subject).filter(Boolean))].sort();
+        setSubjects(uniqueSubs);
+        setColorMap(buildColorMap(uniqueSubs));
+      }
+    } catch (e) {
+      console.warn('LessonPlanner fetchTimetable:', e.message);
+    } finally {
+      setTtLoading(false);
+    }
+  }, []);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchTimetable(teacherId);
+    setRefreshing(false);
+  };
+
+  // Map frontend values to backend enums
+  const YEAR_MAP = { '1': 'FY', '2': 'SY', '3': 'TY' };
+  const TYPE_MAP = { 'theory': 'Theory', 'practical': 'Lab', 'tutorial': 'Theory' };
+
+  const openSubject = useCallback(async (subject) => {
+    if (!teacherId || !selYear || !selDiv) {
+      Alert.alert('Select filters', 'Please choose a year and division first.');
+      return;
+    }
+    setActiveSubject(subject);
+    setPlanLoading(true);
+    try {
+      const mappedYear = YEAR_MAP[selYear] || selYear;
+      const mappedType = TYPE_MAP[selType] || selType;
+      const res = await axiosInstance.post('/lesson-planner', {
+        teacherId,
+        year: mappedYear,
+        division: selDiv,
+        type: mappedType,
+        subject,
+      });
+      if (res.data?.success) setActivePlan(res.data.data);
+    } catch (e) {
+      Alert.alert('Error', 'Could not open plan. Please try again.');
+      setActiveSubject(null);
+    } finally {
+      setPlanLoading(false);
+    }
+  }, [teacherId, selYear, selDiv, selType]);
+
+  const goBack = () => { setActiveSubject(null); setActivePlan(null); };
+
+  /* Chip data */
+  const yearItems = years.map(y => ({
+    key: y,
+    label: { '1': '1st Year', '2': '2nd Year', '3': '3rd Year', '4': '4th Year' }[y] || `Year ${y}`,
+  }));
+  const divItems  = divisions.map(d => ({ key: d, label: `Div ${d}` }));
+  const typeItems = [
+    { key: 'theory',    label: 'Theory'    },
+    { key: 'practical', label: 'Practical' },
+    { key: 'tutorial',  label: 'Tutorial'  },
+  ];
+
+  /* ═══════════════════════════════════════════════════════════════════
+   *  RENDER
+   * ═══════════════════════════════════════════════════════════════════ */
+  return (
+    <Animated.View style={[s.root, { opacity: fadeAnim }]}>
+      <StatusBar barStyle="light-content" backgroundColor={P.panel} />
+
+      {/* ── Main header ── */}
+      <View style={s.header}>
+        <TouchableOpacity
+          onPress={activeSubject ? goBack : () => navigation.goBack()}
+          style={s.backBtn} activeOpacity={0.78}
+        >
+          <Ionicons name="chevron-back" size={20} color={P.t2} />
+        </TouchableOpacity>
+        <View style={{ flex: 1 }}>
+          <Text style={s.headerTitle}>
+            {activeSubject || 'Lesson Planner'}
+          </Text>
+          <Text style={s.headerSub}>
+            {activeSubject ? 'Notes & resources' : 'Select a subject to manage resources'}
+          </Text>
+        </View>
+        {teacherName ? (
+          <View style={s.pill}>
+            <Text style={s.pillTxt} numberOfLines={1}>👩‍🏫 {teacherName.split(' ')[0]}</Text>
+          </View>
+        ) : null}
+      </View>
+
+      {/* ── Plan loading overlay ── */}
+      {planLoading && (
+        <View style={s.planLoadingBar}>
+          <ActivityIndicator size="small" color={P.blue} />
+          <Text style={{ color: P.t2, fontSize: 12, marginLeft: 8 }}>Opening {activeSubject}…</Text>
+        </View>
+      )}
+
+      <Animated.View style={[{ flex: 1 }, { transform: [{ translateY: slideAnim }] }]}>
+
+        {/* ══ SUBJECT DETAIL VIEW ══ */}
+        {activeSubject && !planLoading ? (
+          <SubjectDetailView
+            subject={activeSubject}
+            plan={activePlan}
+            sc={getSubColor(activeSubject, colorMap)}
+            onBack={goBack}
+            onResourceAdded={() => {}}
+          />
+        ) : (
+
+          /* ══ SUBJECT LIST VIEW ══ */
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={P.blue} colors={[P.blue]} />}
+            contentContainerStyle={{ paddingHorizontal: IS_TABLET ? 32 : 16, paddingTop: 18, paddingBottom: 60, gap: 20 }}
+          >
+
+            {/* Filter panel */}
+            <View style={s.filterPanel}>
+
+              <View style={s.filterRow}>
+                <View style={s.filterLabelRow}>
+                  <Ionicons name="school-outline" size={13} color={P.teal} />
+                  <Text style={[s.filterLabel, { color: P.teal }]}>Academic Year</Text>
+                </View>
+                {ttLoading
+                  ? <Text style={s.mutedTxt}>Fetching from timetable…</Text>
+                  : years.length === 0
+                    ? <Text style={s.mutedTxt}>No years found.</Text>
+                    : <ChipRow items={yearItems} selected={selYear} onSelect={setSelYear} color={P.teal} soft={P.tealSoft} />
+                }
+              </View>
+
+              <View style={s.filterRow}>
+                <View style={s.filterLabelRow}>
+                  <Ionicons name="people-outline" size={13} color={P.violet} />
+                  <Text style={[s.filterLabel, { color: P.violet }]}>Division</Text>
+                </View>
+                {ttLoading
+                  ? <Text style={s.mutedTxt}>Fetching from timetable…</Text>
+                  : divisions.length === 0
+                    ? <Text style={s.mutedTxt}>No divisions found.</Text>
+                    : <ChipRow items={divItems} selected={selDiv} onSelect={setSelDiv} color={P.violet} soft={P.violetSoft} />
+                }
+              </View>
+
+              <View style={s.filterRow}>
+                <View style={s.filterLabelRow}>
+                  <Ionicons name="book-outline" size={13} color={P.amber} />
+                  <Text style={[s.filterLabel, { color: P.amber }]}>Type</Text>
+                </View>
+                <ChipRow items={typeItems} selected={selType} onSelect={setSelType} color={P.amber} soft={P.amberSoft} />
+              </View>
+
+            </View>
+
+            {/* Subject list */}
+            {ttLoading ? (
+              <View style={s.center}>
+                <ActivityIndicator size="large" color={P.blue} />
+                <Text style={s.mutedTxt}>Loading your subjects…</Text>
+              </View>
+            ) : subjects.length === 0 ? (
+              <View style={s.center}>
+                <View style={s.emptyIcon}>
+                  <Ionicons name="alert-circle-outline" size={30} color={P.t3} />
+                </View>
+                <Text style={s.emptyTitle}>No Subjects Found</Text>
+                <Text style={s.mutedTxt}>No subjects were found in your timetable.</Text>
+              </View>
+            ) : (
+              <View style={{ gap: 10 }}>
+                <View style={{ gap: 2, marginBottom: 4 }}>
+                  <Text style={s.sectionTitle}>Your Subjects</Text>
+                  <Text style={s.sectionSub}>Tap to view and manage notes & resources</Text>
+                </View>
+
+                {subjects.map((sub) => {
+                  const sc = getSubColor(sub, colorMap);
+                  return (
+                    <TouchableOpacity
+                      key={sub}
+                      onPress={() => openSubject(sub)}
+                      activeOpacity={0.83}
+                      style={[s.subjectRow, { borderLeftColor: sc.text }]}
+                    >
+                      {/* Icon */}
+                      <View style={[s.subjectRowIcon, { backgroundColor: sc.bg }]}>
+                        <Ionicons name="book-outline" size={20} color={sc.text} />
+                      </View>
+
+                      {/* Label */}
+                      <View style={{ flex: 1 }}>
+                        <Text style={[s.subjectRowName, { color: sc.text }]}>{sub}</Text>
+                        <Text style={s.subjectRowMeta}>
+                          Year {selYear} · Div {selDiv} · {selType}
+                        </Text>
+                      </View>
+
+                      <Ionicons name="chevron-forward" size={16} color={P.t3} />
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
+
+          </ScrollView>
+        )}
+      </Animated.View>
+    </Animated.View>
+  );
+}
+
+/* ─── Styles ─────────────────────────────────────────────────────────────── */
 const s = StyleSheet.create({
-  wrapper:   { flex: 1, backgroundColor: COLORS.bg },
-  container: { flex: 1 },
+  root:        { flex: 1, backgroundColor: P.bg },
+  header:      { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: SAFE_T, paddingHorizontal: 16, paddingBottom: 14, backgroundColor: P.panel, borderBottomWidth: 1, borderBottomColor: P.border },
+  backBtn:     { width: 36, height: 36, borderRadius: 10, backgroundColor: P.card, borderWidth: 1, borderColor: P.border, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { fontSize: 18, fontWeight: '800', color: P.t1, letterSpacing: -0.3 },
+  headerSub:   { fontSize: 11, color: P.t3, marginTop: 1 },
+  pill:        { backgroundColor: P.blueSoft, borderRadius: 20, borderWidth: 1, borderColor: P.blue + '40', paddingHorizontal: 12, paddingVertical: 6 },
+  pillTxt:     { fontSize: 11, fontWeight: '700', color: P.blue },
 
-  /* Header */
-  header: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    padding: 20,
-    paddingTop: Platform.OS === 'ios' ? 60 : 20,
-    gap: 12,
-  },
-  breadcrumb:  { fontSize: 11, color: COLORS.textMuted, marginBottom: 4, letterSpacing: 0.5 },
-  screenTitle: { fontSize: 28, fontWeight: '800', color: COLORS.textPrimary, fontFamily: SERIF, marginBottom: 2 },
-  screenSub:   { fontSize: 13, color: COLORS.textSecondary },
-  updateBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: COLORS.accent, paddingHorizontal: 14, paddingVertical: 10,
-    borderRadius: 12, shadowColor: COLORS.accent, shadowOpacity: 0.3, shadowRadius: 8, elevation: 3,
-    marginTop: 4,
-  },
-  updateBtnText: { fontSize: 13, fontWeight: '700', color: '#fff' },
+  planLoadingBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 8, backgroundColor: P.card, borderBottomWidth: 1, borderBottomColor: P.border },
 
-  /* Section blocks */
-  sectionBlock: { marginBottom: 10 },
-  sectionLabel: {
-    fontSize: 11, fontWeight: '700', color: COLORS.textMuted,
-    letterSpacing: 0.8, paddingHorizontal: 20, marginBottom: 8,
-  },
-  chipScroll: { gap: 8, paddingHorizontal: 20 },
+  filterPanel:    { backgroundColor: P.panel, borderRadius: 16, borderWidth: 1, borderColor: P.border, padding: 16, gap: 16 },
+  filterRow:      { gap: 8 },
+  filterLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  filterLabel:    { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  mutedTxt:       { fontSize: 12, color: P.t3 },
 
-  /* Chips */
-  chip: {
-    paddingHorizontal: 18, paddingVertical: 9,
-    borderRadius: 22, borderWidth: 1,
-    borderColor: COLORS.border, backgroundColor: COLORS.surfaceEl,
-  },
-  chipActive:     { borderColor: COLORS.accent, backgroundColor: COLORS.accentSoft },
-  chipText:       { fontSize: 13, fontWeight: '700', color: COLORS.textSecondary },
-  chipTextActive: { color: COLORS.accent },
+  sectionTitle:   { fontSize: 16, fontWeight: '800', color: P.t1 },
+  sectionSub:     { fontSize: 12, color: P.t3 },
 
-  /* Theory / Lab toggle */
-  typeToggleWrap: {
-    flexDirection: 'row',
-    marginHorizontal: 20,
-    marginBottom: 14,
-    backgroundColor: COLORS.surfaceEl,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    padding: 4,
-    gap: 4,
-  },
-  typeBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 7, paddingVertical: 12, borderRadius: 11,
-  },
-  typeBtnActive: {
-    backgroundColor: COLORS.accentSoft,
-    borderWidth: 1, borderColor: COLORS.accent + '60',
-  },
-  typeBtnText:       { fontSize: 14, fontWeight: '700', color: COLORS.textMuted },
-  typeBtnTextActive: { color: COLORS.accent },
+  subjectRow:     { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: P.card, borderRadius: 14, borderWidth: 1, borderColor: P.border, borderLeftWidth: 3, paddingHorizontal: 14, paddingVertical: 14 },
+  subjectRowIcon: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  subjectRowName: { fontSize: 15, fontWeight: '800' },
+  subjectRowMeta: { fontSize: 11, color: P.t3, marginTop: 2 },
 
-  /* Context banner */
-  contextBanner: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    marginHorizontal: 20, marginBottom: 12,
-    paddingHorizontal: 12, paddingVertical: 8,
-    backgroundColor: COLORS.surfaceEl,
-    borderRadius: 10, borderWidth: 1, borderColor: COLORS.border,
-  },
-  contextDot: { width: 8, height: 8, borderRadius: 4 },
-  contextText: { fontSize: 12, fontWeight: '700', color: COLORS.textSecondary },
-
-  /* Syllabus */
-  syllabusWrap: { paddingHorizontal: 20, gap: 10, marginBottom: 18 },
-  topicCard: {
-    ...CARD_BASE,
-    borderLeftWidth: 3,
-    borderLeftColor: COLORS.accent,
-    padding: 0,
-    overflow: 'hidden',
-  },
-  topicRow: {
-    flexDirection: 'row', alignItems: 'center',
-    gap: 12, padding: 14,
-  },
-  indexBadge: {
-    width: 36, height: 36, borderRadius: 10,
-    alignItems: 'center', justifyContent: 'center',
-    flexShrink: 0,
-  },
-  indexText:  { fontSize: 13, fontWeight: '900' },
-  unitLabel:  { fontSize: 10, fontWeight: '700', letterSpacing: 0.6, marginBottom: 2 },
-  topicTitle: { fontSize: 14, fontWeight: '700', color: COLORS.textPrimary, lineHeight: 20 },
-  countPill: {
-    paddingHorizontal: 8, paddingVertical: 4,
-    borderRadius: 8, flexShrink: 0,
-  },
-  countText: { fontSize: 12, fontWeight: '800' },
-  subtopicWrap: {
-    borderTopWidth: 1, borderTopColor: COLORS.border,
-    paddingHorizontal: 14, paddingVertical: 12, gap: 8,
-    backgroundColor: COLORS.surfaceEl,
-  },
-  subtopicRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  subtopicDot: { width: 6, height: 6, borderRadius: 3, marginTop: 6, flexShrink: 0 },
-  subtopicText: { flex: 1, fontSize: 13, color: COLORS.textSecondary, lineHeight: 20 },
-
-  /* Resource Library */
-  card:       { ...CARD_BASE },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 },
-  cardTitle:  { fontSize: 15, fontWeight: '700', color: COLORS.textPrimary },
-  resourceGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  resourceItem: { width: '47%', borderRadius: 10, borderWidth: 1, padding: 12, gap: 6 },
-  resourceName: { fontSize: 12, fontWeight: '600', color: COLORS.textPrimary },
-  resourceSize: { fontSize: 11, color: COLORS.textSecondary },
-
-  /* Uploaded notes */
-  notesList:      { marginTop: 14, borderTopWidth: 1, borderTopColor: COLORS.border, paddingTop: 12, gap: 8 },
-  notesListTitle: { fontSize: 11, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 0.8, marginBottom: 4 },
-  noteRow: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: 8,
-    backgroundColor: COLORS.surfaceEl, borderRadius: 8, padding: 10,
-    borderWidth: 1, borderColor: COLORS.border,
-  },
-  noteRowName: { fontSize: 12, fontWeight: '600', color: COLORS.textPrimary },
-  noteRowSize: { fontSize: 11, color: COLORS.textSecondary, marginTop: 1 },
-
-  /* Modals */
-  modalOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.75)',
-    justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24,
-  },
-  modalBox: {
-    width: '100%', backgroundColor: COLORS.surface,
-    borderRadius: 18, borderWidth: 1, borderColor: COLORS.border, padding: 24,
-  },
-  modalCloseBtn: {
-    width: 30, height: 30, borderRadius: 8,
-    backgroundColor: COLORS.surfaceEl, alignItems: 'center', justifyContent: 'center',
-  },
-  modalTitle:   { fontSize: 17, fontWeight: '800', color: COLORS.textPrimary, marginBottom: 6 },
-  modalSub:     { fontSize: 13, color: COLORS.textSecondary, marginBottom: 16, lineHeight: 18 },
-  inputLabel:   { fontSize: 12, fontWeight: '700', color: COLORS.textSecondary, marginBottom: 6 },
-  modalInput: {
-    backgroundColor: COLORS.surfaceEl, borderRadius: 10, borderWidth: 1,
-    borderColor: COLORS.border, color: COLORS.textPrimary, fontSize: 13,
-    paddingHorizontal: 14, paddingVertical: 12, marginBottom: 14,
-  },
-  modalActions:  { flexDirection: 'row', gap: 10, marginTop: 4 },
-  modalCancel: {
-    flex: 1, paddingVertical: 12, borderRadius: 10,
-    borderWidth: 1, borderColor: COLORS.border, alignItems: 'center',
-  },
-  modalCancelText:  { fontSize: 14, fontWeight: '600', color: COLORS.textSecondary },
-  modalConfirm: {
-    flex: 1, paddingVertical: 12, borderRadius: 10,
-    backgroundColor: COLORS.accent, alignItems: 'center',
-  },
-  modalConfirmText: { fontSize: 14, fontWeight: '700', color: '#fff' },
+  center:     { alignItems: 'center', justifyContent: 'center', paddingVertical: 60, gap: 10 },
+  emptyIcon:  { width: 64, height: 64, borderRadius: 32, backgroundColor: P.card, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  emptyTitle: { fontSize: 17, fontWeight: '700', color: P.t1 },
 });

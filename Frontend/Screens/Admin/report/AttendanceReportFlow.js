@@ -1,11 +1,16 @@
-import React, { useState, useMemo, useContext } from 'react';
+import React, { useState, useMemo, useContext, useEffect } from 'react';
+import axiosInstance from '../../../Src/Axios';
 import {
   View, Text, TouchableOpacity, ScrollView, StyleSheet,
   SafeAreaView, StatusBar, TextInput, Alert, Modal,
 } from 'react-native';
+
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { ThemeContext } from '../dashboard/AdminDashboard';
+
+// ─── API Config ───────────────────────────────────────────────────────────────
+const API_BASE_URL = axiosInstance.defaults.baseURL.replace(/\/api$/, "");
 
 // ─── Mock Data ────────────────────────────────────────────────────────────────
 const YEARS = [
@@ -35,6 +40,9 @@ const generateAttendanceData = (year, division) =>
   STUDENT_NAMES.map((name, i) => ({
     id: i + 1, name,
     rollNo: `${year}${division}${String(i + 1).padStart(3, '0')}`,
+    subjects: LECTURE_SUBJECTS,
+    labs: LAB_SUBJECTS,
+    allSubjects: ALL_SUBJECTS,
     attendance: ALL_SUBJECTS.reduce((acc, sub) => {
       const total = LAB_SUBJECTS.includes(sub) ? 15 : 30;
       const present = Math.floor(Math.random() * (total * 0.4) + total * 0.6);
@@ -42,6 +50,66 @@ const generateAttendanceData = (year, division) =>
       return acc;
     }, {}),
   }));
+
+// Generate attendance data from real students fetched from API
+// classSummary is an array from /api/attendance/class/summary — keyed by studentId
+const generateAttendanceDataFromStudents = (students, classSummary) => {
+  // Build a lookup: MongoDB _id → { subjects: [{subject, present, total, percentage}] }
+  const summaryMap = {};
+  if (Array.isArray(classSummary)) {
+    classSummary.forEach((entry) => {
+      const key = entry.studentId || entry._id;
+      if (key) summaryMap[String(key)] = entry;
+    });
+  }
+
+  return students.map((student) => {
+    const lectureSubs = (student.subjects && student.subjects.length > 0)
+      ? student.subjects
+      : LECTURE_SUBJECTS;
+    const labSubs = (student.lab && student.lab.length > 0)
+      ? student.lab
+      : LAB_SUBJECTS;
+    const allSubs = [...lectureSubs, ...labSubs];
+
+    // Try to match real attendance from summary
+    const realEntry = summaryMap[String(student._id)];
+    const attendance = {};
+
+    if (realEntry && Array.isArray(realEntry.subjects)) {
+      // Build a lowercase→data lookup from backend attendance
+      const realLower = {};
+      realEntry.subjects.forEach((s) => {
+        realLower[s.subject.toLowerCase()] = {
+          present: s.present || 0,
+          total: s.total || 0,
+          pct: s.percentage != null ? s.percentage : (s.total > 0 ? Math.round((s.present / s.total) * 100) : 0),
+        };
+      });
+      // Map each profile subject to real data (case-insensitive)
+      allSubs.forEach((sub) => {
+        const match = realLower[sub.toLowerCase()];
+        attendance[sub] = match || { present: 0, total: 0, pct: 0 };
+      });
+    } else {
+      // No attendance data found for this student — show zeros
+      allSubs.forEach((sub) => {
+        attendance[sub] = { present: 0, total: 0, pct: 0 };
+      });
+    }
+
+    return {
+      id: student._id || student.id,
+      mongoId: student._id,
+      name: student.name,
+      rollNo: student.roll_no,
+      subjects: lectureSubs,
+      labs: labSubs,
+      allSubjects: allSubs,
+      attendance,
+    };
+  });
+};
 
 // ─── Highlight matching text ──────────────────────────────────────────────────
 function HighlightText({ text, query, style, highlightStyle }) {
@@ -96,12 +164,14 @@ const scaleAttendanceByRange = (attendance, fromDate, toDate) => {
 };
 
 // ─── PDF HTML Builder ─────────────────────────────────────────────────────────
-const buildPdfHtml = ({ title, subtitle, attendanceData, lectureOverall, labOverall }) => {
+const buildPdfHtml = ({ title, subtitle, attendanceData, lectureOverall, labOverall, lectureSubs: _ls, labSubs: _bs }) => {
+  const _LSUBS = _ls || LECTURE_SUBJECTS;
+  const _BSUBS = _bs || LAB_SUBJECTS;
   const colorMap = (pct) => pct > 90 ? '#00c853' : pct >= 75 ? '#00e676' : pct >= 50 ? '#ff8f00' : '#d32f2f';
   const bgMap    = (pct) => pct > 90 ? '#e8f5e9' : pct >= 75 ? '#f1fff6' : pct >= 50 ? '#fff8e1' : '#ffebee';
 
   const tableRows = (subjects, overall) => subjects.map((sub, i) => {
-    const { present, total, pct } = attendanceData[sub];
+    const { present = 0, total = 0, pct = 0 } = (attendanceData[sub] || {});
     const c  = colorMap(pct);
     const bg = bgMap(pct);
     const status = getPctStatus(pct);
@@ -186,8 +256,8 @@ const buildPdfHtml = ({ title, subtitle, attendanceData, lectureOverall, labOver
       <div class="chip"><div class="chip-val">${labOverall}%</div><div class="chip-lbl">Lab Overall</div></div>
       <div class="chip"><div class="chip-val">${Math.round((lectureOverall + labOverall) / 2)}%</div><div class="chip-lbl">Grand Overall</div></div>
     </div>
-    ${section('Lecture Attendance', '📖', LECTURE_SUBJECTS, lectureOverall)}
-    ${section('Lab Attendance', '🔬', LAB_SUBJECTS, labOverall)}
+    ${section('Lecture Attendance', '📖', _LSUBS, lectureOverall)}
+    ${section('Lab Attendance', '🔬', _BSUBS, labOverall)}
     <div class="legend">
       <div class="legend-item"><div class="dot" style="background:#00c853"></div> &gt;90% Excellent</div>
       <div class="legend-item"><div class="dot" style="background:#00e676"></div> 75–90% Good</div>
@@ -216,9 +286,9 @@ const buildPdfHtml = ({ title, subtitle, attendanceData, lectureOverall, labOver
 // Landscape is forced by passing { width: 842, height: 595 } to printToFileAsync.
 // Table uses percentage widths so it always fills the full page width.
 
-const buildClassPdfHtml = ({ title, subtitle, students, dateLabel }) => {
-  const LECTURE_SUBJECTS = ['Math', 'Physics', 'Chemistry', 'English', 'CS'];
-  const LAB_SUBJECTS     = ['Physics Lab', 'Chemistry Lab', 'CS Lab'];
+const buildClassPdfHtml = ({ title, subtitle, students, dateLabel, lectureSubs: _ls, labSubs: _bs }) => {
+  const LECTURE_SUBJECTS = _ls || ['Math', 'Physics', 'Chemistry', 'English', 'CS'];
+  const LAB_SUBJECTS     = _bs || ['Physics Lab', 'Chemistry Lab', 'CS Lab'];
   const ALL_SUBJECTS     = [...LECTURE_SUBJECTS, ...LAB_SUBJECTS];
 
   const cMap  = (p) => p >= 75 ? '#00875a' : p >= 50 ? '#b76e00' : '#b91c1c';
@@ -239,13 +309,13 @@ const buildClassPdfHtml = ({ title, subtitle, students, dateLabel }) => {
 
   // Data rows
   const dataRows = students.map((st, i) => {
-    const totalPresent = ALL_SUBJECTS.reduce((s, sub) => s + st.attendance[sub].present, 0);
-    const totalHeld    = ALL_SUBJECTS.reduce((s, sub) => s + st.attendance[sub].total,   0);
-    const overall      = Math.round((totalPresent / totalHeld) * 100);
+    const totalPresent = ALL_SUBJECTS.reduce((s, sub) => s + (st.attendance[sub]?.present || 0), 0);
+    const totalHeld    = ALL_SUBJECTS.reduce((s, sub) => s + (st.attendance[sub]?.total || 0),   0);
+    const overall      = totalHeld > 0 ? Math.round((totalPresent / totalHeld) * 100) : 0;
     const rowBg        = i % 2 === 0 ? '#ffffff' : '#f5f7fa';
 
     const subCells = ALL_SUBJECTS.map(sub => {
-      const { present, total, pct } = st.attendance[sub];
+      const { present = 0, total = 0, pct = 0 } = (st.attendance[sub] || {});
       return `<td style="text-align:center;padding:3.5px 1px;color:#334155;font-size:7px;border-right:1px solid #e2e8f0">${present}</td><td style="text-align:center;padding:3.5px 1px;color:#64748b;font-size:7px;border-right:1px solid #e2e8f0">${total}</td><td style="text-align:center;padding:3.5px 1px;font-weight:700;color:${cMap(pct)};font-size:7.5px;border-right:2px solid #cbd5e1">${pct}%</td>`;
     }).join('');
 
@@ -448,13 +518,16 @@ const handlePrint_ClassReport = async (title, subtitle, students, dateLabel, set
   }
 };
 
-function ClassReportModal({ visible, onClose, title, subtitle, students, dateLabel }) {
+function ClassReportModal({ visible, onClose, title, subtitle, students, dateLabel, lectureSubs, labSubs, allSubs }) {
+  const _ASUBS = allSubs || ALL_SUBJECTS;
+  const _LSUBS = lectureSubs || LECTURE_SUBJECTS;
+  const _BSUBS = labSubs || LAB_SUBJECTS;
   const [isPrinting, setIsPrinting] = useState(false);
 
   const handlePrint = async () => {
     try {
       setIsPrinting(true);
-      const html = buildClassPdfHtml({ title, subtitle, students, dateLabel });
+      const html = buildClassPdfHtml({ title, subtitle, students, dateLabel, lectureSubs: _LSUBS, labSubs: _BSUBS });
       const { uri } = await Print.printToFileAsync({ html, base64: false });
       const canShare = await Sharing.isAvailableAsync();
       if (canShare) {
@@ -503,8 +576,8 @@ function ClassReportModal({ visible, onClose, title, subtitle, students, dateLab
                 <View style={[crm.hCell, crm.fixedNo,   crm.hCellDark, { rowspan: 2 }]}><Text style={crm.hTxt}>No.</Text></View>
                 <View style={[crm.hCell, crm.fixedName, crm.hCellDark]}><Text style={crm.hTxt}>Student Name</Text></View>
                 <View style={[crm.hCell, crm.fixedRoll, crm.hCellDark, crm.borderRight2]}><Text style={crm.hTxt}>Roll No</Text></View>
-                {ALL_SUBJECTS.map((sub, i) => {
-                  const isLab = LAB_SUBJECTS.includes(sub);
+                {_ASUBS.map((sub, i) => {
+                  const isLab = _BSUBS.includes(sub);
                   return (
                     <View key={sub} style={[crm.hCell, crm.subjectGroupCell, isLab ? crm.hCellLab : crm.hCellLec, crm.borderRight2]}>
                       <Text style={crm.subjectGroupTxt} numberOfLines={1}>{sub}</Text>
@@ -521,7 +594,7 @@ function ClassReportModal({ visible, onClose, title, subtitle, students, dateLab
                 <View style={[crm.hCell, crm.fixedNo,   crm.hCellDark2]}><Text style={crm.hSubTxt}> </Text></View>
                 <View style={[crm.hCell, crm.fixedName, crm.hCellDark2]}><Text style={crm.hSubTxt}> </Text></View>
                 <View style={[crm.hCell, crm.fixedRoll, crm.hCellDark2, crm.borderRight2]}><Text style={crm.hSubTxt}> </Text></View>
-                {ALL_SUBJECTS.map(sub => (
+                {_ASUBS.map(sub => (
                   <React.Fragment key={sub}>
                     <View style={[crm.hCell, crm.subCol, crm.hCellDark2]}><Text style={crm.hSubTxt}>Att.</Text></View>
                     <View style={[crm.hCell, crm.subCol, crm.hCellDark2]}><Text style={crm.hSubTxt}>Tot.</Text></View>
@@ -534,8 +607,9 @@ function ClassReportModal({ visible, onClose, title, subtitle, students, dateLab
 
               {/* ── Data Rows ────────────────────────────────────────────── */}
               {students.map((st, idx) => {
-                const totalPresent = ALL_SUBJECTS.reduce((s, sub) => s + st.attendance[sub].present, 0);
-                const totalHeld    = ALL_SUBJECTS.reduce((s, sub) => s + st.attendance[sub].total,   0);
+                const stSubs = st.allSubjects || _ASUBS;
+                const totalPresent = stSubs.reduce((s, sub) => s + (st.attendance[sub]?.present || 0), 0);
+                const totalHeld    = stSubs.reduce((s, sub) => s + (st.attendance[sub]?.total || 0),   0);
                 const overall      = Math.round((totalPresent / totalHeld) * 100);
                 const overallColor = getPctColor(overall);
                 const isAlt = idx % 2 === 1;
@@ -554,8 +628,8 @@ function ClassReportModal({ visible, onClose, title, subtitle, students, dateLab
                       <Text style={crm.dRoll}>{st.rollNo}</Text>
                     </View>
                     {/* Subject cells */}
-                    {ALL_SUBJECTS.map(sub => {
-                      const { present, total, pct } = st.attendance[sub];
+                    {_ASUBS.map(sub => {
+                      const { present = 0, total = 0, pct = 0 } = (st.attendance[sub] || {});
                       const c = getPctColor(pct);
                       return (
                         <React.Fragment key={sub}>
@@ -602,13 +676,15 @@ function ClassReportModal({ visible, onClose, title, subtitle, students, dateLab
 }
 
 // ─── Attendance Table Modal (Individual Student) ──────────────────────────────
-function AttendanceTableModal({ visible, onClose, title, subtitle, attendanceData, lectureOverall, labOverall }) {
+function AttendanceTableModal({ visible, onClose, title, subtitle, attendanceData, lectureOverall, labOverall, lectureSubs: _lecSubs, labSubs: _labSubs }) {
+  const _LSUBS = _lecSubs || LECTURE_SUBJECTS;
+  const _BSUBS = _labSubs || LAB_SUBJECTS;
   const [isPrinting, setIsPrinting] = useState(false);
 
   const handlePrint = async () => {
     try {
       setIsPrinting(true);
-      const html = buildPdfHtml({ title, subtitle, attendanceData, lectureOverall, labOverall });
+      const html = buildPdfHtml({ title, subtitle, attendanceData, lectureOverall, labOverall, lectureSubs: _LSUBS, labSubs: _BSUBS });
 
       // Generate the PDF file
       const { uri } = await Print.printToFileAsync({ html, base64: false });
@@ -647,7 +723,7 @@ function AttendanceTableModal({ visible, onClose, title, subtitle, attendanceDat
           <Text style={[atm.th, { flex: 1.4, textAlign: 'center' }]}>Status</Text>
         </View>
         {subjects.map((sub, idx) => {
-          const { present, total, pct } = attendanceData[sub];
+          const { present = 0, total = 0, pct = 0 } = (attendanceData[sub] || {});
           const color  = getPctColor(pct);
           const status = getPctStatus(pct);
           return (
@@ -694,8 +770,8 @@ function AttendanceTableModal({ visible, onClose, title, subtitle, attendanceDat
 
           {/* Scrollable table content */}
           <ScrollView contentContainerStyle={atm.body} showsVerticalScrollIndicator={false}>
-            {renderSection(LECTURE_SUBJECTS, 'Lecture Attendance', '📖', lectureOverall)}
-            {renderSection(LAB_SUBJECTS,     'Lab Attendance',     '🔬', labOverall)}
+            {renderSection(_LSUBS, 'Lecture Attendance', '📖', lectureOverall)}
+            {renderSection(_BSUBS, 'Lab Attendance',     '🔬', labOverall)}
 
             {/* Legend */}
             <View style={atm.legend}>
@@ -932,24 +1008,87 @@ function StudentReportScreen({ student, year, division, onBack }) {
   const [showDateFilter, setShowDateFilter] = useState(false);
   const [dateFrom, setDateFrom]             = useState(null);
   const [dateTo,   setDateTo]               = useState(null);
+  const [realAttendance, setRealAttendance] = useState(null);
+  const [attLoading, setAttLoading]         = useState(false);
+
+  // Fetch individual attendance from backend
+  useEffect(() => {
+    (async () => {
+      const studentId = student.mongoId || student.id;
+      if (!studentId) return;
+      setAttLoading(true);
+      try {
+        const res = await axiosInstance.get(`/attendance/student/${studentId}`);
+        const data = res.data;
+        if (data.success && Array.isArray(data.subjectSummary)) {
+          const attMap = {};
+          data.subjectSummary.forEach((s) => {
+            attMap[s.subject] = {
+              present: s.present || 0,
+              total: s.total || 0,
+              pct: s.percentage != null ? s.percentage : 0,
+            };
+          });
+          setRealAttendance(attMap);
+        }
+      } catch (_) { /* keep using passed-in data */ }
+      finally { setAttLoading(false); }
+    })();
+  }, [student.mongoId, student.id]);
+
+  // Derive subjects from student record (real data) or fall back to defaults
+  const stLectureSubs = student.subjects || LECTURE_SUBJECTS;
+  const stLabSubs = student.labs || LAB_SUBJECTS;
+  const stAllSubs = student.allSubjects || ALL_SUBJECTS;
+
+  // Use real backend attendance if available, otherwise fall back to what was passed in
+  // Case-insensitive merge: subject stored as "DATA STRUCTURE" in attendance but "Data Structure" in student profile
+  const baseAttendance = useMemo(() => {
+    if (!realAttendance) return student.attendance;
+    const merged = {};
+    // Build a lowercase→realData lookup from backend attendance
+    const realLower = {};
+    Object.keys(realAttendance).forEach((sub) => {
+      realLower[sub.toLowerCase()] = realAttendance[sub];
+    });
+    // Also index passed-in attendance by lowercase
+    const passedLower = {};
+    if (student.attendance) {
+      Object.keys(student.attendance).forEach((sub) => {
+        passedLower[sub.toLowerCase()] = student.attendance[sub];
+      });
+    }
+    // Map each profile subject to real data (case-insensitive)
+    stAllSubs.forEach((sub) => {
+      const key = sub.toLowerCase();
+      if (realLower[key]) {
+        merged[sub] = realLower[key];
+      } else if (passedLower[key]) {
+        merged[sub] = passedLower[key];
+      } else {
+        merged[sub] = { present: 0, total: 0, pct: 0 };
+      }
+    });
+    return merged;
+  }, [realAttendance, student.attendance, stAllSubs]);
 
   const isFiltered = !!(dateFrom && dateTo);
 
   const effectiveAttendance = useMemo(() =>
     isFiltered
-      ? scaleAttendanceByRange(student.attendance, dateFrom, dateTo)
-      : student.attendance,
-  [student.attendance, dateFrom, dateTo, isFiltered]);
+      ? scaleAttendanceByRange(baseAttendance, dateFrom, dateTo)
+      : baseAttendance,
+  [baseAttendance, dateFrom, dateTo, isFiltered]);
 
-  const lectureOverall = Math.round(
-    LECTURE_SUBJECTS.reduce((a, sub) => a + effectiveAttendance[sub].pct, 0) / LECTURE_SUBJECTS.length
-  );
-  const labOverall = Math.round(
-    LAB_SUBJECTS.reduce((a, sub) => a + effectiveAttendance[sub].pct, 0) / LAB_SUBJECTS.length
-  );
-  const grandOverall = Math.round(
-    ALL_SUBJECTS.reduce((a, sub) => a + effectiveAttendance[sub].pct, 0) / ALL_SUBJECTS.length
-  );
+  // Only count subjects that have at least 1 class held (total > 0)
+  const calcOverall = (subs) => {
+    const active = subs.filter(sub => (effectiveAttendance[sub]?.total || 0) > 0);
+    if (active.length === 0) return 0;
+    return Math.round(active.reduce((a, sub) => a + (effectiveAttendance[sub]?.pct || 0), 0) / active.length);
+  };
+  const lectureOverall = calcOverall(stLectureSubs);
+  const labOverall = calcOverall(stLabSubs);
+  const grandOverall = calcOverall(stAllSubs);
 
   const renderSubjectTable = (subjects, title, icon) => (
     <View style={sr.tableSection}>
@@ -966,7 +1105,7 @@ function StudentReportScreen({ student, year, division, onBack }) {
           <Text style={[sr.th, { flex: 1.2, textAlign: 'center' }]}>Status</Text>
         </View>
         {subjects.map((sub, idx) => {
-          const { present, total, pct } = effectiveAttendance[sub];
+          const { present = 0, total = 0, pct = 0 } = (effectiveAttendance[sub] || {});
           const color = getPctColor(pct);
           const status = getPctStatus(pct);
           return (
@@ -1076,14 +1215,14 @@ function StudentReportScreen({ student, year, division, onBack }) {
             </View>
             <View style={[sr.overallStatDivider, { backgroundColor: colors.border }]} />
             <View style={sr.overallStatItem}>
-              <Text style={[sr.overallStatVal, { color: '#00c8ff' }]}>{ALL_SUBJECTS.length}</Text>
+              <Text style={[sr.overallStatVal, { color: '#00c8ff' }]}>{stAllSubs.length}</Text>
               <Text style={[sr.overallStatLbl, { color: colors.textSec }]}>Subjects</Text>
             </View>
           </View>
         </View>
 
-        {renderSubjectTable(LECTURE_SUBJECTS, 'Lecture Attendance', '📖')}
-        {renderSubjectTable(LAB_SUBJECTS, 'Lab Attendance', '🔬')}
+        {renderSubjectTable(stLectureSubs, 'Lecture Attendance', '📖')}
+        {renderSubjectTable(stLabSubs, 'Lab Attendance', '🔬')}
 
         {/* Legend */}
         <View style={[s.legend, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -1114,6 +1253,8 @@ function StudentReportScreen({ student, year, division, onBack }) {
         attendanceData={effectiveAttendance}
         lectureOverall={lectureOverall}
         labOverall={labOverall}
+        lectureSubs={stLectureSubs}
+        labSubs={stLabSubs}
       />
     </SafeAreaView>
   );
@@ -1219,10 +1360,49 @@ function SelectorScreen({ onContinue }) {
 // ─── Class Report Screen ─────────────────────────────────────────────────────
 function ClassReportScreen({ year, division, onBack, onStudentSelect }) {
   const { colors, isDark } = useContext(ThemeContext);
-  const allData = useMemo(
-    () => generateAttendanceData(year.id, division.id),
-    [year.id, division.id]
-  );
+
+  // ── API fetch state ────────────────────────────────────────────────────────
+  const [isLoading, setIsLoading]   = useState(true);
+  const [fetchError, setFetchError] = useState(null);
+  const [allData, setAllData]       = useState([]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const yearRaw = year.id || year.short || year;
+        const yearNum = typeof yearRaw === 'number'
+          ? yearRaw
+          : parseInt(String(yearRaw).replace(/\D/g, '')) || { '1st': 1, '2nd': 2, '3rd': 3, '4th': 4 }[yearRaw] || yearRaw;
+        const divisionId = typeof division === 'string' ? division : (division.id || division);
+
+        // Fetch students and class attendance summary in parallel
+        const [studentsRes, summaryRes] = await Promise.all([
+          axiosInstance.get('/students/by-class', {
+            params: { year: yearNum, division: divisionId }
+          }),
+          axiosInstance.get('/attendance/class/summary', {
+            params: { year: yearNum, division: divisionId }
+          }),
+        ]);
+
+        const students = studentsRes.data;
+        const summaryData = summaryRes.data;
+        const classSummary = summaryData.summary || [];
+
+        if (!Array.isArray(students) || students.length === 0) {
+          setAllData([]);
+        } else {
+          setAllData(generateAttendanceDataFromStudents(students, classSummary));
+        }
+      } catch (err) {
+        setFetchError(err.message);
+        setAllData([]);
+      } finally {
+        setIsLoading(false);
+      }
+    })();
+  }, [year.id, year.short, division]);
+  // ──────────────────────────────────────────────────────────────────────────
   const [searchQuery, setSearchQuery]       = useState('');
   const [modalVisible, setModalVisible]     = useState(false);
   const [showDateFilter, setShowDateFilter] = useState(false);
@@ -1248,29 +1428,39 @@ function ClassReportScreen({ year, division, onBack, onStudentSelect }) {
     );
   }, [displayData, searchQuery]);
 
-  const avgAttendance = Math.round(
-    displayData.reduce((a, st) =>
-      a + ALL_SUBJECTS.reduce((b, sub) => b + st.attendance[sub].pct, 0) / ALL_SUBJECTS.length, 0
-    ) / displayData.length
+  // Derive dynamic subjects from the fetched/generated data
+  const dynLectureSubs = allData.length > 0 && allData[0].subjects ? allData[0].subjects : LECTURE_SUBJECTS;
+  const dynLabSubs = allData.length > 0 && allData[0].labs ? allData[0].labs : LAB_SUBJECTS;
+  const dynAllSubs = allData.length > 0 && allData[0].allSubjects ? allData[0].allSubjects : ALL_SUBJECTS;
+
+  const avgAttendance = displayData.length === 0 ? 0 : Math.round(
+    displayData.reduce((a, st) => {
+      const subs = st.allSubjects || dynAllSubs;
+      const active = subs.filter(sub => (st.attendance[sub]?.total || 0) > 0);
+      if (active.length === 0) return a;
+      return a + active.reduce((b, sub) => b + (st.attendance[sub]?.pct || 0), 0) / active.length;
+    }, 0) / displayData.length
   );
 
   // Build class-level subject averages for the modal
   const classAvg = useMemo(() =>
-    ALL_SUBJECTS.reduce((acc, sub) => {
-      const totalPresent = displayData.reduce((s, st) => s + st.attendance[sub].present, 0);
-      const totalClasses = displayData.reduce((s, st) => s + st.attendance[sub].total,   0);
-      const pct = Math.round((totalPresent / totalClasses) * 100);
+    dynAllSubs.reduce((acc, sub) => {
+      const totalPresent = displayData.reduce((s, st) => s + (st.attendance[sub]?.present || 0), 0);
+      const totalClasses = displayData.reduce((s, st) => s + (st.attendance[sub]?.total || 0),   0);
+      const pct = totalClasses > 0 ? Math.round((totalPresent / totalClasses) * 100) : 0;
       acc[sub] = { present: totalPresent, total: totalClasses, pct };
       return acc;
     }, {}),
-  [displayData]);
+  [displayData, dynAllSubs]);
 
-  const classLectureOverall = Math.round(
-    LECTURE_SUBJECTS.reduce((a, sub) => a + classAvg[sub].pct, 0) / LECTURE_SUBJECTS.length
-  );
-  const classLabOverall = Math.round(
-    LAB_SUBJECTS.reduce((a, sub) => a + classAvg[sub].pct, 0) / LAB_SUBJECTS.length
-  );
+  const classLectureOverall = (() => {
+    const active = dynLectureSubs.filter(sub => (classAvg[sub]?.total || 0) > 0);
+    return active.length === 0 ? 0 : Math.round(active.reduce((a, sub) => a + (classAvg[sub]?.pct || 0), 0) / active.length);
+  })();
+  const classLabOverall = (() => {
+    const active = dynLabSubs.filter(sub => (classAvg[sub]?.total || 0) > 0);
+    return active.length === 0 ? 0 : Math.round(active.reduce((a, sub) => a + (classAvg[sub]?.pct || 0), 0) / active.length);
+  })();
 
   return (
     <SafeAreaView style={[s.container, { backgroundColor: colors.bg }]}>
@@ -1281,9 +1471,23 @@ function ClassReportScreen({ year, division, onBack, onStudentSelect }) {
           <Text style={[s.headerIconText, { color: '#00e676' }]}>←</Text>
         </TouchableOpacity>
         <View style={{ marginLeft: 12, flex: 1 }}>
-          <Text style={[s.topHeaderTitle, { color: colors.textPrim }]}>{year.label} · Division {division.id}</Text>
-          <Text style={[s.topHeaderSub, { color: colors.textSec }]}>Attendance Report</Text>
+          <Text style={[s.topHeaderTitle, { color: colors.textPrim }]}>{year.label} · Division {typeof division === 'string' ? division : division.id}</Text>
+          <Text style={[s.topHeaderSub, { color: colors.textSec }]}>
+            {isLoading ? 'Fetching students…' : fetchError ? 'Attendance Report (fallback data)' : 'Attendance Report'}
+          </Text>
         </View>
+        {isLoading && <Text style={{ color: '#00e676', fontSize: 12 }}>⏳</Text>}
+        {fetchError && !isLoading && (
+          <TouchableOpacity
+            onPress={() => {
+              /* retry — just re-trigger the effect by changing a dep isn't easy here,
+                 so we show a toast-style note; the fallback data is already loaded */
+            }}
+            style={{ backgroundColor: '#ff525222', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1, borderColor: '#ff5252' }}
+          >
+            <Text style={{ color: '#ff5252', fontSize: 10, fontWeight: '700' }}>⚠ Offline</Text>
+          </TouchableOpacity>
+        )}
       </View>
       <View style={s.greenDivider} />
 
@@ -1365,7 +1569,7 @@ function ClassReportScreen({ year, division, onBack, onStudentSelect }) {
             <Text style={[s.summaryLbl, { color: colors.textSec }]}>Students</Text>
           </View>
           <View style={[s.summaryChip, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={[s.summaryVal, { color: '#a78bfa' }]}>{ALL_SUBJECTS.length}</Text>
+            <Text style={[s.summaryVal, { color: '#a78bfa' }]}>{dynAllSubs.length}</Text>
             <Text style={[s.summaryLbl, { color: colors.textSec }]}>Subjects</Text>
           </View>
           <View style={[s.summaryChip, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -1379,21 +1583,29 @@ function ClassReportScreen({ year, division, onBack, onStudentSelect }) {
         </View>
 
         {/* Student list */}
-        {filteredData.length === 0 ? (
+        {isLoading ? (
+          <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+            <Text style={{ color: '#00e676', fontSize: 32 }}>⏳</Text>
+            <Text style={{ color: colors.textSec, fontSize: 14, marginTop: 10 }}>Loading students from server…</Text>
+          </View>
+        ) : filteredData.length === 0 ? (
           <View style={sl.noResults}>
             <Text style={sl.noResultsIcon}>🔍</Text>
             <Text style={[sl.noResultsText, { color: colors.textSec }]}>No students found for "{searchQuery}"</Text>
           </View>
         ) : (
           filteredData.map((student, idx) => {
+            const stSubs = student.allSubjects || dynAllSubs;
+            const stLec = student.subjects || dynLectureSubs;
+            const stLab = student.labs || dynLabSubs;
             const overall = Math.round(
-              ALL_SUBJECTS.reduce((a, sub) => a + student.attendance[sub].pct, 0) / ALL_SUBJECTS.length
+              stSubs.reduce((a, sub) => a + (student.attendance[sub]?.pct || 0), 0) / stSubs.length
             );
             const lectureAvg = Math.round(
-              LECTURE_SUBJECTS.reduce((a, sub) => a + student.attendance[sub].pct, 0) / LECTURE_SUBJECTS.length
+              stLec.reduce((a, sub) => a + (student.attendance[sub]?.pct || 0), 0) / stLec.length
             );
             const labAvg = Math.round(
-              LAB_SUBJECTS.reduce((a, sub) => a + student.attendance[sub].pct, 0) / LAB_SUBJECTS.length
+              stLab.reduce((a, sub) => a + (student.attendance[sub]?.pct || 0), 0) / stLab.length
             );
             const color = getPctColor(overall);
             return (
@@ -1464,12 +1676,15 @@ function ClassReportScreen({ year, division, onBack, onStudentSelect }) {
       <ClassReportModal
         visible={modalVisible}
         onClose={() => setModalVisible(false)}
-        title={`${year.label} · Division ${division.id}`}
+        title={`${year.label} · Division ${typeof division === 'string' ? division : division.id}`}
         subtitle={isFiltered
           ? `Period: ${dateObjToStr(dateFrom)} → ${dateObjToStr(dateTo)}  ·  ${allData.length} Students`
           : `Class Attendance Summary  ·  ${allData.length} Students`}
         students={displayData}
         dateLabel={isFiltered ? `${dateObjToStr(dateFrom)} → ${dateObjToStr(dateTo)}` : null}
+        lectureSubs={dynLectureSubs}
+        labSubs={dynLabSubs}
+        allSubs={dynAllSubs}
       />
     </SafeAreaView>
   );

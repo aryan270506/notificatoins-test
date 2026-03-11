@@ -1,18 +1,21 @@
 // ============================================================
-//  SelectionScreen.js  —  Campus360
+//  SelectionScreen.js  —  UniVerse
 //  Theme comes from AdminDashboard's ThemeContext
 // ============================================================
 import React, { useState, useRef, useEffect, useContext } from 'react';
 import {
   View, Text, TouchableOpacity, ScrollView,
   StyleSheet, SafeAreaView, StatusBar,
-  Dimensions, Animated, Platform,
+  Dimensions, Animated, Platform, ActivityIndicator,
 } from 'react-native';
 
 import MessagingScreen from './Messagingscreen';
 import { ThemeContext, DARK_COLORS, LIGHT_COLORS } from '../dashboard/AdminDashboard';
 
 const { width: SW } = Dimensions.get('window');
+
+// ── Replace with your actual API base URL ──────────────────────
+const API_BASE = 'axiosInstance.defaults.baseURL'; // e.g. 'https://myapp.com/api'
 
 // ─── SELECTION THEME COLORS (for this screen) ──────────────
 const getSelectColors = (isDark) => isDark ? {
@@ -59,7 +62,7 @@ const sl = StyleSheet.create({
 });
 
 // ─── ROLE CARD ───────────────────────────────────────────────
-function RoleCard({ role, selected, onPress }) {
+function RoleCard({ role, selected, onPress, count, loading }) {
   const active = selected === role.id;
   return (
     <TouchableOpacity
@@ -77,16 +80,35 @@ function RoleCard({ role, selected, onPress }) {
         <Text style={[{ fontSize: 15, fontWeight: '800', marginBottom: 3 }, { color: active ? role.color : role.textColor }]}>{role.label}</Text>
         <Text style={{ fontSize: 12, color: role.subColor }}>{role.desc}</Text>
       </View>
-      <View style={[{ width: 22, height: 22, borderRadius: 11, borderWidth: 2, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }, { borderColor: active ? role.color : role.borderColor }]}>
-        {active && <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: role.color }} />}
+      {/* Live total count badge */}
+      <View style={{ alignItems: 'flex-end', gap: 6 }}>
+        {loading ? (
+          <ActivityIndicator size="small" color={role.color} />
+        ) : count !== null ? (
+          <View style={{ backgroundColor: role.color + '22', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 3, borderWidth: 1, borderColor: role.color + '50' }}>
+            <Text style={{ fontSize: 11, color: role.color, fontWeight: '700' }}>
+              {count.toLocaleString()} total
+            </Text>
+          </View>
+        ) : null}
+        <View style={[{ width: 22, height: 22, borderRadius: 11, borderWidth: 2, alignItems: 'center', justifyContent: 'center' }, { borderColor: active ? role.color : role.borderColor }]}>
+          {active && <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: role.color }} />}
+        </View>
       </View>
     </TouchableOpacity>
   );
 }
 
 // ─── YEAR CARD ───────────────────────────────────────────────
-function YearCard({ year, selected, onPress, colors }) {
+function YearCard({ year, selected, onPress, colors, role, counts, loadingCounts }) {
   const active = selected === year.id;
+
+  // Sum across all 3 divisions for this role+year
+  const totalForYear = counts
+    ? ['A', 'B', 'C'].reduce((sum, d) => sum + (counts[`${role}-${year.id}-${d}`] ?? 0), 0)
+    : null;
+  const isLoading = loadingCounts;
+
   return (
     <TouchableOpacity
       activeOpacity={0.82}
@@ -101,7 +123,13 @@ function YearCard({ year, selected, onPress, colors }) {
       </View>
       <View style={{ flex: 1 }}>
         <Text style={[{ fontSize: 15, fontWeight: '800', marginBottom: 3 }, { color: active ? colors.CYAN : colors.WHITE }]}>{year.label}</Text>
-        <Text style={{ fontSize: 12, color: colors.SUB }}>~{year.count.toLocaleString()} members</Text>
+        {isLoading ? (
+          <ActivityIndicator size="small" color={colors.SUB} style={{ alignSelf: 'flex-start' }} />
+        ) : (
+          <Text style={{ fontSize: 12, color: colors.SUB }}>
+            {totalForYear !== null ? `~${totalForYear.toLocaleString()} members` : '—'}
+          </Text>
+        )}
       </View>
       <View style={[{ width: 22, height: 22, borderRadius: 11, borderWidth: 2, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }, { borderColor: active ? colors.CYAN : colors.BORDER }]}>
         {active && <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: colors.CYAN }} />}
@@ -111,11 +139,13 @@ function YearCard({ year, selected, onPress, colors }) {
 }
 
 // ─── DIVISION ROW ────────────────────────────────────────────
-function DivisionRow({ selected, onPress, colors }) {
+function DivisionRow({ selected, onPress, colors, role, year, counts, loadingCounts }) {
   return (
     <View style={{ flexDirection: 'row', gap: 12 }}>
       {['A', 'B', 'C'].map(d => {
         const active = selected === d;
+        const key = `${role}-${year}-${d}`;
+        const count = counts?.[key] ?? null;
         return (
           <TouchableOpacity
             key={d} activeOpacity={0.82}
@@ -132,7 +162,13 @@ function DivisionRow({ selected, onPress, colors }) {
             )}
             <Text style={[{ fontSize: 32, fontWeight: '900', marginBottom: 4 }, { color: active ? colors.CYAN : colors.SUB }]}>{d}</Text>
             <Text style={[{ fontSize: 12, fontWeight: '600' }, { color: active ? colors.CYAN + 'AA' : colors.SUB }]}>Division</Text>
-            <Text style={{ fontSize: 11, color: colors.SUB + '99', marginTop: 2 }}>~1,050</Text>
+            {loadingCounts ? (
+              <ActivityIndicator size="small" color={colors.SUB} style={{ marginTop: 4 }} />
+            ) : (
+              <Text style={{ fontSize: 11, color: colors.SUB + '99', marginTop: 2 }}>
+                {count !== null ? `~${count.toLocaleString()}` : '—'}
+              </Text>
+            )}
           </TouchableOpacity>
         );
       })}
@@ -141,7 +177,16 @@ function DivisionRow({ selected, onPress, colors }) {
 }
 
 // ─── SUMMARY BANNER ──────────────────────────────────────────
-function SummaryBanner({ roleObj, yearLabel, division, colors }) {
+function SummaryBanner({ roleObj, yearLabel, division, colors, role, year, counts, loadingCounts }) {
+  const divCount = (role && year && division && counts)
+    ? (counts[`${role}-${year}-${division}`] ?? null)
+    : null;
+  const yearTotal = (role && year && counts)
+    ? ['A', 'B', 'C'].reduce((sum, d) => sum + (counts[`${role}-${year}-${d}`] ?? 0), 0)
+    : null;
+
+  const recipientCount = division ? divCount : yearTotal;
+
   return (
     <View style={[{ borderRadius: 14, padding: 16, borderWidth: 1, marginTop: 16 },
       { backgroundColor: colors.BG3, borderColor: (roleObj?.color || colors.CYAN) + '50' }
@@ -152,7 +197,13 @@ function SummaryBanner({ roleObj, yearLabel, division, colors }) {
       </Text>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <View style={{ backgroundColor: colors.CYAN_D + '22', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 5, borderWidth: 1, borderColor: colors.CYAN_D + '50' }}>
-          <Text style={{ fontSize: 12, color: colors.CYAN, fontWeight: '600' }}>👥  {division ? '~1,050' : '~3,100'}  recipients</Text>
+          {loadingCounts ? (
+            <ActivityIndicator size="small" color={colors.CYAN} />
+          ) : (
+            <Text style={{ fontSize: 12, color: colors.CYAN, fontWeight: '600' }}>
+              👥  {recipientCount !== null ? `~${recipientCount.toLocaleString()}` : '—'}  recipients
+            </Text>
+          )}
         </View>
         {!division && (
           <View style={{ backgroundColor: colors.AMBER + '18', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 5, borderWidth: 1, borderColor: colors.AMBER + '40' }}>
@@ -165,8 +216,7 @@ function SummaryBanner({ roleObj, yearLabel, division, colors }) {
 }
 
 // ─── MAIN EXPORT ─────────────────────────────────────────────
-// Gets isDark from AdminDashboard's ThemeContext
-export default function SelectionScreen() {
+export default function SelectionScreen({ initialContext, onContextConsumed }) {
   const themeCtx = useContext(ThemeContext);
   const isDark = themeCtx.isDark;
   const colors = getSelectColors(isDark);
@@ -178,10 +228,10 @@ export default function SelectionScreen() {
     { id: 'parent',  label: 'Parent',  icon: '👨‍👩‍👧', desc: "Parents of students",  color: GREEN,  bg: BG2, border: BORDER, textColor: WHITE, subColor: SUB, borderColor: BORDER },
   ];
   const YEARS = [
-    { id: '1', label: '1st Year', icon: '🌱', color: GREEN,  count: 3100 },
-    { id: '2', label: '2nd Year', icon: '📖', color: CYAN,   count: 3050 },
-    { id: '3', label: '3rd Year', icon: '🔭', color: AMBER,  count: 3100 },
-    { id: '4', label: '4th Year', icon: '🎓', color: PURPLE, count: 3130 },
+    { id: '1', label: '1st Year', icon: '🌱', color: GREEN  },
+    { id: '2', label: '2nd Year', icon: '📖', color: CYAN   },
+    { id: '3', label: '3rd Year', icon: '🔭', color: AMBER  },
+    { id: '4', label: '4th Year', icon: '🎓', color: PURPLE },
   ];
 
   const [role,     setRole]     = useState(null);
@@ -189,6 +239,118 @@ export default function SelectionScreen() {
   const [division, setDivision] = useState(null);
   const [showMessaging,  setShowMessaging]  = useState(false);
   const [messageContext, setMessageContext] = useState(null);
+
+  // ── Live count state ─────────────────────────────────────
+  // roleTotals: { teacher: N, student: N, parent: N }
+  const [roleTotals,    setRoleTotals]    = useState({});
+  const [loadingRoles,  setLoadingRoles]  = useState(false);
+
+  // divCounts: keyed as "role-year-division" → count
+  const [divCounts,     setDivCounts]     = useState({});
+  const [loadingCounts, setLoadingCounts] = useState(false);
+
+  // ── Fetch total counts for each role (on mount) ──────────
+  useEffect(() => {
+    const fetchRoleTotals = async () => {
+      setLoadingRoles(true);
+      try {
+        const [teachersRes, studentsRes, parentsRes] = await Promise.all([
+          fetch(`${API_BASE}/teachers/all`),
+          fetch(`${API_BASE}/students`),
+          fetch(`${API_BASE}/parents`),
+        ]);
+
+        const [teachersData, studentsData, parentsData] = await Promise.all([
+          teachersRes.json(),
+          studentsRes.json(),
+          parentsRes.json(),
+        ]);
+
+        setRoleTotals({
+          teacher: teachersData?.data?.length  ?? null,
+          student: studentsData?.data?.length  ?? studentsData?.count ?? null,
+          parent:  parentsData?.data?.length   ?? parentsData?.count  ?? null,
+        });
+      } catch (err) {
+        console.warn('[SelectionScreen] Failed to fetch role totals:', err.message);
+      } finally {
+        setLoadingRoles(false);
+      }
+    };
+
+    fetchRoleTotals();
+  }, []);
+
+  // ── Fetch per-division counts whenever role changes ───────
+  useEffect(() => {
+    if (!role) return;
+
+    const fetchDivCounts = async () => {
+      setLoadingCounts(true);
+      const years     = ['1', '2', '3', '4'];
+      const divisions = ['A', 'B', 'C'];
+      const newCounts = {};
+
+      try {
+        if (role === 'teacher') {
+          // Teachers: fetch all once, then tally by year+division
+          const res  = await fetch(`${API_BASE}/teachers/all`);
+          const data = await res.json();
+          const all  = data?.data || [];
+
+          years.forEach(y => {
+            divisions.forEach(d => {
+              newCounts[`teacher-${y}-${d}`] = all.filter(t =>
+                Array.isArray(t.years)      && t.years.includes(parseInt(y)) &&
+                Array.isArray(t.divisions)  && t.divisions.includes(d)
+              ).length;
+            });
+          });
+
+        } else if (role === 'student') {
+          // Students: use /students?year=&division= endpoint
+          const requests = years.flatMap(y =>
+            divisions.map(d =>
+              fetch(`${API_BASE}/students?year=${y}&division=${d}`)
+                .then(r => r.json())
+                .then(data => ({ key: `student-${y}-${d}`, count: data?.count ?? data?.data?.length ?? 0 }))
+            )
+          );
+          const results = await Promise.all(requests);
+          results.forEach(({ key, count }) => { newCounts[key] = count; });
+
+        } else if (role === 'parent') {
+          // Parents: fetch all, tally by linked student's year+division via roll_no prefix
+          // roll_no format: FY-A2-36  (FY=1, SY=2, TY=3, LY=4)
+          const yearMap = { FY: '1', SY: '2', TY: '3', LY: '4' };
+          const res  = await fetch(`${API_BASE}/parents`);
+          const data = await res.json();
+          const all  = data?.data || [];
+
+          years.forEach(y => {
+            divisions.forEach(d => {
+              newCounts[`parent-${y}-${d}`] = all.filter(p => {
+                if (!p.roll_no) return false;
+                const parts = p.roll_no.split('-');
+                if (parts.length < 2) return false;
+                const pYear = yearMap[parts[0]?.toUpperCase()];
+                const pDiv  = parts[1]?.replace(/[^A-Z]/gi, '').toUpperCase();
+                return pYear === y && pDiv === d;
+              }).length;
+            });
+          });
+        }
+
+        setDivCounts(prev => ({ ...prev, ...newCounts }));
+      } catch (err) {
+        console.warn('[SelectionScreen] Failed to fetch division counts:', err.message);
+      } finally {
+        setLoadingCounts(false);
+      }
+    };
+
+    fetchDivCounts();
+  }, [role]);
 
   const roleObj = ROLES.find(r => r.id === role);
   const yearObj = YEARS.find(y => y.id === year);
@@ -206,10 +368,43 @@ export default function SelectionScreen() {
     return t;
   })();
 
+  // Actual recipient count from live data
+  const actualRecipientCount = (role && year && division && divCounts[`${role}-${year}-${division}`] !== undefined)
+    ? divCounts[`${role}-${year}-${division}`]
+    : null;
+
   const handleGo = () => {
-    setMessageContext({ role, year, division, roleLabel: roleObj?.label, yearLabel: yearObj?.label, recipientCount: 1050 });
+    setMessageContext({
+      role, year, division,
+      roleLabel: roleObj?.label,
+      yearLabel: yearObj?.label,
+      recipientCount: actualRecipientCount ?? 0,
+    });
     setShowMessaging(true);
   };
+
+  // ── Auto-open from notification click ──
+  useEffect(() => {
+    if (initialContext && initialContext.role && initialContext.year && initialContext.division) {
+      const ic = initialContext;
+      const rObj = ROLES.find(r => r.id === ic.role);
+      const yObj = YEARS.find(y => y.id === String(ic.year));
+      setRole(ic.role);
+      setYear(String(ic.year));
+      setDivision(ic.division);
+      setMessageContext({
+        role: ic.role,
+        year: String(ic.year),
+        division: ic.division,
+        roleLabel: rObj?.label,
+        yearLabel: yObj?.label,
+        recipientCount: actualRecipientCount ?? 0,
+        highlightMessageId: ic.messageId || null,
+      });
+      setShowMessaging(true);
+      onContextConsumed?.();
+    }
+  }, [initialContext]);
 
   if (showMessaging && messageContext) {
     return (
@@ -240,34 +435,69 @@ export default function SelectionScreen() {
             <Text style={[css.topPillTxt, { color: WHITE }, roleObj && { color: roleObj.color }]} numberOfLines={1}>{pillLabel}</Text>
           </View>
         )}
-        {/* GLOBAL THEME TOGGLE — controlled by AdminDashboard */}
-        {/* Theme toggle removed - controlled at AdminDashboard level */}
       </View>
 
       {/* SCROLLABLE CONTENT */}
       <ScrollView contentContainerStyle={[css.scroll, { paddingHorizontal: 18, paddingTop: 20, paddingBottom: 40 }]} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <FadeIn delay={0}>
           <StepLabel num="1" text="Choose Recipient Role" done={!!role} colors={colors} />
-          {ROLES.map(r => <RoleCard key={r.id} role={r} selected={role} onPress={handleRole} />)}
+          {ROLES.map(r => (
+            <RoleCard
+              key={r.id}
+              role={r}
+              selected={role}
+              onPress={handleRole}
+              count={roleTotals[r.id] ?? null}
+              loading={loadingRoles}
+            />
+          ))}
         </FadeIn>
 
         {role && (
           <FadeIn delay={50}>
             <StepLabel num="2" text="Choose Academic Year" done={!!year} colors={colors} />
-            {YEARS.map(y => <YearCard key={y.id} year={y} selected={year} onPress={handleYear} colors={colors} />)}
+            {YEARS.map(y => (
+              <YearCard
+                key={y.id}
+                year={y}
+                selected={year}
+                onPress={handleYear}
+                colors={colors}
+                role={role}
+                counts={divCounts}
+                loadingCounts={loadingCounts}
+              />
+            ))}
           </FadeIn>
         )}
 
         {role && year && (
           <FadeIn delay={50}>
             <StepLabel num="3" text="Choose Division" done={!!division} colors={colors} />
-            <DivisionRow selected={division} onPress={setDivision} colors={colors} />
+            <DivisionRow
+              selected={division}
+              onPress={setDivision}
+              colors={colors}
+              role={role}
+              year={year}
+              counts={divCounts}
+              loadingCounts={loadingCounts}
+            />
           </FadeIn>
         )}
 
         {role && year && (
           <FadeIn delay={60}>
-            <SummaryBanner roleObj={roleObj} yearLabel={yearObj?.label} division={division} colors={colors} />
+            <SummaryBanner
+              roleObj={roleObj}
+              yearLabel={yearObj?.label}
+              division={division}
+              colors={colors}
+              role={role}
+              year={year}
+              counts={divCounts}
+              loadingCounts={loadingCounts}
+            />
           </FadeIn>
         )}
 
@@ -282,7 +512,8 @@ export default function SelectionScreen() {
           onPress={handleGo}
         >
           <Text style={css.ctaTxt}>
-            Compose Message  ·  {roleObj?.label}  ·  {yearObj?.label?.replace(' Year', '')}  Div {division}  →
+            Compose Message  ·  {roleObj?.label}  ·  {yearObj?.label?.replace(' Year', '')}  Div {division}
+            {actualRecipientCount !== null ? `  ·  ${actualRecipientCount.toLocaleString()} recipients` : ''}  →
           </Text>
         </TouchableOpacity>
       )}

@@ -5,7 +5,54 @@
 
 const express = require("express");
 const router = express.Router();
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
 const Message = require("../Models/Messages");
+
+// ─── Multer config for message attachments ───────────────
+const MSG_UPLOAD_DIR = path.join(__dirname, "..", "uploads", "messages");
+if (!fs.existsSync(MSG_UPLOAD_DIR)) {
+  fs.mkdirSync(MSG_UPLOAD_DIR, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, MSG_UPLOAD_DIR),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `msg_${Date.now()}_${Math.round(Math.random() * 1e9)}${ext}`);
+  },
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
+});
+
+// ─── POST: Upload attachment file ────────────────────────
+router.post("/upload-attachment", upload.single("file"), (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "No file uploaded" });
+    }
+    const fileUrl = `/uploads/messages/${req.file.filename}`;
+    res.status(201).json({
+      success: true,
+      data: {
+        url: fileUrl,
+        name: req.file.originalname,
+        size: req.file.size,
+        mimetype: req.file.mimetype,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      message: "Upload failed: " + error.message,
+    });
+  }
+});
 
 // ─── POST: Save a new message ────────────────────────────
 router.post("/save", async (req, res) => {
@@ -84,6 +131,36 @@ router.get("/", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Error fetching messages: " + error.message,
+    });
+  }
+});
+
+// ─── GET: Admin notifications (messages NOT from admin) ──
+router.get("/notifications/admin", async (req, res) => {
+  try {
+    const { since } = req.query; // optional ISO timestamp
+    const filter = {
+      isDeleted: false,
+      senderRole: { $ne: "admin" },
+    };
+    if (since) {
+      filter.timestamp = { $gt: new Date(since) };
+    }
+
+    const messages = await Message.find(filter)
+      .sort({ timestamp: -1 })
+      .limit(50);
+
+    res.status(200).json({
+      success: true,
+      count: messages.length,
+      data: messages,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching notifications: " + error.message,
     });
   }
 });

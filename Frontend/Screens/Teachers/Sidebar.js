@@ -6,7 +6,7 @@
  * - Tap avatar to upload a new profile photo
  */
 
-import React, { useCallback, useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect, useContext } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Alert,
   useWindowDimensions, Modal, Pressable, Platform,
@@ -17,22 +17,62 @@ import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import axiosInstance from '../../Src/Axios';
+import { ThemeContext } from './TeacherStack';
+
+// ─── Sidebar themes ───────────────────────────────────────────────────────────────────
+const SB_DARK = {
+  wideBg: '#080818', sidebarBg: '#0f0f23', screenBg: '#0d0d20',
+  borderColor: 'rgba(99,102,241,0.15)', borderColor2: 'rgba(99,102,241,0.2)',
+  borderColor3: 'rgba(99,102,241,0.12)',
+  logoBadgeBg: '#6366f1', logoText: '#e2e8f0',
+  hamburgerColor: '#a5b4fc',
+  navText: '#64748b', navActiveText: '#a5b4fc',
+  navActiveBg: 'rgba(99,102,241,0.14)', navActiveBorder: '#6366f1',
+  avatarBg: '#6366f1', avatarBorder: 'rgba(99,102,241,0.4)',
+  cameraBadgeBg: '#1e1e3a',
+  userName: '#e2e8f0', userRole: '#475569',
+  logoutBg: 'rgba(239,68,68,0.10)', logoutBorder: 'rgba(239,68,68,0.30)',
+  drawerBg: '#0f0f23', drawerShadow: '#000',
+};
+const SB_LIGHT = {
+  wideBg: '#F1F4FD', sidebarBg: '#FFFFFF', screenBg: '#F1F4FD',
+  borderColor: '#E2E8F4', borderColor2: '#DDE3F4', borderColor3: '#E8EDF5',
+  logoBadgeBg: '#4F46E5', logoText: '#1E293B',
+  hamburgerColor: '#4F46E5',
+  navText: '#64748B', navActiveText: '#4F46E5',
+  navActiveBg: 'rgba(79,70,229,0.08)', navActiveBorder: '#4F46E5',
+  avatarBg: '#4F46E5', avatarBorder: 'rgba(79,70,229,0.3)',
+  cameraBadgeBg: '#EEF2FF',
+  userName: '#1E293B', userRole: '#64748B',
+  logoutBg: 'rgba(239,68,68,0.06)', logoutBorder: 'rgba(239,68,68,0.20)',
+  drawerBg: '#FFFFFF', drawerShadow: '#94A3B8',
+};
 
 // ─── Derive BASE_URL from axiosInstance so there's no hardcoded IP ───────────
 const BASE_URL = axiosInstance.defaults.baseURL;
 
 const NAV_ITEMS = [
-  { id: 'dashboard',   label: 'Dashboard',         icon: '⊞', route: 'DashboardScreen'          },
-  { id: 'attendance',  label: 'Attendance Marking', icon: '✓', route: 'AttendanceScreen'         },
-  { id: 'assignments', label: 'Assignments',        icon: '📋', route: 'AssignmentScreen'         },
-  { id: 'Attendance',  label: 'Attendance',         icon: '📈', route: 'StudentAttendanceScreen'  },
-  { id: 'planner',     label: 'Lesson Planner',     icon: '📅', route: 'PlannerScreen'            },
-  { id: 'exams',       label: 'Exams',              icon: '📝', route: 'TeacherExamScreen'        },
-  { id: 'quiz',        label: 'Quiz Session',       icon: '🧠', route: 'QuizzSessionScreen'       },
-  { id: 'addquizz',    label: 'Add Quiz',           icon: '➕', route: 'QuizBuilderScreen'        },
-  { id: 'doubt',       label: 'Doubt Session',      icon: '❓', route: 'DoubtScreen'              },
-  { id: 'messages',    label: 'Messages',           icon: '💬', route: 'MessagesScreen'           },
-  { id: 'timetable',   label: 'Timetable',          icon: '🗓', route: 'TimetableScreen'          },
+  { id: 'dashboard', label: 'Dashboard', route: 'DashboardScreen' },
+
+  { id: 'attendanceMarking', label: 'Attendance Marking', route: 'AttendanceScreen' },
+
+  { id: 'studentAttendance', label: 'Attendance', route: 'StudentAttendanceScreen' },
+
+  { id: 'assignments', label: 'Assignments', route: 'AssignmentScreen' },
+
+  { id: 'planner', label: 'Lesson Planner', route: 'PlannerScreen' },
+
+  { id: 'exams', label: 'Exams', route: 'TeacherExamScreen' },
+
+  { id: 'quiz', label: 'Quiz Session', route: 'QuizzSessionScreen' },
+
+  { id: 'addquizz', label: 'Add Quiz', route: 'QuizBuilderScreen' },
+
+  { id: 'doubt', label: 'Doubt Session', route: 'DoubtScreen' },
+
+  { id: 'messages', label: 'Messages', route: 'MessagesScreen' },
+
+  { id: 'timetable', label: 'Timetable', route: 'TimetableScreen' },
 ];
 
 const SIDEBAR_W  = 210;
@@ -72,14 +112,14 @@ const AvatarButton = ({ name, profileImage, teacherId, uploading, onPress }) => 
 };
 
 // ─── Sidebar inner content ────────────────────────────────────────────────────
-const SidebarContent = ({ activeScreen, onSelect, onLogout, teacher, uploading, onAvatarPress }) => (
-  <View style={s.sidebar}>
+const SidebarContent = ({ activeScreen, onSelect, onLogout, teacher, uploading, onAvatarPress, ST }) => (
+  <View style={[s.sidebar, { backgroundColor: ST.sidebarBg }]}>
     {/* Logo */}
-    <View style={s.logoRow}>
-      <View style={s.logoBadge}>
+    <View style={[s.logoRow, { borderBottomColor: ST.borderColor3 }]}>
+      <View style={[s.logoBadge, { backgroundColor: ST.logoBadgeBg }]}>
         <Text style={s.logoIcon}>✦</Text>
       </View>
-      <Text style={s.logoText}>Campus360</Text>
+      <Text style={[s.logoText, { color: ST.logoText }]}>UniVerse</Text>
     </View>
 
     {/* Nav items */}
@@ -91,16 +131,16 @@ const SidebarContent = ({ activeScreen, onSelect, onLogout, teacher, uploading, 
             key={item.id}
             onPress={() => onSelect(item)}
             activeOpacity={0.75}
-            style={[s.navItem, active && s.navItemActive]}>
-            <Text style={[s.navIcon, active && s.navIconActive]}>{item.icon}</Text>
-            <Text style={[s.navLabel, active && s.navLabelActive]}>{item.label}</Text>
+            style={[s.navItem, active && [s.navItemActive, { backgroundColor: ST.navActiveBg, borderLeftColor: ST.navActiveBorder }]]}>
+            <Text style={[s.navIcon, { color: ST.navText }, active && { color: ST.navActiveText }]}>{item.icon}</Text>
+            <Text style={[s.navLabel, { color: ST.navText }, active && { color: ST.navActiveText, fontWeight: '600' }]}>{item.label}</Text>
           </TouchableOpacity>
         );
       })}
     </View>
 
     {/* User profile + Logout */}
-    <View style={s.userRow}>
+    <View style={[s.userRow, { borderTopColor: ST.borderColor3 }]}>
       <AvatarButton
   name={teacher.name}
   profileImage={teacher.profileImage}
@@ -109,14 +149,14 @@ const SidebarContent = ({ activeScreen, onSelect, onLogout, teacher, uploading, 
   onPress={onAvatarPress}
 />
       <View style={{ flex: 1 }}>
-        <Text style={s.userName} numberOfLines={1}>
+        <Text style={[s.userName, { color: ST.userName }]} numberOfLines={1}>
           {teacher.name || 'Loading...'}
         </Text>
-        <Text style={s.userRole} numberOfLines={1}>
+        <Text style={[s.userRole, { color: ST.userRole }]} numberOfLines={1}>
           {teacher.role || 'Teacher'}
         </Text>
       </View>
-      <TouchableOpacity onPress={onLogout} activeOpacity={0.75} style={s.logoutBtn}>
+      <TouchableOpacity onPress={onLogout} activeOpacity={0.75} style={[s.logoutBtn, { backgroundColor: ST.logoutBg, borderColor: ST.logoutBorder }]}>
         <Text style={s.logoutIcon}>🚪</Text>
       </TouchableOpacity>
     </View>
@@ -128,6 +168,8 @@ const Sidebar = ({ activeScreen = 'dashboard', children }) => {
   const navigation              = useNavigation();
   const { width }               = useWindowDimensions();
   const isWide                  = width >= BREAKPOINT;
+  const { isDark }              = useContext(ThemeContext);
+  const ST                      = isDark ? SB_DARK : SB_LIGHT;
   const [drawerOpen, setDrawer] = useState(false);
 
   // Teacher state
@@ -152,16 +194,15 @@ const Sidebar = ({ activeScreen = 'dashboard', children }) => {
         // ✅ Use axiosInstance — no hardcoded IP needed
         const res = await axiosInstance.get(`/teachers/${id}`);
         const json = res.data;
-        console.log('Sidebar API response:', json);
 
-        if (json.success && json.data) {
-          setTeacher({
-            id:           json.data._id || json.data.id || '',
-            name:         json.data.name || '',
-            role:         'Teacher',
-            profileImage: json.data.profileImage || '',
-          });
-        }
+if (json.success && json.data) {
+  setTeacher({
+    id: json.data._id || json.data.id || '',
+    name: json.data.name || '',
+    role: 'Teacher',
+    profileImage: json.data.profileImage || '',
+  });
+}
       } catch (err) {
         console.warn('Sidebar: failed to fetch teacher', err);
       }
@@ -245,10 +286,41 @@ if (Platform.OS === "web") {
     setDrawer(false);
 
     const performLogout = async () => {
-      await AsyncStorage.removeItem('teacherId');
-      let nav = navigation;
-      while (nav.getParent()) nav = nav.getParent();
-      nav.reset({ index: 0, routes: [{ name: 'Login' }] });
+      try {
+        // Call logout endpoint to invalidate token on backend
+        const token = await AsyncStorage.getItem('authToken');
+        if (token) {
+          try {
+            await axiosInstance.post('/auth/logout', {}, {
+              headers: {
+                Authorization: `Bearer ${token}`
+              }
+            });
+            console.log("✅ Token revoked on backend");
+          } catch (error) {
+            console.error("⚠️  Error revoking token on backend:", error.message);
+            // Continue with logout even if backend call fails
+          }
+        }
+
+        // Clear all auth data from storage
+        await AsyncStorage.removeItem('authToken');
+        await AsyncStorage.removeItem('teacherId');
+        await AsyncStorage.removeItem('userId');
+        await AsyncStorage.removeItem('userRole');
+        await AsyncStorage.removeItem('userName');
+        await AsyncStorage.removeItem('currentScreen');
+
+        console.log("✅ User logged out successfully");
+
+        // Navigate to login
+        let nav = navigation;
+        while (nav.getParent()) nav = nav.getParent();
+        nav.reset({ index: 0, routes: [{ name: 'Login' }] });
+      } catch (error) {
+        console.error("❌ Logout error:", error);
+        Alert.alert('Error', 'Error during logout. Please try again.');
+      }
     };
 
     if (Platform.OS === 'web') {
@@ -273,36 +345,37 @@ if (Platform.OS === "web") {
     teacher,
     uploading,
     onAvatarPress: handleAvatarPress,
+    ST,
   };
 
   /* ── Desktop: permanent sidebar ─────────────────────────────────────────── */
   if (isWide) {
     return (
-      <View style={s.wideContainer}>
-        <View style={s.permanentSidebar}>
+      <View style={[s.wideContainer, { backgroundColor: ST.wideBg }]}>
+        <View style={[s.permanentSidebar, { backgroundColor: ST.sidebarBg, borderRightColor: ST.borderColor }]}>
           <SidebarContent {...sidebarContentProps} />
         </View>
-        <View style={s.screenArea}>{children}</View>
+        <View style={[s.screenArea, { backgroundColor: ST.screenBg }]}>{children}</View>
       </View>
     );
   }
 
   /* ── Mobile: top bar + slide-in drawer ──────────────────────────────────── */
   return (
-    <SafeAreaView style={s.mobileRoot}>
-      <View style={s.topBar}>
+    <SafeAreaView style={[s.mobileRoot, { backgroundColor: ST.screenBg }]}>
+      <View style={[s.topBar, { backgroundColor: ST.sidebarBg, borderBottomColor: ST.borderColor2 }]}>
         <TouchableOpacity
           onPress={() => setDrawer(true)}
           style={s.hamburger}
           activeOpacity={0.7}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <Text style={s.hamburgerIcon}>☰</Text>
+          <Text style={[s.hamburgerIcon, { color: ST.hamburgerColor }]}>☰</Text>
         </TouchableOpacity>
         <View style={s.topLogoRow}>
-          <View style={s.logoBadgeSm}>
+          <View style={[s.logoBadgeSm, { backgroundColor: ST.logoBadgeBg }]}>
             <Text style={s.logoIconSm}>✦</Text>
           </View>
-          <Text style={s.logoTextSm}>Campus360</Text>
+          <Text style={[s.logoTextSm, { color: ST.logoText }]}>UniVerse</Text>
         </View>
       </View>
 
@@ -314,7 +387,7 @@ if (Platform.OS === "web") {
         animationType="slide"
         onRequestClose={() => setDrawer(false)}>
         <Pressable style={s.backdrop} onPress={() => setDrawer(false)} />
-        <View style={s.drawerPanel}>
+        <View style={[s.drawerPanel, { backgroundColor: ST.drawerBg, borderRightColor: ST.borderColor2, shadowColor: ST.drawerShadow }]}>
           <SidebarContent {...sidebarContentProps} />
         </View>
       </Modal>

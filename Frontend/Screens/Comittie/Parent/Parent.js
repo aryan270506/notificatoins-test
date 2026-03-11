@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,9 @@ import {
   SafeAreaView,
   StatusBar,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
+import axiosInstance from '../../../Src/Axios';
 
 const { width } = Dimensions.get('window');
 
@@ -118,14 +120,52 @@ function ParentRow({ name, student, lastActive, status }) {
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function ParentManagementDashboard() {
   const [searchText, setSearchText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [parents, setParents] = useState([]);
+  const [totalParents, setTotalParents] = useState(0);
+  const [activeParents, setActiveParents] = useState(0);
+  const [inactiveParents, setInactiveParents] = useState(0);
 
-  const parents = [
-    { name: 'Sarah Jenkins',   student: 'Leo Jenkins (Grade 4)',     lastActive: 'Just now',    status: 'ONLINE'  },
-    { name: 'Michael Chen',    student: 'Emily Chen (Grade 7)',      lastActive: '15 mins ago', status: 'OFFLINE' },
-    { name: 'Elena Rodriguez', student: 'Sofia Rodriguez (Grade 5)', lastActive: '2 hours ago', status: 'ONLINE'  },
-    { name: 'James Patel',     student: 'Arjun Patel (Grade 9)',     lastActive: '3 hours ago', status: 'OFFLINE' },
-    { name: 'Linda Kim',       student: 'Mia Kim (Grade 3)',         lastActive: '5 hours ago', status: 'ONLINE'  },
-  ];
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [parentsRes, activeUsersRes] = await Promise.all([
+          axiosInstance.get('/parents/').catch(() => ({ data: { data: [], count: 0 } })),
+          axiosInstance.get('/users/active-users').catch(() => ({ data: { users: [] } })),
+        ]);
+
+        const allParents = parentsRes.data?.data || [];
+        const total = parentsRes.data?.count || allParents.length;
+
+        const allActive = activeUsersRes.data?.users || [];
+        const onlineParents = allActive.filter(u => u.role === 'parent');
+        const onlineCount = onlineParents.length;
+
+        setTotalParents(total);
+        setActiveParents(onlineCount);
+        setInactiveParents(Math.max(total - onlineCount, 0));
+
+        // Build parent list from DB data
+        const onlineIds = new Set(onlineParents.map(p => p.email || p.userId));
+        const parentList = allParents.slice(0, 10).map(p => {
+          const isOnline = onlineIds.has(p.email) || onlineIds.has(p.id);
+          return {
+            name: p.name || p.id || 'Parent',
+            student: p.roll_no ? `Roll: ${p.roll_no}` : (p.email || '-'),
+            lastActive: isOnline ? 'Active now' : 'Offline',
+            status: isOnline ? 'ONLINE' : 'OFFLINE',
+          };
+        });
+
+        setParents(parentList);
+      } catch (err) {
+        console.error('Parent fetch error:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -157,13 +197,20 @@ export default function ParentManagementDashboard() {
         </View>
 
         {/* ── Stat Cards ── */}
+        {loading ? (
+          <View style={{ padding: 40, alignItems: 'center' }}>
+            <ActivityIndicator size="large" color={C.blue} />
+            <Text style={{ color: C.textMuted, marginTop: 12 }}>Loading parent data...</Text>
+          </View>
+        ) : (
+          <>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statsRow}>
-          <StatCard title="Total Parents"    value="240" badge="+5%"  badgePositive={true}  icon="👥" />
-          <StatCard title="Active Parents"   value="210" badge="+12%" badgePositive={true}  icon="✅" />
-          <StatCard title="Inactive Parents" value="30"  badge="-3%"  badgePositive={false} icon="⏸" />
+          <StatCard title="Total Parents"    value={String(totalParents)}    badge=""  badgePositive={null}  icon="👥" />
+          <StatCard title="Active Parents"   value={String(activeParents)}   badge="Online" badgePositive={true}  icon="✅" />
+          <StatCard title="Inactive Parents" value={String(inactiveParents)} badge="Offline" badgePositive={false} icon="⏸" />
         </ScrollView>
 
-        {/* ── Middle Row ── */}
+          {/* ── Middle Row ── */}
         <View style={styles.midRow}>
 
           {/* Bar Chart Card */}
@@ -171,12 +218,12 @@ export default function ParentManagementDashboard() {
             <Text style={styles.cardTitle}>Account Status</Text>
             <Text style={styles.cardSub}>Headcount breakdown</Text>
             <View style={styles.totalRow}>
-              <Text style={styles.totalNumber}>240</Text>
+              <Text style={styles.totalNumber}>{totalParents}</Text>
               <Text style={styles.totalLabel}> Total</Text>
             </View>
             <View style={styles.barsRow}>
-              <GradientBar heightPct={100} value="210" label="Active"   selected />
-              <GradientBar heightPct={14}  value="30"  label="Inactive" />
+              <GradientBar heightPct={totalParents > 0 ? Math.round((activeParents / totalParents) * 100) : 0} value={String(activeParents)} label="Active"   selected />
+              <GradientBar heightPct={totalParents > 0 ? Math.round((inactiveParents / totalParents) * 100) : 0}  value={String(inactiveParents)}  label="Inactive" />
             </View>
           </View>
 
@@ -184,20 +231,20 @@ export default function ParentManagementDashboard() {
           <View style={[styles.card, styles.donutCard]}>
             <Text style={styles.cardTitle}>Distribution</Text>
             <Text style={styles.cardSub}>Engagement split</Text>
-            <DonutRing total="240" />
+            <DonutRing total={String(totalParents)} />
             <View style={styles.legendBlock}>
               <View style={styles.legendRow}>
                 <View style={[styles.legendDot, { backgroundColor: C.donutActive }]} />
                 <View>
-                  <Text style={styles.legendName}>Active <Text style={styles.legendPct}>87.5%</Text></Text>
-                  <Text style={styles.legendDesc}>210 Verified</Text>
+                  <Text style={styles.legendName}>Active <Text style={styles.legendPct}>{totalParents > 0 ? Math.round((activeParents / totalParents) * 100) : 0}%</Text></Text>
+                  <Text style={styles.legendDesc}>{activeParents} Online</Text>
                 </View>
               </View>
               <View style={styles.legendRow}>
                 <View style={[styles.legendDot, { backgroundColor: C.textMuted }]} />
                 <View>
-                  <Text style={styles.legendName}>Inactive <Text style={styles.legendPct}>12.5%</Text></Text>
-                  <Text style={styles.legendDesc}>30 Pending</Text>
+                  <Text style={styles.legendName}>Inactive <Text style={styles.legendPct}>{totalParents > 0 ? Math.round((inactiveParents / totalParents) * 100) : 0}%</Text></Text>
+                  <Text style={styles.legendDesc}>{inactiveParents} Offline</Text>
                 </View>
               </View>
             </View>
@@ -215,10 +262,14 @@ export default function ParentManagementDashboard() {
               <Text style={styles.viewAllText}>VIEW ALL →</Text>
             </TouchableOpacity>
           </View>
-          {parents.map((p, i) => (
+          {parents.length > 0 ? parents.map((p, i) => (
             <ParentRow key={i} {...p} />
-          ))}
+          )) : (
+            <Text style={{ color: C.textMuted, textAlign: 'center', padding: 20, fontSize: 13 }}>No parent activity found</Text>
+          )}
         </View>
+        </>
+        )}
 
       </ScrollView>
     </SafeAreaView>

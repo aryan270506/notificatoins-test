@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,15 @@ import StudentManagementDashboard from '../Students/Students';
 import TeacherManagementDashboard from '../Teacher/Teacher';
 import ParentManagementDashboard from '../Parent/Parent';
 import AttendanceDashboard from '../Attendence/Attendence';
+import PermissionDashboard from '../Permission/Permission';
+
+// ── Admin screens reused by Committee ──
+import { ThemeContext, DARK_COLORS } from '../../Admin/dashboard/AdminDashboard';
+import TimeTableScreen from '../../Admin/timetable/TimeTableManagement';
+import SelectionScreen from '../../Admin/Message/Selectionscreen';
+import Assignment from '../../Admin/Assignment/Assignment';
+import Admissionfees from '../../Admin/Fees/Admissionfees';
+import DataImportCenter from '../../Admin/DataImportCenter/DataImportCenter';
 
 
 // ---------------- ICONS ----------------
@@ -24,10 +33,14 @@ const Icon = ({ name, color = '#fff', size = 20 }) => {
     faculty: '👨‍🏫',
     parents: '👨‍👩‍👧',
     attendance: '📅',
-    exams: '📋',
-    results: '📊',
-    Storage: '🏢',
-    settings: '⚙️',
+    permission: '🔑',
+    reports: '📊',
+    timetable: '🕐',
+    messages: '✉️',
+    assignment: '📝',
+    finance: '💰',
+    securitylogs: '🔒',
+    dataimport: '📥',
     logout: '🚪',
   };
 
@@ -41,15 +54,20 @@ const Icon = ({ name, color = '#fff', size = 20 }) => {
 
 // ---------------- NAV ITEMS ----------------
 const navItems = [
-  { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
-  { id: 'students', label: 'Students', icon: 'students' },
-  { id: 'faculty', label: 'Faculty', icon: 'faculty' },
-  { id: 'parents', label: 'Parents', icon: 'parents' },
-  { id: 'attendance', label: 'Attendance', icon: 'attendance' },
+  { id: 'dashboard',    label: 'Dashboard',     icon: 'dashboard' },
+  { id: 'students',     label: 'Students',      icon: 'students' },
+  { id: 'faculty',      label: 'Faculty',       icon: 'faculty' },
+  { id: 'parents',      label: 'Parents',       icon: 'parents' },
+  { id: 'attendance',   label: 'Attendance',    icon: 'attendance' },
+  { id: 'timetable',    label: 'Timetable',     icon: 'timetable' },
+  { id: 'messages',     label: 'Messages',      icon: 'messages' },
+  { id: 'assignment',   label: 'Assignments',   icon: 'assignment' },
+  { id: 'finance',      label: 'Finance / Fees', icon: 'finance' },
+  { id: 'permission',   label: 'Permissions',   icon: 'permission' },
+  { id: 'dataimport',   label: 'Data Import',   icon: 'dataimport' },
 ];
 
 const bottomItems = [
-  { id: 'settings', label: 'Settings', icon: 'settings' },
   { id: 'logout', label: 'Logout', icon: 'logout', danger: true },
 ];
 
@@ -102,7 +120,7 @@ const SidebarContent = ({ active, setActive, onClose, isMobile }) => {
         <View style={styles.logoIconWrap}>
           <Text style={styles.logoIcon}>⊞</Text>
         </View>
-        <Text style={styles.logoText}>Campus360</Text>
+        <Text style={styles.logoText}>UniVerse</Text>
 
         {/* Close button — only on mobile */}
         {isMobile && (
@@ -139,18 +157,29 @@ const ComitteiSideBar = () => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
 
+  // Provide ThemeContext so Admin screens (Reports, Timetable, etc.) work
+  const themeValue = useMemo(() => ({ isDark: true, colors: DARK_COLORS }), []);
+
   const renderContent = () => {
     switch (active) {
-      case 'dashboard':   return <CommitteeDash />;
-      case 'students':    return <StudentManagementDashboard />;
-      case 'faculty':     return <TeacherManagementDashboard />;
-      case 'parents':     return <ParentManagementDashboard />;
-      case 'attendance':  return <AttendanceDashboard />;
-      default:            return <CommitteeDash />;
+      case 'dashboard':    return <CommitteeDash onNavigate={setActive} />;
+      case 'students':     return <StudentManagementDashboard />;
+      case 'faculty':      return <TeacherManagementDashboard />;
+      case 'parents':      return <ParentManagementDashboard />;
+      case 'attendance':   return <AttendanceDashboard />;
+      case 'permission':   return <PermissionDashboard />;
+      case 'timetable':    return <TimeTableScreen />;
+      case 'messages':     return <SelectionScreen />;
+      case 'assignment':   return <Assignment />;
+      case 'finance':      return <Admissionfees />;
+      
+      case 'dataimport':   return <DataImportCenter />;
+      default:             return <CommitteeDash onNavigate={setActive} />;
     }
   };
 
   return (
+    <ThemeContext.Provider value={themeValue}>
     <View style={styles.mainContainer}>
 
       {/* ---- DESKTOP: persistent sidebar ---- */}
@@ -205,7 +234,7 @@ const ComitteiSideBar = () => {
               <View style={styles.hamburgerLine} />
             </TouchableOpacity>
 
-            <Text style={styles.topBarTitle}>Campus360</Text>
+            <Text style={styles.topBarTitle}>UniVerse</Text>
           </View>
         )}
 
@@ -213,6 +242,7 @@ const ComitteiSideBar = () => {
       </View>
 
     </View>
+    </ThemeContext.Provider>
   );
 };
 

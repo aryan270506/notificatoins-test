@@ -18,8 +18,10 @@ import { NavigationContainer } from '@react-navigation/native';
 const { width, height } = Dimensions.get('window');
 const isWeb = Platform.OS === 'web';
 const isMobile = width < 768;
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { connectSocket } from "../../utils/socket";
 import axiosInstance from "../../Src/Axios";
+
 
 const LoginScreen = ({navigation}) => {
   const [email, setEmail] = useState('');
@@ -31,6 +33,17 @@ const LoginScreen = ({navigation}) => {
 
 
   const handleLogin = async () => {
+  // Hardcoded committee credentials
+  if (email === "committee" && password === "committee123") {
+    await AsyncStorage.setItem('userId', 'committee_user');
+    await AsyncStorage.setItem('userRole', 'committee');
+    await AsyncStorage.setItem('userName', 'Committee Member');
+    await AsyncStorage.setItem('currentScreen', 'ComitteiSideBar');
+    connectSocket({ _id: 'committee_user', name: 'Committee Member', role: 'committee' });
+    navigation.navigate('ComitteiSideBar');
+    return;
+  }
+
   try {
     const response = await axiosInstance.post("/auth/login", {
       email,
@@ -40,31 +53,82 @@ const LoginScreen = ({navigation}) => {
 
     const data = response.data;
 
+    // Store JWT token
+    if (data.token) {
+      await AsyncStorage.setItem('authToken', data.token);
+    }
+
     switch (data.role) {
 
       case "admin":
         console.log("✅ Admin Logged In:", data.user.name);
+        await AsyncStorage.setItem('userId', data.user._id);
+        await AsyncStorage.setItem('userRole', 'admin');
+        await AsyncStorage.setItem('userName', data.user.name);
+        await AsyncStorage.setItem('currentScreen', 'AdminMain');
         connectSocket({ ...data.user, role: data.role });
         navigation.navigate("AdminMain");
         break;
 
       case "teacher":
         console.log("✅ Teacher Logged In:", data.user.name);
+        await AsyncStorage.setItem('teacherId', data.user._id);
+        await AsyncStorage.setItem('userId', data.user._id);
+        await AsyncStorage.setItem('userRole', 'teacher');
+        await AsyncStorage.setItem('userName', data.user.name);
+        await AsyncStorage.setItem('currentScreen', 'TeacherStack');
         connectSocket({ ...data.user, role: data.role });
-        navigation.navigate("TeacherDashboard");
+        navigation.navigate("TeacherStack", { user: data.user });
         break;
 
       case "student":
         console.log("✅ Student Logged In:", data.user.name);
+        await AsyncStorage.setItem('userId', data.user._id);
+        await AsyncStorage.setItem('userRole', 'student');
+        await AsyncStorage.setItem('userName', data.user.name);
+        await AsyncStorage.setItem('currentScreen', 'StudentMain');
+        
+        // ─── Extract batch from roll_no or use student.batch ───────────────────
+        // roll_no format: "FY-A2-36" → batch should be "A2"
+        let batch = data.user.batch;
+        if (!batch && data.user.roll_no) {
+          const parts = data.user.roll_no.split('-');
+          batch = parts[1] || null; // Extract "A2" from "FY-A2-36"
+        }
+        
+        // Store full student data for later use (timetable, subjects, etc.)
+        const studentData = {
+          _id: data.user._id,
+          id: data.user.id,
+          name: data.user.name,
+          email: data.user.email,
+          prn: data.user.prn,
+          roll_no: data.user.roll_no,
+          year: data.user.year,
+          division: data.user.division,
+          batch: batch,
+          branch: data.user.branch,
+          subjects: data.user.subjects || [],
+          lab: data.user.lab || [],
+        };
+        await AsyncStorage.setItem('studentData', JSON.stringify(studentData));
+        console.log('📚 Student data stored:', { year: data.user.year, division: data.user.division, batch });
+        
         connectSocket({ ...data.user, role: data.role });
         navigation.navigate("StudentMain", { user: data.user });
         break;
 
       case "parent":
-        console.log("✅ Parent Logged In:", data.user.name);
-        connectSocket({ ...data.user, role: data.role });
-        navigation.navigate("Parentmaindashboard");
-        break;
+  console.log("✅ Parent Logged In:", data.user.name);
+  await AsyncStorage.setItem('userId',   data.user._id);
+  await AsyncStorage.setItem('parentId', data.user._id);  // ← ADD THIS
+  await AsyncStorage.setItem('userRole', 'parent');
+  await AsyncStorage.setItem('userName', data.user.name);
+  await AsyncStorage.setItem('currentScreen', 'Parentmaindashboard');
+  connectSocket({ ...data.user, role: data.role });
+  navigation.navigate("Parentmaindashboard");
+  break;
+
 
       default:
         alert("Unknown role");
@@ -179,7 +243,7 @@ const LoginScreen = ({navigation}) => {
                 ))}
               </View>
             </View>
-            <Text style={styles.logoText}>Campus360</Text>
+            <Text style={styles.logoText}>UniVerse</Text>
           </View>
 
           <View style={styles.heroContent}>
@@ -202,7 +266,7 @@ const LoginScreen = ({navigation}) => {
           </View>
 
           <Text style={styles.copyright}>
-            © 2026 Campus360 OS. All rights reserved. Built for the future of education.
+            © 2026 UniVerse OS. All rights reserved. Built for the future of education.
           </Text>
         </View>
 
@@ -252,7 +316,7 @@ const LoginScreen = ({navigation}) => {
               ))}
             </View>
           </View>
-          <Text style={styles.mobileLogoText}>Campus360</Text>
+          <Text style={styles.mobileLogoText}>UniVerse</Text>
         </View>
         {renderLoginCard()}
       </ScrollView>

@@ -1,4 +1,4 @@
-import { io } from "socket.io-client/dist/socket.io";
+import { io } from "socket.io-client";
 
 import axiosInstance from "../Src/Axios";
 
@@ -7,8 +7,8 @@ let socket = null;
 export const connectSocket = (user) => {
   if (!socket) {
     // ✅ Extract socket URL from axios baseURL - remove /api path
-    const baseURL = axiosInstance.defaults.baseURL; // "http://192.168.137.1:5001/api"
-    const socketURL = baseURL.replace(/\/api$/, ""); // Remove trailing /api to get "http://192.168.137.1:5001"
+    const baseURL = axiosInstance.defaults.baseURL; // "http://192.168.137.1:5000/api"
+    const socketURL = baseURL.replace(/\/api$/, ""); // Remove trailing /api to get "http://192.168.137.1:5000"
     
     socket = io(socketURL, {
       transports: ["websocket", "polling"], // important for React Native - added fallback

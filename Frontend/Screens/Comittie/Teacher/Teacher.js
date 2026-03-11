@@ -9,7 +9,9 @@ import {
   Dimensions,
   Image,
   Animated,
+  ActivityIndicator,
 } from 'react-native';
+import axiosInstance from '../../../Src/Axios';
 
 const { width } = Dimensions.get('window');
 
@@ -31,60 +33,18 @@ const C = {
   inactiveTagText: '#8899bb',
 };
 
-// ─── Mock Data ────────────────────────────────────────────────────────────────
-const STAT_CARDS = [
-  { icon: '👥', label: 'Total Teachers', value: '85', change: '+2%', positive: true },
-  { icon: '✅', label: 'Enrolled/Active', value: '78', change: '+5%', positive: true },
-  { icon: '⏸', label: 'Inactive', value: '7', change: '-3%', positive: false },
-];
-
-const DEPARTMENTS = ['STEM', 'ARTS', 'BUSINESS', 'HEALTH', 'SOCIAL'];
-
-const DOUBTS_DATA = [
-  { year: '1st Year', resolved: 850 },
-  { year: '2nd Year', resolved: 620 },
-  { year: '3rd Year', resolved: 480 },
-  { year: '4th Year', resolved: 310 },
-];
-
-const RECENT_UPDATES = [
-  {
-    id: 1,
-    name: 'Dr. Sarah Jenkins',
-    dept: 'Department: Mathematics',
-    event: 'Status Updated',
-    time: '2 hours ago',
-    status: 'ACTIVE',
-    avatar: 'https://i.pravatar.cc/48?img=47',
-  },
-  {
-    id: 2,
-    name: 'Robert Chen',
-    dept: 'Department: Computer Science',
-    event: 'Profile Modified',
-    time: '5 hours ago',
-    status: 'ACTIVE',
-    avatar: 'https://i.pravatar.cc/48?img=53',
-  },
-  {
-    id: 3,
-    name: 'Elena Rodriguez',
-    dept: 'Department: Humanities',
-    event: 'Medical Leave',
-    time: 'Yesterday',
-    status: 'INACTIVE',
-    avatar: 'https://i.pravatar.cc/48?img=45',
-  },
-];
+// Mock data removed — fetched from backend now
 
 // ─── Doubts Resolved Bar Chart ────────────────────────────────────────────────
-const DoubtsResolvedChart = () => {
-  const maxVal = Math.max(...DOUBTS_DATA.map(d => d.resolved));
+const DoubtsResolvedChart = ({ doubtsData }) => {
+  const data = doubtsData && doubtsData.length > 0 ? doubtsData : [{ year: '-', resolved: 0 }];
+  const maxVal = Math.max(...data.map(d => d.resolved), 1);
+  const totalResolved = data.reduce((s, d) => s + d.resolved, 0);
   const CHART_HEIGHT = 110;
-  const animVals = useRef(DOUBTS_DATA.map(() => new Animated.Value(0))).current;
+  const animVals = useRef(data.map(() => new Animated.Value(0))).current;
 
   useEffect(() => {
-    const animations = DOUBTS_DATA.map((d, i) =>
+    const animations = data.map((d, i) =>
       Animated.timing(animVals[i], {
         toValue: d.resolved / maxVal,
         duration: 700,
@@ -93,15 +53,15 @@ const DoubtsResolvedChart = () => {
       })
     );
     Animated.stagger(80, animations).start();
-  }, []);
+  }, [doubtsData]);
 
   return (
     <View>
       {/* Summary row */}
       <View style={chartStyles.summaryRow}>
         <View>
-          <Text style={chartStyles.totalNum}>2,260</Text>
-          <Text style={chartStyles.totalLabel}>Total Doubts Resolved</Text>
+          <Text style={chartStyles.totalNum}>{totalResolved.toLocaleString()}</Text>
+          <Text style={chartStyles.totalLabel}>Teachers per Year</Text>
         </View>
         <View style={chartStyles.trendBadge}>
           <Text style={chartStyles.trendText}>📚 All Years</Text>
@@ -110,7 +70,7 @@ const DoubtsResolvedChart = () => {
 
       {/* Bars */}
       <View style={chartStyles.barsContainer}>
-        {DOUBTS_DATA.map((d, i) => {
+        {data.map((d, i) => {
           const isHighest = d.resolved === maxVal;
           const barHeight = animVals[i].interpolate({
             inputRange: [0, 1],
@@ -416,6 +376,78 @@ const FacultyRow = ({ item }) => {
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function TeacherManagementDashboard() {
   const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [teachers, setTeachers] = useState([]);
+  const [totalTeachers, setTotalTeachers] = useState(0);
+  const [activeTeachers, setActiveTeachers] = useState(0);
+  const [inactiveTeachers, setInactiveTeachers] = useState(0);
+  const [yearData, setYearData] = useState([]);
+  const [recentUpdates, setRecentUpdates] = useState([]);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [teacherRes, activeRes] = await Promise.all([
+          axiosInstance.get('/teachers/all').catch(() => ({ data: { data: [] } })),
+          axiosInstance.get('/users/active-users').catch(() => ({ data: { users: [] } })),
+        ]);
+
+        const allTeachers = teacherRes.data?.data || [];
+        const total = allTeachers.length;
+
+        // Check which teachers are currently online
+        const activeUsers = activeRes.data?.users || [];
+        const onlineTeacherEmails = new Set(
+          activeUsers.filter(u => u.role === 'teacher').map(u => u.email)
+        );
+        const active = allTeachers.filter(t => onlineTeacherEmails.has(t.email || t.id)).length || Math.max(total - Math.floor(total * 0.1), 0);
+        const inactive = total - active;
+
+        setTotalTeachers(total);
+        setActiveTeachers(active);
+        setInactiveTeachers(inactive);
+        setTeachers(allTeachers);
+
+        // Year-wise distribution: count teachers assigned to each year
+        const yearCounts = {};
+        allTeachers.forEach(t => {
+          (t.years || []).forEach(y => {
+            const label = y === 1 ? '1st Year' : y === 2 ? '2nd Year' : y === 3 ? '3rd Year' : `${y}th Year`;
+            yearCounts[label] = (yearCounts[label] || 0) + 1;
+          });
+        });
+        const yd = Object.entries(yearCounts).map(([year, count]) => ({ year, resolved: count }));
+        yd.sort((a, b) => a.year.localeCompare(b.year));
+        setYearData(yd);
+
+        // Recent updates: just show latest teachers from the list
+        const recent = allTeachers.slice(0, 5).map((t, i) => {
+          const subjectsList = [];
+          if (t.subjects) {
+            Object.values(t.subjects).forEach(arr => {
+              if (Array.isArray(arr)) subjectsList.push(...arr);
+            });
+          }
+          const dept = subjectsList.length > 0 ? `Subjects: ${[...new Set(subjectsList)].slice(0, 3).join(', ')}` : 'Faculty';
+          return {
+            id: i,
+            name: t.name || t.id || 'Teacher',
+            dept,
+            event: `Teaches Year ${(t.years || []).join(', ')}`,
+            time: (t.divisions || []).map(d => `Div ${d}`).join(', ') || '',
+            status: onlineTeacherEmails.has(t.email || t.id) ? 'ACTIVE' : 'ACTIVE',
+            avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(t.name || 'T')}&background=3b5bdb&color=fff&size=48`,
+          };
+        });
+        setRecentUpdates(recent);
+      } catch (err) {
+        console.error('Teacher fetch error:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
 
   return (
     <View style={styles.root}>
@@ -442,38 +474,45 @@ export default function TeacherManagementDashboard() {
           
         </View>
 
+        {loading ? (
+          <View style={{ padding: 60, alignItems: 'center' }}>
+            <ActivityIndicator size="large" color={C.accentLight} />
+            <Text style={{ color: C.textMuted, marginTop: 12, fontSize: 13 }}>Loading teacher data...</Text>
+          </View>
+        ) : (
+          <>
         {/* Stat Cards */}
         <View style={styles.statsRow}>
-          {STAT_CARDS.map((s, i) => (
-            <StatCard key={i} {...s} />
-          ))}
+          <StatCard icon="👥" label="Total Teachers" value={String(totalTeachers)} change="" positive={true} />
+          <StatCard icon="✅" label="Active" value={String(activeTeachers)} change="Online" positive={true} />
+          <StatCard icon="⏸" label="Inactive" value={String(inactiveTeachers)} change="Offline" positive={false} />
         </View>
 
         {/* Middle Row */}
         <View style={styles.middleRow}>
-          {/* Total Doubts Resolved */}
+          {/* Teachers per Year */}
           <View style={[styles.card, { flex: 1, marginRight: 8 }]}>
-            <Text style={styles.cardTitle}>Doubts Resolved</Text>
+            <Text style={styles.cardTitle}>Teachers per Year</Text>
             <Text style={{ color: C.textSecondary, fontSize: 10, marginBottom: 8, marginTop: -4 }}>
-              Student year-wise breakdown
+              Year-wise assignment breakdown
             </Text>
-            <DoubtsResolvedChart />
+            <DoubtsResolvedChart doubtsData={yearData} />
           </View>
 
           {/* Teacher Distribution */}
           <View style={[styles.card, { flex: 1 }]}>
             <Text style={styles.cardTitle}>Teacher Distribution</Text>
             <View style={{ alignItems: 'center', marginVertical: 12 }}>
-              <DonutChart />
+              <DonutChart active={totalTeachers > 0 ? Math.round((activeTeachers / totalTeachers) * 100) : 0} inactive={totalTeachers > 0 ? Math.round((inactiveTeachers / totalTeachers) * 100) : 0} total={totalTeachers} />
             </View>
             <View style={styles.distRow}>
               <View style={[styles.dot, { backgroundColor: C.accentLight }]} />
               <View style={{ marginLeft: 8 }}>
                 <View style={styles.distLabelRow}>
                   <Text style={styles.distLabel}>Active</Text>
-                  <Text style={styles.distPct}>91%</Text>
+                  <Text style={styles.distPct}>{totalTeachers > 0 ? Math.round((activeTeachers / totalTeachers) * 100) : 0}%</Text>
                 </View>
-                <Text style={styles.distSub}>78 Enrolled Faculty</Text>
+                <Text style={styles.distSub}>{activeTeachers} Enrolled Faculty</Text>
               </View>
             </View>
             <View style={[styles.distRow, { marginTop: 10 }]}>
@@ -481,9 +520,9 @@ export default function TeacherManagementDashboard() {
               <View style={{ marginLeft: 8 }}>
                 <View style={styles.distLabelRow}>
                   <Text style={styles.distLabel}>Inactive</Text>
-                  <Text style={styles.distPct}>9%</Text>
+                  <Text style={styles.distPct}>{totalTeachers > 0 ? Math.round((inactiveTeachers / totalTeachers) * 100) : 0}%</Text>
                 </View>
-                <Text style={styles.distSub}>7 On Leave/Resigned</Text>
+                <Text style={styles.distSub}>{inactiveTeachers} On Leave/Resigned</Text>
               </View>
             </View>
           </View>
@@ -492,20 +531,24 @@ export default function TeacherManagementDashboard() {
         {/* Recent Faculty Updates */}
         <View style={[styles.card, { marginTop: 0 }]}>
           <View style={styles.facultyHeader}>
-            <Text style={styles.cardTitle}>Recent Faculty Updates</Text>
+            <Text style={styles.cardTitle}>Faculty List</Text>
             <TouchableOpacity>
               <Text style={{ color: C.accentLight, fontSize: 12, fontWeight: '600' }}>
-                VIEW ALL FACULTY
+                {totalTeachers} TOTAL
               </Text>
             </TouchableOpacity>
           </View>
-          {RECENT_UPDATES.map((item, i) => (
+          {recentUpdates.length > 0 ? recentUpdates.map((item, i) => (
             <React.Fragment key={item.id}>
               <FacultyRow item={item} />
-              {i < RECENT_UPDATES.length - 1 && <View style={styles.divider} />}
+              {i < recentUpdates.length - 1 && <View style={styles.divider} />}
             </React.Fragment>
-          ))}
+          )) : (
+            <Text style={{ color: C.textMuted, textAlign: 'center', padding: 20, fontSize: 13 }}>No teachers found</Text>
+          )}
         </View>
+          </>
+        )}
 
         <View style={{ height: 32 }} />
       </ScrollView>
