@@ -26,6 +26,51 @@ const buildSecurityFilter = (query) => {
   return filter;
 };
 
+// ─────────────────────────────────────────────────────────────
+// GET DASHBOARD STATISTICS
+// GET /api/admins/dashboard/stats
+// ─────────────────────────────────────────────────────────────
+router.get("/dashboard/stats", async (req, res) => {
+  try {
+    const Student = require("../Models/Student");
+    const Teacher = require("../Models/Teacher");
+    const Parent = require("../Models/Parent");
+
+    // Get counts in parallel
+    const [studentsCount, teachersCount, adminsCount, parentsCount] = await Promise.all([
+      Student.countDocuments(),
+      Teacher.countDocuments(),
+      Admin.countDocuments(),
+      Parent.countDocuments(),
+    ]);
+
+    // Calculate total active users (students + teachers + admins + parents)
+    const totalUsers = studentsCount + teachersCount + adminsCount + parentsCount;
+
+    // Calculate staff (teachers + admins)
+    const staffCount = teachersCount + adminsCount;
+
+    res.json({
+      success: true,
+      data: {
+        totalUsers,
+        students: studentsCount,
+        faculty: teachersCount,
+        staff: staffCount,
+        admins: adminsCount,
+        parents: parentsCount,
+      },
+    });
+  } catch (error) {
+    console.error("GET /admins/dashboard/stats error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch dashboard statistics",
+      error: error.message,
+    });
+  }
+});
+
 // GET ALL ADMINS
 router.get("/", async (req, res) => {
   try {

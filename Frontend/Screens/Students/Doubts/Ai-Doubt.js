@@ -188,16 +188,8 @@ function Sidebar({ anim, onClose, onSelectRecent, recents, loadingRecents, C }) 
       </ScrollView>
 
       <View style={[sb.userBar, { borderTopColor: C.border }]}>
-        <View style={[sb.avatar, { backgroundColor: C.accent }]}>
-          <Text style={[sb.avatarTxt, { color: C.bg }]}>AJ</Text>
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={[sb.userName, { color: C.text }]}>Alex Johnson</Text>
-          <Text style={[sb.userRole, { color: C.muted }]}>PREMIUM USER</Text>
-        </View>
-        <TouchableOpacity>
-          <Text style={{ color: C.muted, fontSize: 18 }}>⚙</Text>
-        </TouchableOpacity>
+        
+        
       </View>
     </Animated.View>
   );
@@ -382,11 +374,7 @@ const handleSolve = useCallback(async () => {
               <Text style={{ color: C.blue }}>AI Doubt Resolver</Text>
             </Text>
           )}
-          {onThemeToggle && (
-            <TouchableOpacity style={[n.themeBtn, { borderColor: C.border }]} onPress={onThemeToggle}>
-              <Text style={{ fontSize: 16 }}>{C.moonIcon}</Text>
-            </TouchableOpacity>
-          )}
+        
         </View>
       </View>
 

@@ -9,13 +9,12 @@
  * e.g. "http://192.168.137.4:5000/api"
  */
 
-import React, { useState, useCallback, useContext, useRef } from 'react';
+import React, { useState, useCallback, useContext, useEffect } from 'react';
 import { ThemeContext } from '../dashboard/AdminDashboard';
 import axiosInstance from '../../../Src/Axios';
 
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
-import * as XLSX from 'xlsx';
 
 import {
   View,
@@ -25,7 +24,6 @@ import {
   StyleSheet,
   SafeAreaView,
   StatusBar,
-  TextInput,
   Modal,
   Alert,
   Pressable,
@@ -38,38 +36,7 @@ import {
 const TABLET_BP = 600;
 
 // ─── Mock Data ────────────────────────────────────────────────────────────────
-const UPLOAD_HISTORY_INIT = [
-  {
-    id: 1,
-    fileName: 'fall_enrollment_v2.csv',
-    targetGroup: 'Students',
-    status: 'Success',
-    date: 'Oct 24, 2023, 14:32',
-    adminName: 'Dr. Harrison',
-    initials: 'DH',
-    avatarColor: '#1a3a5c',
-  },
-  {
-    id: 2,
-    fileName: 'faculty_profiles_new.xlsx',
-    targetGroup: 'Faculty',
-    status: 'Failed',
-    date: 'Oct 23, 2023, 09:15',
-    adminName: 'Sarah Miller',
-    initials: 'SM',
-    avatarColor: '#c2440a',
-  },
-  {
-    id: 3,
-    fileName: 'parent_contacts_export.csv',
-    targetGroup: 'Parents',
-    status: 'Success',
-    date: 'Oct 22, 2023, 16:45',
-    adminName: 'Dr. Harrison',
-    initials: 'DH',
-    avatarColor: '#1a3a5c',
-  },
-];
+const UPLOAD_HISTORY_INIT = [];
 
 const IMPORT_SOURCES = [
   {
@@ -79,7 +46,7 @@ const IMPORT_SOURCES = [
     iconBg: '#1a2a4a',
     iconAccent: '#4a8aff',
     status: 'Ready for upload',
-    hint: 'Required columns: name, email, password, id, prn, roll_no, branch, division, year. Optional: subjects, lab. Accepts CSV, XLSX, or JSON (array of objects or { students: [...] }).',
+    hint: 'Required fields: name, email, password, id, prn, roll_no, branch, division, year. Optional: subjects[], lab[], batch.',
   },
   {
     id: 'teacher',
@@ -88,7 +55,7 @@ const IMPORT_SOURCES = [
     iconBg: '#2a1a4a',
     iconAccent: '#a855f7',
     status: 'Ready for upload',
-    hint: 'Faculty profiles require valid department IDs and employee certification numbers.',
+    hint: 'Required fields: id, name, password. Optional: years[], divisions[], course_codes, subjects.',
   },
   {
     id: 'parent',
@@ -97,7 +64,7 @@ const IMPORT_SOURCES = [
     iconBg: '#2a1a0a',
     iconAccent: '#f97316',
     status: 'Ready for upload',
-    hint: 'Map parents to students using the StudentID field to enable communication features.',
+    hint: 'Required fields: id, name, email, password. Link to student via prn or roll_no.',
   },
   {
     id: 'admin',
@@ -106,16 +73,145 @@ const IMPORT_SOURCES = [
     iconBg: '#0e2a1a',
     iconAccent: '#10b981',
     status: 'Ready for upload',
-    hint: 'Required columns: name, email, password, role, department. Admins will have access to the dashboard based on their assigned role permissions.',
+    hint: 'Required fields: id, email, password, branch.',
   },
 ];
 
-const NOTIFICATIONS = [
-  { id: 1, icon: '✅', title: 'Upload Complete',   msg: 'fall_enrollment_v2.csv processed successfully.',      time: '2m ago',  unread: true  },
-  { id: 2, icon: '❌', title: 'Upload Failed',     msg: 'faculty_profiles_new.xlsx — invalid department IDs.', time: '1h ago',  unread: true  },
-  { id: 3, icon: '⚙️', title: 'Queue Processing', msg: 'Process queue started by admin_01.',                   time: '3h ago',  unread: false },
-  { id: 4, icon: '📋', title: 'Template Updated', msg: 'Student CSV template v2 is now available.',            time: '1d ago',  unread: false },
-];
+// ─── JSON Templates ────────────────────────────────────────────────────────────
+const JSON_TEMPLATES = {
+  student: [
+    {
+      name: 'Aditya Ambaji Bailkar',
+      email: 'aditya.bailkar@gmail.com',
+      password: 'CSE@123',
+      id: '252141001',
+      prn: 'PRN252141001',
+      roll_no: 'FY-A1-01',
+      branch: 'Computer Science',
+      division: 'A',
+      year: '1',
+      subjects: [
+        'Calculus and Probability',
+        'Modern Physics',
+        'Data Communication and Computer Networks',
+        'Design Thinking',
+        'AICSE',
+        'Python Programming',
+      ],
+      lab: [
+        'Modern Physics Lab',
+        'Design Thinking Lab',
+        'Web Development Lab',
+        'Python Programing Lab',
+      ],
+    },
+  ],
+  teacher: [
+    {
+      id: 'Priyanka Patil',
+      name: 'Mrs. Priyanka Patil',
+      password: '1201',
+      divisions: ['A'],
+      subjects: { year1: ['Calculus and Probability'] },
+      course_codes: { year1: ['USTBS203'] },
+    },
+  ],
+  parent: [
+    {
+      id: '252141001',
+      name: 'Aditya Ambaji Bailkar',
+      email: 'aditya.bailkar@gmail.com',
+      password: 'Pass@123',
+      branch: 'Computer Science',
+      division: 'A',
+      year: '1',
+      prn: 'PRN252141001',
+      roll_no: 'FY-A1-01',
+      subjects: [
+        'Calculus and Probability',
+        'Modern Physics',
+        'Data Communication and Computer Networks',
+        'Design Thinking',
+        'AICSE',
+        'Python Programming',
+      ],
+      lab: [
+        'Modern Physics Lab',
+        'Design Thinking Lab',
+        'Web Development Lab',
+        'Python Programing Lab',
+      ],
+    },
+  ],
+  admin: [
+    {
+      id: 'ADMIN001',
+      email: 'admin.comps1@college.edu',
+      password: 'admin123',
+      branch: 'Computer Science',
+    },
+  ],
+};
+
+// ─── Cross-platform JSON template download ─────────────────────────────────────
+// Web  → creates a hidden <a download> link and clicks it (instant browser download)
+// iOS/Android → writes to documentDirectory then opens expo-sharing share sheet
+async function downloadTemplate(sourceId, sourceTitle) {
+  try {
+    const template = JSON_TEMPLATES[sourceId];
+    if (!template) {
+      Alert.alert('Error', `No template found for ${sourceTitle}.`);
+      return;
+    }
+
+    const json     = JSON.stringify(template, null, 2);
+    const fileName = `${sourceId}_template.json`;
+
+    // ── Web ──────────────────────────────────────────────────────────────────
+    if (Platform.OS === 'web') {
+      const blob = new Blob([json], { type: 'application/json' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    // ── iOS / Android ─────────────────────────────────────────────────────────
+    const savePath = FileSystem.documentDirectory + fileName;
+    await FileSystem.writeAsStringAsync(savePath, json, {
+      encoding: FileSystem.EncodingType.UTF8,
+    });
+
+    // Try expo-sharing (opens native share / "Save to Files" sheet)
+    try {
+      const Sharing = await import('expo-sharing');
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(savePath, {
+          mimeType:    'application/json',
+          dialogTitle: `Save ${fileName}`,
+          UTI:         'public.json',
+        });
+        return;
+      }
+    } catch (_) { /* expo-sharing not installed */ }
+
+    // Fallback: saved to Documents, tell user where
+    Alert.alert(
+      '✅ Template Saved',
+      `${fileName} saved to app Documents.\n\nFor a "Save to Files" dialog, install expo-sharing:\n  npx expo install expo-sharing`,
+      [{ text: 'OK' }],
+    );
+  } catch (err) {
+    console.error('downloadTemplate error:', err);
+    Alert.alert('Download Failed', err.message || 'Could not write template file.');
+  }
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const statusColor = (s) =>
@@ -137,8 +233,8 @@ function base64ToUint8Array(base64) {
   return bytes;
 }
 
-// ─── Normalise a single raw row into a student object ─────────────────────────
-function normaliseRow(row) {
+// ─── Normalise a raw JSON object per entity type ──────────────────────────────
+function normaliseStudent(row) {
   return {
     name:     String(row.name     || '').trim(),
     email:    String(row.email    || '').trim(),
@@ -149,79 +245,47 @@ function normaliseRow(row) {
     branch:   String(row.branch   || '').trim(),
     division: String(row.division || '').trim(),
     year:     String(row.year     || '').trim(),
+    batch:    row.batch ? String(row.batch).trim() : null,
     subjects: Array.isArray(row.subjects)
       ? row.subjects.map((s) => String(s).trim()).filter(Boolean)
-      : row.subjects
-        ? String(row.subjects).split(',').map((s) => s.trim()).filter(Boolean)
-        : [],
+      : row.subjects ? String(row.subjects).split(',').map((s) => s.trim()).filter(Boolean) : [],
     lab: Array.isArray(row.lab)
       ? row.lab.map((s) => String(s).trim()).filter(Boolean)
-      : row.lab
-        ? String(row.lab).split(',').map((s) => s.trim()).filter(Boolean)
-        : [],
+      : row.lab ? String(row.lab).split(',').map((s) => s.trim()).filter(Boolean) : [],
   };
 }
 
-// ─── Parse workbook bytes (CSV / XLSX) into student objects ───────────────────
-function parseWorkbook(data) {
-  const workbook = XLSX.read(data, { type: 'array' });
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-  if (rows.length === 0) throw new Error('File is empty or has no data rows.');
-  return rows.map(normaliseRow);
-}
-const handleTeacherUpload = async () => {
-  const formData = new FormData();
+// For teacher/parent/admin we send the raw object as-is (backend handles schema)
+function normaliseRaw(row) { return row; }
 
-  formData.append("file", {
-    uri: selectedFile.uri,
-    name: selectedFile.name,
-    type: selectedFile.mimeType,
-  });
-
-  try {
-    const response = await axiosInstance.post("/teachers/upload", formData, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
-    });
-
-    const data = response.data;
-    alert(data.message);
-  } catch (error) {
-    console.log(error);
-    alert("Upload failed");
-  }
-};
-// ─── Parse JSON text into student objects ─────────────────────────────────────
-function parseJSON(text) {
+// ─── Parse JSON text into an array of objects ─────────────────────────────────
+function parseJSON(text, sourceId) {
   let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    throw new Error('Invalid JSON — could not parse file.');
-  }
-  // Accept either a plain array or { students: [...] } / { data: [...] }
+  try { parsed = JSON.parse(text); } catch { throw new Error('Invalid JSON — could not parse file.'); }
+
   const arr = Array.isArray(parsed)
     ? parsed
-    : Array.isArray(parsed.students)
-      ? parsed.students
-      : Array.isArray(parsed.data)
-        ? parsed.data
-        : null;
-  if (!arr) throw new Error('JSON must be an array of student objects (or { students: [...] }).');
+    : Array.isArray(parsed.students) ? parsed.students
+    : Array.isArray(parsed.teachers) ? parsed.teachers
+    : Array.isArray(parsed.parents)  ? parsed.parents
+    : Array.isArray(parsed.admins)   ? parsed.admins
+    : Array.isArray(parsed.data)     ? parsed.data
+    : null;
+
+  if (!arr) throw new Error('JSON must be an array or { students/teachers/parents/admins: [...] }');
   if (arr.length === 0) throw new Error('JSON array is empty.');
-  return arr.map(normaliseRow);
+
+  return sourceId === 'student' ? arr.map(normaliseStudent) : arr.map(normaliseRaw);
 }
 
-// ─── Cross-platform file picker + parser ──────────────────────────────────────
-async function pickAndParseFile() {
+// ─── Cross-platform JSON file picker + parser ─────────────────────────────────
+async function pickAndParseFile(sourceId) {
   // ── WEB ───────────────────────────────────────────────────────────────────
   if (Platform.OS === 'web') {
     return new Promise((resolve, reject) => {
       const input = document.createElement('input');
       input.type = 'file';
-      input.accept = '.csv,.xlsx,.xls,.json';
+      input.accept = '.json';
 
       let resolved = false;
       const onFocus = () => {
@@ -235,30 +299,19 @@ async function pickAndParseFile() {
         window.removeEventListener('focus', onFocus);
         const file = e.target.files?.[0];
         if (!file) return reject(new Error('No file selected.'));
+        if (!file.name.toLowerCase().endsWith('.json')) return reject(new Error('Please select a .json file.'));
 
         const sizeLabel = file.size > 1048576
           ? `${(file.size / 1048576).toFixed(2)} MB`
           : `${(file.size / 1024).toFixed(1)} KB`;
 
-        const isJSON = file.name.toLowerCase().endsWith('.json');
-
         const reader = new FileReader();
-
-        if (isJSON) {
-          reader.onload = (ev) => {
-            try { resolve({ name: file.name, size: sizeLabel, rows: parseJSON(ev.target.result) }); }
-            catch (err) { reject(err); }
-          };
-          reader.onerror = () => reject(new Error('Could not read file.'));
-          reader.readAsText(file);
-        } else {
-          reader.onload = (ev) => {
-            try { resolve({ name: file.name, size: sizeLabel, rows: parseWorkbook(new Uint8Array(ev.target.result)) }); }
-            catch (err) { reject(err); }
-          };
-          reader.onerror = () => reject(new Error('Could not read file.'));
-          reader.readAsArrayBuffer(file);
-        }
+        reader.onload = (ev) => {
+          try { resolve({ name: file.name, size: sizeLabel, rows: parseJSON(ev.target.result, sourceId) }); }
+          catch (err) { reject(err); }
+        };
+        reader.onerror = () => reject(new Error('Could not read file.'));
+        reader.readAsText(file);
       };
       input.click();
     });
@@ -266,38 +319,28 @@ async function pickAndParseFile() {
 
   // ── NATIVE (Expo) ─────────────────────────────────────────────────────────
   const result = await DocumentPicker.getDocumentAsync({
-    type: ['*/*'],
+    type: ['application/json', '*/*'],
     copyToCacheDirectory: true,
   });
 
-  if (result.canceled || !result.assets?.[0]) {
-    throw new Error('CANCELLED');
-  }
+  if (result.canceled || !result.assets?.[0]) throw new Error('CANCELLED');
 
   const asset = result.assets[0];
   const name  = asset.name ?? asset.uri.split('/').pop();
-  const size  = asset.size
+
+  if (!name.toLowerCase().endsWith('.json')) throw new Error('Please select a .json file.');
+
+  const size = asset.size
     ? asset.size > 1048576
       ? `${(asset.size / 1048576).toFixed(2)} MB`
       : `${(asset.size / 1024).toFixed(1)} KB`
     : 'Unknown size';
 
-  const isJSON = name.toLowerCase().endsWith('.json');
-  let rows;
+  const text = await FileSystem.readAsStringAsync(asset.uri, {
+    encoding: FileSystem.EncodingType.UTF8,
+  });
 
-  if (isJSON) {
-    const text = await FileSystem.readAsStringAsync(asset.uri, {
-      encoding: FileSystem.EncodingType.UTF8,
-    });
-    rows = parseJSON(text);
-  } else {
-    const base64 = await FileSystem.readAsStringAsync(asset.uri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-    rows = parseWorkbook(base64ToUint8Array(base64));
-  }
-
-  return { name, size, rows };
+  return { name, size, rows: parseJSON(text, sourceId) };
 }
 
 // ─── Row Action Menu ──────────────────────────────────────────────────────────
@@ -355,58 +398,189 @@ function RowActionMenu({ visible, row, onClose, onRetry, onDelete, onView }) {
   );
 }
 
-// ─── Notification Panel ───────────────────────────────────────────────────────
-function NotificationPanel({ visible, onClose }) {
+// ─── Student Detail Sheet ─────────────────────────────────────────────────────
+// Shows every field of one student record, matching the DB structure exactly
+function StudentDetailSheet({ visible, student, onClose, onBack }) {
   const { colors } = useContext(ThemeContext);
-  const [notes, setNotes] = useState(NOTIFICATIONS);
-  const markAllRead = () => setNotes((n) => n.map((x) => ({ ...x, unread: false })));
-  const unreadCount = notes.filter((n) => n.unread).length;
+  if (!student) return null;
+
+  const sid = typeof student._id === 'object' ? (student._id?.$oid || JSON.stringify(student._id)) : String(student._id || '');
+
+  const fields = [
+    { key: '_id',       label: 'MongoDB _id',  val: sid },
+    { key: 'id',        label: 'Student ID',   val: student.id },
+    { key: 'name',      label: 'Name',         val: student.name },
+    { key: 'email',     label: 'Email',        val: student.email },
+    { key: 'password',  label: 'Password Hash',val: student.password },
+    { key: 'prn',       label: 'PRN',          val: student.prn },
+    { key: 'roll_no',   label: 'Roll No',      val: student.roll_no },
+    { key: 'branch',    label: 'Branch',       val: student.branch },
+    { key: 'division',  label: 'Division',     val: student.division },
+    { key: 'year',      label: 'Year',         val: student.year },
+    { key: 'batch',     label: 'Batch',        val: student.batch },
+    { key: 'subjects',  label: 'Subjects',     val: Array.isArray(student.subjects) && student.subjects.length ? student.subjects : null },
+    { key: 'lab',       label: 'Lab',          val: Array.isArray(student.lab) && student.lab.length ? student.lab : null },
+    { key: '__v',       label: '__v',          val: student.__v ?? student['__v'] },
+    { key: 'createdAt', label: 'Created At',   val: student.createdAt?.$date || student.createdAt },
+    { key: 'updatedAt', label: 'Updated At',   val: student.updatedAt?.$date || student.updatedAt },
+  ].filter(f => f.val !== undefined && f.val !== null && f.val !== '');
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={np.backdrop} onPress={onClose}>
-        <Pressable style={[np.panel, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => {}}>
-          <View style={[np.handle, { backgroundColor: colors.border }]} />
-          <View style={np.header}>
-            <Text style={[np.title, { color: colors.textPrim }]}>Notifications</Text>
-            {unreadCount > 0 && (
-              <View style={np.badge}><Text style={np.badgeTxt}>{unreadCount}</Text></View>
-            )}
-            <View style={{ flex: 1 }} />
-            <TouchableOpacity onPress={markAllRead} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={[np.markRead, { color: colors.accentBlue }]}>Mark all read</Text>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onBack}>
+      <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.80)', justifyContent: 'flex-end' }} onPress={onBack}>
+        <Pressable style={{ borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, borderBottomWidth: 0, maxHeight: '90%', backgroundColor: colors.surface, borderColor: colors.border }} onPress={() => {}}>
+          {/* Handle */}
+          <View style={{ width: 40, height: 4, borderRadius: 2, alignSelf: 'center', marginTop: 12, backgroundColor: colors.border }} />
+          {/* Header */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingTop: 12, paddingBottom: 12 }}>
+            <TouchableOpacity onPress={onBack} style={{ marginRight: 10, padding: 4 }} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} activeOpacity={0.6}>
+              <Text style={{ fontSize: 22, color: colors.accentBlue }}>‹</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={onClose} style={[np.closeBtn, { backgroundColor: colors.surfaceAlt }]} activeOpacity={0.7}>
-              <Text style={[np.closeTxt, { color: colors.textSec }]}>✕</Text>
+            <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: '#1a2a4a', alignItems: 'center', justifyContent: 'center', marginRight: 10 }}>
+              <Text style={{ fontSize: 18 }}>🎓</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 15, fontWeight: '700', color: colors.textPrim }} numberOfLines={1}>{student.name}</Text>
+              <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 1 }}>{student.roll_no}  ·  Year {student.year}  ·  Div {student.division}</Text>
+            </View>
+            <TouchableOpacity onPress={onClose} style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' }} activeOpacity={0.7}>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: colors.textSec }}>✕</Text>
             </TouchableOpacity>
           </View>
-          <View style={[np.divider, { backgroundColor: colors.border }]} />
-          <ScrollView showsVerticalScrollIndicator={false}>
-            {notes.map((n, idx) => (
-              <TouchableOpacity
-                key={n.id}
-                style={[
-                  np.item,
-                  { backgroundColor: colors.surface },
-                  n.unread && { backgroundColor: colors.surfaceAlt },
-                  idx < notes.length - 1 && [np.itemBorder, { borderBottomColor: colors.border }],
-                ]}
-                onPress={() => setNotes((prev) => prev.map((x) => x.id === n.id ? { ...x, unread: false } : x))}
-                activeOpacity={0.75}>
-                <Text style={np.itemIcon}>{n.icon}</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={[np.itemTitle, { color: colors.textSec }, n.unread && { color: colors.textPrim, fontWeight: '700' }]}>{n.title}</Text>
-                  <Text style={[np.itemMsg, { color: colors.textMuted }]} numberOfLines={2}>{n.msg}</Text>
-                  <Text style={[np.itemTime, { color: colors.textMuted }]}>{n.time}</Text>
-                </View>
-                {n.unread && <View style={[np.dot, { backgroundColor: colors.accentBlue }]} />}
-              </TouchableOpacity>
+          <View style={{ height: 1, backgroundColor: colors.border }} />
+          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+            {fields.map(({ key, label, val }) => (
+              <View key={key} style={{ marginBottom: 12 }}>
+                <Text style={{ fontSize: 10, fontWeight: '700', letterSpacing: 0.6, color: colors.textMuted, marginBottom: 4 }}>
+                  {label.toUpperCase()}
+                </Text>
+                {Array.isArray(val) ? (
+                  <View style={{ backgroundColor: colors.bg, borderRadius: 10, borderWidth: 1, borderColor: colors.border, padding: 12 }}>
+                    {val.map((item, i) => (
+                      <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: i < val.length - 1 ? 8 : 0 }}>
+                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#4a8aff', marginTop: 6, marginRight: 8 }} />
+                        <Text style={{ fontSize: 13, color: colors.textPrim, flex: 1, lineHeight: 20 }}>{item}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  <View style={{ backgroundColor: colors.bg, borderRadius: 10, borderWidth: 1, borderColor: colors.border, padding: 12 }}>
+                    <Text style={{ fontSize: 13, color: key === 'password' ? colors.textMuted : colors.textPrim, lineHeight: 20, fontFamily: key === 'password' || key === '_id' ? Platform.OS === 'ios' ? 'Menlo' : 'monospace' : undefined }}>
+                      {String(val)}
+                    </Text>
+                  </View>
+                )}
+              </View>
             ))}
-            <View style={{ height: 32 }} />
           </ScrollView>
         </Pressable>
       </Pressable>
     </Modal>
+  );
+}
+
+// ─── Student List Sheet ───────────────────────────────────────────────────────
+// Fetches all students from GET /students and shows a tappable list.
+// Tapping a name opens StudentDetailSheet.
+function StudentListSheet({ visible, onClose }) {
+  const { colors } = useContext(ThemeContext);
+  const [students,       setStudents]       = useState([]);
+  const [loading,        setLoading]        = useState(false);
+  const [selectedStudent, setSelectedStudent] = useState(null);
+
+  useEffect(() => {
+    if (!visible) return;
+    setLoading(true);
+    axiosInstance.get('/students')
+      .then(res => {
+        const data = res.data?.data ?? res.data;
+        setStudents(Array.isArray(data) ? data : []);
+      })
+      .catch(err => {
+        console.error('Student list fetch error:', err);
+        setStudents([]);
+      })
+      .finally(() => setLoading(false));
+  }, [visible]);
+
+  const handleClose = () => { setSelectedStudent(null); onClose(); };
+
+  return (
+    <>
+      <Modal visible={visible && !selectedStudent} transparent animationType="slide" onRequestClose={handleClose}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' }} onPress={handleClose}>
+          <Pressable style={{ borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, borderBottomWidth: 0, maxHeight: '88%', backgroundColor: colors.surface, borderColor: colors.border }} onPress={() => {}}>
+            {/* Handle */}
+            <View style={{ width: 40, height: 4, borderRadius: 2, alignSelf: 'center', marginTop: 12, backgroundColor: colors.border }} />
+            {/* Header */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingTop: 12, paddingBottom: 14 }}>
+              <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: '#1a2a4a', alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                <Text style={{ fontSize: 18 }}>🎓</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 16, fontWeight: '700', color: colors.textPrim }}>All Students</Text>
+                <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 1 }}>
+                  {loading ? 'Loading…' : `${students.length} record${students.length !== 1 ? 's' : ''} — tap a name to view full details`}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={handleClose} style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' }} activeOpacity={0.7}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: colors.textSec }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={{ height: 1, backgroundColor: colors.border }} />
+
+            {loading ? (
+              <View style={{ paddingVertical: 48, alignItems: 'center' }}>
+                <ActivityIndicator size="large" color="#4a8aff" />
+                <Text style={{ color: colors.textMuted, marginTop: 12, fontSize: 13 }}>Fetching students…</Text>
+              </View>
+            ) : students.length === 0 ? (
+              <View style={{ paddingVertical: 48, alignItems: 'center' }}>
+                <Text style={{ fontSize: 32, marginBottom: 10 }}>📭</Text>
+                <Text style={{ color: colors.textMuted, fontSize: 14 }}>No students found in database</Text>
+              </View>
+            ) : (
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }}>
+                {students.map((student, idx) => (
+                  <TouchableOpacity
+                    key={student._id || student.id || idx}
+                    onPress={() => setSelectedStudent(student)}
+                    activeOpacity={0.72}
+                    style={{
+                      flexDirection: 'row', alignItems: 'center',
+                      paddingHorizontal: 18, paddingVertical: 14,
+                      borderBottomWidth: 1, borderBottomColor: colors.border,
+                      backgroundColor: idx % 2 === 1 ? colors.bg : colors.surface,
+                    }}>
+                    {/* Avatar initials */}
+                    <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: '#1a2a4a', alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                      <Text style={{ color: '#4a8aff', fontSize: 13, fontWeight: '800' }}>
+                        {(student.name || '?').split(' ').map(w => w[0]).slice(0,2).join('').toUpperCase()}
+                      </Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textPrim }} numberOfLines={1}>{student.name}</Text>
+                      <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
+                        {student.roll_no}  ·  Year {student.year}  ·  Div {student.division}  ·  {student.branch}
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: 20, color: '#4a8aff', marginLeft: 8 }}>›</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Detail sheet slides over the list */}
+      <StudentDetailSheet
+        visible={!!selectedStudent}
+        student={selectedStudent}
+        onBack={() => setSelectedStudent(null)}
+        onClose={handleClose}
+      />
+    </>
   );
 }
 
@@ -429,7 +603,7 @@ function UploadModal({ visible, source, onClose, onUploadSuccess }) {
     setStage('reading');
     setErrorMsg('');
     try {
-      const info = await pickAndParseFile();
+      const info = await pickAndParseFile(source?.id);
       setFileInfo(info);
       setStage('ready');
     } catch (err) {
@@ -461,19 +635,13 @@ function UploadModal({ visible, source, onClose, onUploadSuccess }) {
 
     setStage('uploading');
     try {
-let payload = fileInfo.rows;
-
-// If teacher upload, do NOT normalise as student
-if (source.id === "teacher") {
-  payload = fileInfo.rows; // send raw teacher JSON
-}
-
-const response = await axiosInstance.post(endpoint, payload);
+      const payload = fileInfo.rows;
+      const response = await axiosInstance.post(endpoint, payload);
       const count = response.data?.count ?? fileInfo.rows.length;
 
       setUploadCount(count);
       setStage('success');
-      onUploadSuccess?.({ fileName: fileInfo.name, targetGroup: source?.title?.replace(' Data', 's') || 'Records', count });
+      onUploadSuccess?.({ fileName: fileInfo.name, targetGroup: source?.title?.replace(' Data', 's') || 'Records', count, records: fileInfo.rows });
     } catch (err) {
       const msg =
         err.response?.data?.error ||
@@ -590,12 +758,12 @@ const response = await axiosInstance.post(endpoint, payload);
 
               {(isIdle || isUploading) && (
                 <>
-                  <Text style={um.dropIcon}>☁️</Text>
+                  <Text style={um.dropIcon}>📂</Text>
                   <Text style={[um.dropTitle, { color: colors.textPrim }]}>
-                    Tap to Select File or{' '}
-                    <Text style={{ color: source.iconAccent, fontWeight: '700' }}>Browse</Text>
+                    Tap to Select{' '}
+                    <Text style={{ color: source.iconAccent, fontWeight: '700' }}>.json File</Text>
                   </Text>
-                  <Text style={[um.dropSub, { color: colors.textSec }]}>CSV, XLSX, or JSON  ·  Up to 10 MB</Text>
+                  <Text style={[um.dropSub, { color: colors.textSec }]}>JSON array of objects  ·  Up to 10 MB</Text>
                 </>
               )}
             </TouchableOpacity>
@@ -624,10 +792,10 @@ const response = await axiosInstance.post(endpoint, payload);
             {/* Template */}
             <TouchableOpacity
               style={[um.templateBtn, { backgroundColor: colors.bg, borderColor: source.iconAccent + '44' }]}
-              onPress={() => Alert.alert('Download', `${source.title} CSV template downloaded.`)}
+              onPress={() => downloadTemplate(source.id, source.title)}
               activeOpacity={0.75}>
               <Text style={um.templateBtnIcon}>⬇️</Text>
-              <Text style={[um.templateTxt, { color: colors.textPrim }]}>Download CSV Template</Text>
+              <Text style={[um.templateTxt, { color: colors.textPrim }]}>Download JSON Template</Text>
             </TouchableOpacity>
 
           </ScrollView>
@@ -778,32 +946,55 @@ export default function DataImportCenter() {
   const { width: screenWidth } = useWindowDimensions();
   const isTablet = screenWidth >= TABLET_BP;
 
-  const [search,        setSearch]        = useState('');
-  const [activeSource,  setActiveSource]  = useState(null);
-  const [modalVisible,  setModalVisible]  = useState(false);
-  const [notifVisible,  setNotifVisible]  = useState(false);
-  const [actionRow,     setActionRow]     = useState(null);
-  const [history,       setHistory]       = useState(UPLOAD_HISTORY_INIT);
-  const [searchFocused, setSearchFocused] = useState(false);
+  const [activeSource,      setActiveSource]      = useState(null);
+  const [modalVisible,      setModalVisible]      = useState(false);
+  const [actionRow,         setActionRow]         = useState(null);
+  const [history,           setHistory]           = useState(UPLOAD_HISTORY_INIT);
+  const [studentListVisible, setStudentListVisible] = useState(false);
 
-  const unreadCount = NOTIFICATIONS.filter((n) => n.unread).length;
+  // ── Real stats from API ──────────────────────────────────────────────────
+  const [statsLoading,   setStatsLoading]   = useState(true);
+  const [totalProcessed, setTotalProcessed] = useState(null);
+  const [lastUploadDate, setLastUploadDate] = useState(null);
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      setStatsLoading(true);
+      try {
+        const res = await axiosInstance.get('/admins/dashboard/stats');
+        if (res.data?.success) {
+          const d = res.data.data;
+          const total = (d.students || 0) + (d.faculty || 0) + (d.parents || 0) + (d.admins || 0);
+          setTotalProcessed(total.toLocaleString());
+        }
+      } catch (err) {
+        console.error('Stats fetch error:', err);
+      } finally {
+        setStatsLoading(false);
+      }
+    };
+    fetchStats();
+  }, [history]); // re-fetch when a new upload succeeds
 
   const openUpload = useCallback((source) => {
     setActiveSource(source);
     setModalVisible(true);
   }, []);
 
-  const handleUploadSuccess = useCallback(({ fileName, targetGroup }) => {
+  const handleUploadSuccess = useCallback(({ fileName, targetGroup, records }) => {
+    const now = nowLabel();
+    setLastUploadDate(now);
     setHistory((prev) => [
       {
         id: Date.now(),
         fileName,
         targetGroup,
         status: 'Success',
-        date: nowLabel(),
+        date: now,
         adminName: 'Admin',
         initials: 'A',
         avatarColor: '#1d4ed8',
+        _records: records || [],
       },
       ...prev,
     ]);
@@ -828,32 +1019,21 @@ export default function DataImportCenter() {
       `File: ${row.fileName}\nGroup: ${row.targetGroup}\nStatus: ${row.status}\nDate: ${row.date}\nAdmin: ${row.adminName}`);
   }, []);
 
-  const filteredHistory = history.filter(
-    (r) =>
-      !search.trim() ||
-      r.fileName.toLowerCase().includes(search.toLowerCase()) ||
-      r.targetGroup.toLowerCase().includes(search.toLowerCase()) ||
-      r.adminName.toLowerCase().includes(search.toLowerCase()),
-  );
-
   const statCards = [
     {
       iconBg: '#0e2044', icon: '🗃️',
-      label: 'Total Records Processed', value: '1,284,592',
-      badge: '↑ +12.5% this month', badgeColor: '#22c55e',
-      onPress: () => Alert.alert('Records', 'Total: 1,284,592 records processed.'),
+      label: 'Total Records in DB',
+      value: statsLoading ? '…' : (totalProcessed ?? '—'),
+      badge: 'Students + Teachers + Parents + Admins',
+      badgeColor: '#22c55e',
+      onPress: () => {},
     },
     {
       iconBg: '#2a1200', icon: '📅',
-      label: 'Last Upload Date', value: 'Oct 24, 2023',
-      sub: '14:32 PM by admin_01',
-      onPress: () => Alert.alert('Last Upload', 'fall_enrollment_v2.csv — Oct 24 at 14:32'),
-    },
-    {
-      iconBg: '#052e16', icon: '🛡️',
-      label: 'System Health', value: '99.9%',
-      badge: '● All services operational', badgeColor: '#22c55e',
-      onPress: () => Alert.alert('System Health', 'All microservices running normally.'),
+      label: 'Last Upload Date',
+      value: lastUploadDate ? lastUploadDate.split(',')[0] : '—',
+      sub: lastUploadDate ? lastUploadDate.split(',').slice(1).join(',').trim() : 'No uploads yet',
+      onPress: () => {},
     },
   ];
 
@@ -863,50 +1043,9 @@ export default function DataImportCenter() {
 
       {/* Navbar */}
       <View style={[s.navbar, { backgroundColor: colors.bg, borderBottomColor: colors.border }]}>
-        {(!searchFocused || isTablet) && (
-          <Text style={[s.navTitle, { color: colors.textPrim }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
-            Data Import Center
-          </Text>
-        )}
-        <View style={[s.navRight, searchFocused && !isTablet && { flex: 1 }]}>
-          <View style={[
-            s.searchBar,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-            searchFocused && !isTablet && s.searchBarExpanded,
-          ]}>
-            <Text style={s.searchIcon}>🔍</Text>
-            <TextInput
-              style={[s.searchInput, { color: colors.textPrim }]}
-              placeholder="Search imports…"
-              placeholderTextColor={colors.textMuted}
-              value={search}
-              onChangeText={setSearch}
-              onFocus={() => setSearchFocused(true)}
-              onBlur={() => setSearchFocused(false)}
-              returnKeyType="search"
-              autoCorrect={false}
-            />
-            {search.length > 0 && (
-              <TouchableOpacity onPress={() => setSearch('')} activeOpacity={0.7} style={s.searchClearBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <Text style={[s.searchClearTxt, { color: colors.textMuted }]}>✕</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-          <TouchableOpacity
-            style={[s.navIconBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
-            onPress={() => setNotifVisible(true)}
-            activeOpacity={0.7}>
-            <Text style={s.navIconTxt}>🔔</Text>
-            {unreadCount > 0 && (
-              <View style={[s.notifDot, { borderColor: colors.bg }]}>
-                <Text style={s.notifDotTxt}>{unreadCount}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity style={s.avatar} onPress={() => Alert.alert('Profile', 'Admin profile & settings.')} activeOpacity={0.8}>
-            <Text style={s.avatarTxt}>A</Text>
-          </TouchableOpacity>
-        </View>
+        <Text style={[s.navTitle, { color: colors.textPrim }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+          Data Import Center
+        </Text>
       </View>
 
       <ScrollView
@@ -952,37 +1091,51 @@ export default function DataImportCenter() {
                 { backgroundColor: colors.surface, borderColor: source.iconAccent + '33' },
                 isTablet ? s.sourceCardTablet : s.sourceCardMobile,
               ]}>
-              <TouchableOpacity style={s.sourceCardHeader} onPress={() => openUpload(source)} activeOpacity={0.8}>
-                <View style={[s.sourceIconBox, { backgroundColor: source.iconBg, borderColor: source.iconAccent + '55' }]}>
-                  <Text style={s.sourceIconTxt}>{source.icon}</Text>
-                </View>
-                <View style={{ flex: 1, marginLeft: 10 }}>
-                  <Text style={[s.sourceTitle, { color: colors.textPrim }]}>{source.title}</Text>
-                  <Text style={[s.sourceStatus, { color: '#22c55e' }]}>● {source.status}</Text>
-                </View>
-                <Text style={[s.sourceArrow, { color: source.iconAccent }]}>›</Text>
-              </TouchableOpacity>
+              {/* Header: tap icon/title area to upload; tap › arrow to view last uploaded records */}
+              <View style={s.sourceCardHeader}>
+                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }} onPress={() => openUpload(source)} activeOpacity={0.8}>
+                  <View style={[s.sourceIconBox, { backgroundColor: source.iconBg, borderColor: source.iconAccent + '55' }]}>
+                    <Text style={s.sourceIconTxt}>{source.icon}</Text>
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text style={[s.sourceTitle, { color: colors.textPrim }]}>{source.title}</Text>
+                    <Text style={[s.sourceStatus, { color: '#22c55e' }]}>● {source.status}</Text>
+                  </View>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => {
+                    if (source.id === 'student') {
+                      setStudentListVisible(true);
+                    } else {
+                      Alert.alert('Coming Soon', `Record viewer for ${source.title} is coming soon.`);
+                    }
+                  }}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 4 }}
+                  activeOpacity={0.6}>
+                  <Text style={[s.sourceArrow, { color: source.iconAccent }]}>›</Text>
+                </TouchableOpacity>
+              </View>
 
               <TouchableOpacity
                 style={[s.sourceDropZone, { backgroundColor: colors.bg, borderColor: source.iconAccent + '44' }]}
                 onPress={() => openUpload(source)}
                 activeOpacity={0.75}>
-                <Text style={s.sourceDropIcon}>☁️</Text>
+                <Text style={s.sourceDropIcon}>📂</Text>
                 <Text style={[s.sourceDropText, { color: colors.textPrim }]}>
                   Tap to Upload{' '}
-                  <Text style={[s.browseLink, { color: source.iconAccent }]}>Browse</Text>
+                  <Text style={[s.browseLink, { color: source.iconAccent }]}>.json File</Text>
                 </Text>
-                <Text style={[s.sourceDropSub, { color: colors.textMuted }]}>CSV, XLSX, or JSON up to 10 MB</Text>
+                <Text style={[s.sourceDropSub, { color: colors.textMuted }]}>JSON array of objects  ·  Up to 10 MB</Text>
               </TouchableOpacity>
 
               <Text style={[s.sourceHint, { color: colors.textMuted }]} numberOfLines={isTablet ? 3 : 2}>{source.hint}</Text>
 
               <TouchableOpacity
                 style={[s.templateBtn, { backgroundColor: colors.bg, borderColor: source.iconAccent + '33' }]}
-                onPress={() => Alert.alert('Download', `${source.title} CSV template downloaded.`)}
+                onPress={() => downloadTemplate(source.id, source.title)}
                 activeOpacity={0.75}>
                 <Text style={s.templateIcon}>⬇️</Text>
-                <Text style={[s.templateTxt, { color: colors.textPrim }]}>Download CSV Template</Text>
+                <Text style={[s.templateTxt, { color: colors.textPrim }]}>Download JSON Template</Text>
               </TouchableOpacity>
             </View>
           ))}
@@ -1008,17 +1161,21 @@ export default function DataImportCenter() {
             </View>
           )}
 
-          {filteredHistory.length === 0 ? (
+          {history.length === 0 ? (
             <View style={s.emptyHistory}>
-              <Text style={s.emptyIcon}>🔍</Text>
-              <Text style={[s.emptyTxt, { color: colors.textMuted }]}>No records match "{search}"</Text>
+              <Text style={s.emptyIcon}>📭</Text>
+              <Text style={[s.emptyTxt, { color: colors.textMuted }]}>No uploads yet — import a JSON file to get started</Text>
             </View>
           ) : (
-            filteredHistory.map((row, idx) =>
+            history.map((row, idx) =>
               isTablet ? (
-                <HistoryTableRow key={row.id} row={row} isAlt={idx % 2 === 1} onPress={() => handleViewDetails(row)} onMorePress={() => setActionRow(row)} />
+                <HistoryTableRow key={row.id} row={row} isAlt={idx % 2 === 1}
+                  onPress={() => handleViewDetails(row)}
+                  onMorePress={() => setActionRow(row)} />
               ) : (
-                <HistoryCardRow key={row.id} row={row} isAlt={idx % 2 === 1} onPress={() => handleViewDetails(row)} onMorePress={() => setActionRow(row)} />
+                <HistoryCardRow key={row.id} row={row} isAlt={idx % 2 === 1}
+                  onPress={() => handleViewDetails(row)}
+                  onMorePress={() => setActionRow(row)} />
               )
             )
           )}
@@ -1034,7 +1191,10 @@ export default function DataImportCenter() {
         onClose={() => setModalVisible(false)}
         onUploadSuccess={handleUploadSuccess}
       />
-      <NotificationPanel visible={notifVisible} onClose={() => setNotifVisible(false)} />
+      <StudentListSheet
+        visible={studentListVisible}
+        onClose={() => setStudentListVisible(false)}
+      />
       <RowActionMenu
         visible={!!actionRow}
         row={actionRow}
@@ -1063,26 +1223,6 @@ const am = StyleSheet.create({
   cancelTxt:    { fontSize: 16, fontWeight: '700' },
 });
 
-const np = StyleSheet.create({
-  backdrop:  { flex: 1, backgroundColor: 'rgba(0,0,0,0.68)', justifyContent: 'flex-end' },
-  panel:     { borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, borderBottomWidth: 0, maxHeight: '75%' },
-  handle:    { width: 40, height: 4, borderRadius: 2, alignSelf: 'center', marginTop: 12, marginBottom: 4 },
-  header:    { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingTop: 10, paddingBottom: 14 },
-  title:     { fontSize: 17, fontWeight: '800', marginRight: 8 },
-  badge:     { backgroundColor: '#1d4ed8', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2 },
-  badgeTxt:  { color: '#ffffff', fontSize: 12, fontWeight: '800' },
-  markRead:  { fontSize: 13, fontWeight: '600', marginRight: 8 },
-  closeBtn:  { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
-  closeTxt:  { fontSize: 14, fontWeight: '700' },
-  divider:   { height: 1 },
-  item:      { flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 18, paddingVertical: 16, minHeight: 72 },
-  itemBorder:{ borderBottomWidth: 1 },
-  itemIcon:  { fontSize: 22, marginRight: 12, marginTop: 2 },
-  itemTitle: { fontSize: 14, fontWeight: '600' },
-  itemMsg:   { fontSize: 13, marginTop: 3, lineHeight: 18 },
-  itemTime:  { fontSize: 12, marginTop: 4 },
-  dot:       { width: 8, height: 8, borderRadius: 4, marginTop: 6 },
-});
 
 const um = StyleSheet.create({
   overlay:        { flex: 1, backgroundColor: 'rgba(0,0,0,0.80)', justifyContent: 'flex-end' },

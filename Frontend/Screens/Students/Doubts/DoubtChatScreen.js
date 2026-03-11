@@ -673,19 +673,11 @@ export default function DoubtChatScreen({ course, inquiry, mode, onBack, C, onTh
           <View style={[styles.subjectBanner, { backgroundColor: cardAlt, borderBottomColor: border }]}>
             <Text style={{ fontSize: 16 }}>📚</Text>
             <Text style={[styles.subjectBannerText, { color: textPri }]}>Subject: {course.title}</Text>
-            <View style={[styles.statusPill, { backgroundColor: accent + '22' }]}>
-              <Text style={[styles.statusPillText, { color: accent }]}>OPEN</Text>
-            </View>
           </View>
         )}
 
         {/* ── Hint bar ── */}
-        <View style={[styles.hintBar, { backgroundColor: '#EF444411', borderBottomColor: '#EF444430' }]}>
-          <Text style={[styles.hintText, { color: '#EF9999' }]}>
-            💡 Tap your message to delete it
-          </Text>
-        </View>
-
+        
         {/* ── Messages + Input ── */}
         <KeyboardAvoidingView
           style={styles.flex}

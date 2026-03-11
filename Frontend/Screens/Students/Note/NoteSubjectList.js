@@ -86,7 +86,7 @@ export default function StudentsNotes({ C, onThemeToggle, user }) {
   const [loading,        setLoading]        = useState(true);
   const [activeTab,      setActiveTab]      = useState('All');
 
-  const TABS = ['All', 'Theory', 'Lab'];
+  const TABS = [];
 
   const { width } = useWindowDimensions();
   const isWide     = width >= 768;

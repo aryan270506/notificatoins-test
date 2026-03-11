@@ -157,81 +157,91 @@ const StatCard = React.memo(({ label, value, sub, badge, highlight, cardWidth })
       <Text style={[ss.statValue, { color: colors.textPrim }]}>{value}</Text>
       <Text style={[ss.statLabel, { color: colors.textMuted }]}>{label}</Text>
       {sub && <Text style={[ss.statSub, { color: colors.textSec }]}>{sub}</Text>}
-      <View style={[ss.statBar, { backgroundColor: colors.border }]}>
-        <View style={[ss.statBarFill, {
-          width: highlight ? '30%' : '60%',
-          backgroundColor: highlight ? colors.accent : colors.accentBlue,
-        }]} />
-      </View>
     </View>
   );
 });
 
-// ─── Mini Bar Chart (width-aware) ─────────────────────────────────────────────
-const MiniBarChart = React.memo(({ chartWidth }) => {
+// ─── Attendance Bar Chart (real data) ────────────────────────────────────────
+// Renders one bar per student, coloured by their overall attendance percentage.
+// Falls back to a shimmer-style placeholder while loading.
+const AttendanceBarChart = React.memo(({ chartWidth, data, loading }) => {
   const { colors } = useContext(ThemeContext);
-  const bars = [40, 65, 55, 70, 60, 85, 75, 90, 55, 65, 70, 60, 80, 75, 95, 70, 65, 80, 85, 90, 75, 70, 80, 85, 88, 75, 82, 78, 90, 100];
-  const w = chartWidth || 280;
-  const barW = (w - bars.length) / bars.length;
-  const inactiveColor = colors === LIGHT_COLORS ? '#c5d8e8' : '#1e3a4a';
+  const w   = chartWidth || 280;
+  const H   = 100;                     // SVG height
+  const PAD = 2;                        // gap between bars
 
+  // Colour thresholds: ≥75 → accent (green), 60–74 → warn (amber), <60 → red
+  const barColor = (pct) => {
+    if (pct >= 75) return colors.accent;
+    if (pct >= 60) return colors.accentWarn;
+    return colors.accentRed;
+  };
+
+  if (loading) {
+    // Placeholder shimmers — 20 muted bars shown only while fetching
+    const placeholderBars = Array.from({ length: 20 }, (_, i) => 30 + ((i * 17) % 55));
+    const bw = (w - placeholderBars.length * PAD) / placeholderBars.length;
+    const mutedColor = colors === LIGHT_COLORS ? '#d1dae3' : '#1e3a4a';
+    return (
+      <Svg width={w} height={H}>
+        {placeholderBars.map((h, i) => (
+          <Rect
+            key={i}
+            x={i * (bw + PAD)}
+            y={H - (h / 100) * (H - 10)}
+            width={Math.max(bw, 1)}
+            height={(h / 100) * (H - 10)}
+            rx={2}
+            fill={mutedColor}
+          />
+        ))}
+      </Svg>
+    );
+  }
+
+  // No data state — empty chart with a centre label
+  if (!data || data.length === 0) {
+    return (
+      <Svg width={w} height={H}>
+        <Rect x={0} y={H - 2} width={w} height={2} rx={1} fill={colors === LIGHT_COLORS ? '#d1dae3' : '#1e3a4a'} />
+      </Svg>
+    );
+  }
+
+  const bw = Math.max((w - data.length * PAD) / data.length, 1);
   return (
-    <Svg width={w} height={100}>
+    <Svg width={w} height={H}>
       <Defs>
-        <LinearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor={colors.accent} stopOpacity="0.8" />
-          <Stop offset="1" stopColor={colors.accent} stopOpacity="0.1" />
+        <LinearGradient id="barGradGreen" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor={colors.accent}     stopOpacity="0.9" />
+          <Stop offset="1" stopColor={colors.accent}     stopOpacity="0.3" />
+        </LinearGradient>
+        <LinearGradient id="barGradWarn" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor={colors.accentWarn} stopOpacity="0.9" />
+          <Stop offset="1" stopColor={colors.accentWarn} stopOpacity="0.3" />
+        </LinearGradient>
+        <LinearGradient id="barGradRed" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor={colors.accentRed}  stopOpacity="0.9" />
+          <Stop offset="1" stopColor={colors.accentRed}  stopOpacity="0.3" />
         </LinearGradient>
       </Defs>
-      {bars.map((h, i) => {
-        const highlight = i === 1 || i === bars.length - 1;
+      {data.map((student, i) => {
+        const pct    = student.overallPercentage ?? 0;
+        const barH   = Math.max((pct / 100) * (H - 10), 2);
+        const gradId = pct >= 75 ? 'url(#barGradGreen)' : pct >= 60 ? 'url(#barGradWarn)' : 'url(#barGradRed)';
         return (
           <Rect
             key={i}
-            x={i * (barW + 1)}
-            y={100 - (h / 100) * 90}
-            width={Math.max(barW, 1)}
-            height={(h / 100) * 90}
+            x={i * (bw + PAD)}
+            y={H - barH}
+            width={bw}
+            height={barH}
             rx={2}
-            fill={highlight ? colors.accent : inactiveColor}
+            fill={gradId}
           />
         );
       })}
     </Svg>
-  );
-});
-
-// ─── Donut Chart ──────────────────────────────────────────────────────────────
-const DonutChart = React.memo(({ percent = 72, size = 110 }) => {
-  const { colors } = useContext(ThemeContext);
-  const r = size * 0.38;
-  const cx = size / 2;
-  const cy = size / 2;
-  const circumference = 2 * Math.PI * r;
-  const strokeDash = (percent / 100) * circumference;
-  const strokeW = size * 0.09;
-
-  return (
-    <View style={{ alignItems: 'center', justifyContent: 'center' }}>
-      <Svg width={size} height={size}>
-        <Circle cx={cx} cy={cy} r={r} fill="none" stroke={colors.border} strokeWidth={strokeW} />
-        <Circle
-          cx={cx} cy={cy} r={r}
-          fill="none"
-          stroke={colors.accent}
-          strokeWidth={strokeW}
-          strokeDasharray={`${strokeDash} ${circumference - strokeDash}`}
-          strokeDashoffset={circumference * 0.25}
-          strokeLinecap="round"
-        />
-      </Svg>
-      <View style={StyleSheet.absoluteFill}>
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={[ss.donutPct, { color: colors.textPrim, fontSize: size * 0.16 }]}>{percent}%</Text>
-          <Text style={[ss.donutLabel, { color: colors.textMuted }]}>USED</Text>
-        </View>
-      </View>
-    </View>
   );
 });
 
@@ -299,21 +309,12 @@ export default function UniVerseDashboard({ isDark: isDarkProp, onToggleTheme, o
   const contentPad = isDesktop ? 24 : 16;
   const contentWidth = screenWidth - contentPad * 2;
 
-  // Stat card widths: desktop → 4 visible; mobile → 160 fixed (horizontal scroll)
+  // Stat card widths: desktop → 5 visible in one row; mobile → 160 fixed (horizontal scroll)
   const statCardW = isDesktop
-    ? Math.floor((contentWidth - 36) / 4)   // 4 cards, 3×12 gaps
+    ? Math.floor((contentWidth - 48) / 5)   // 5 cards, 4×12 gaps
     : isTablet
-      ? Math.floor((contentWidth - 12) / 2) // 2 cards, 1×12 gap
+      ? Math.floor((contentWidth - 24) / 3) // 3 cards, 2×12 gaps
       : 160;
-
-  // Chart width = card width minus padding
-  const attendanceCardW = isDesktop
-    ? Math.floor(contentWidth * 0.60) - 32
-    : contentWidth - 32;
-
-  // Donut size scales with card
-  const storageCardW = isDesktop ? contentWidth - attendanceCardW - 32 - 12 : contentWidth;
-  const donutSize = Math.min(storageCardW * 0.45, 120);
 
   const [isDarkInternal, setIsDarkInternal] = useState(true);
   const isControlled = isDarkProp !== undefined;
@@ -329,6 +330,21 @@ export default function UniVerseDashboard({ isDark: isDarkProp, onToggleTheme, o
   const [broadcastMsg, setBroadcastMsg] = useState('');
   const [highPriority, setHighPriority] = useState(false);
   const togglePriority = useCallback(() => setHighPriority((p) => !p), []);
+
+  // Dashboard statistics state
+  const [stats, setStats] = useState({
+    totalUsers: 0,
+    students: 0,
+    faculty: 0,
+    staff: 0,
+    parents: 0,
+  });
+  const [statsLoading, setStatsLoading] = useState(true);
+
+  // ── Attendance chart state ──
+  const [attendanceData,    setAttendanceData]    = useState([]);
+  const [attendanceLoading, setAttendanceLoading] = useState(true);
+  const [attendanceStats,   setAttendanceStats]   = useState({ avg: null, peak: null, low: null });
 
   // Recent broadcast state (fix ReferenceError)
   const [recentBroadcast, setRecentBroadcast] = useState(null);
@@ -466,18 +482,83 @@ export default function UniVerseDashboard({ isDark: isDarkProp, onToggleTheme, o
     fetchRecentBroadcast();
   }, []);
 
+  // Fetch dashboard statistics on mount
+  useEffect(() => {
+    const fetchDashboardStats = async () => {
+      setStatsLoading(true);
+      try {
+        const response = await axiosInstance.get('/admins/dashboard/stats');
+        if (response.data.success) {
+          setStats(response.data.data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch dashboard stats:', err);
+        Alert.alert('Error', 'Failed to load dashboard statistics. Using default values.');
+      } finally {
+        setStatsLoading(false);
+      }
+    };
+
+    fetchDashboardStats();
+  }, []);
+
+  // Fetch overall student attendance for chart
+  useEffect(() => {
+    const fetchAttendance = async () => {
+      setAttendanceLoading(true);
+      try {
+        // Fetch all three years simultaneously; combine into one student list
+        const years = ['1', '2', '3'];
+        const results = await Promise.allSettled(
+          years.map((yr) =>
+            axiosInstance.get('/attendance/class/summary', {
+              params: { year: yr, division: 'all' },
+            })
+          )
+        );
+
+        // Aggregate: if a student appears in multiple year responses keep highest entry
+        const studentMap = {};
+        for (const result of results) {
+          if (result.status !== 'fulfilled') continue;
+          const summary = result.value?.data?.summary;
+          if (!Array.isArray(summary)) continue;
+          for (const s of summary) {
+            const id = String(s.studentId);
+            if (!studentMap[id] || s.overallPercentage > studentMap[id].overallPercentage) {
+              studentMap[id] = s;
+            }
+          }
+        }
+
+        const combined = Object.values(studentMap);
+        // Sort by roll number for a consistent visual order
+        combined.sort((a, b) => (a.rollNumber || '').localeCompare(b.rollNumber || '', undefined, { numeric: true }));
+
+        if (combined.length > 0) {
+          const percentages = combined.map((s) => s.overallPercentage ?? 0);
+          const avg  = Math.round(percentages.reduce((a, b) => a + b, 0) / percentages.length);
+          const peak = Math.max(...percentages);
+          const low  = Math.min(...percentages);
+          setAttendanceStats({ avg, peak, low });
+          setAttendanceData(combined);
+        }
+      } catch (err) {
+        console.error('Failed to fetch attendance chart data:', err);
+      } finally {
+        setAttendanceLoading(false);
+      }
+    };
+
+    fetchAttendance();
+  }, []);
+
   // Audit data
   const auditLogs = [
     { time: '09:42:15', actor: 'sys_admin_vance', action: 'Database Schema Migration', status: 'Success' },
     { time: '09:15:02', actor: 'auto_bot_04',     action: 'Scheduled Backup Initiated', status: 'Warning' },
     { time: '08:55:44', actor: 'security_ovr',    action: 'API Key Rotation',           status: 'Success' },
     { time: '08:12:10', actor: 'net_monitor',     action: 'Auth Attempt (Unauthorized)', status: 'Failed' },
-  ];
-
-  const storageItems = [
-    { label: 'Student Portfolios', val: '4.2 TB', color: colors.accent },
-    { label: 'LMS Resources',      val: '1.8 TB', color: colors.accentBlue },
-    { label: 'Other / System',     val: '0.5 TB', color: colors.textMuted },
   ];
 
   return (
@@ -504,13 +585,7 @@ export default function UniVerseDashboard({ isDark: isDarkProp, onToggleTheme, o
             </View>
 
             <View style={ss.headerRight}>
-              {/* Search — hide on small mobile to save space */}
-              {(isDesktop || isTablet) && (
-                <View style={[ss.searchBar, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <Icon name="search" size={14} color={colors.textMuted} />
-                  <Text style={[ss.searchPlaceholder, { color: colors.textMuted }]}>Search systems…</Text>
-                </View>
-              )}
+
 
               <TouchableOpacity
                 onPress={handleToggle}
@@ -540,18 +615,59 @@ export default function UniVerseDashboard({ isDark: isDarkProp, onToggleTheme, o
           </View>
 
           {/* ── Stat Cards ── */}
-          {isDesktop || isTablet ? (
-            // Grid layout: 4 columns on desktop, 2 on tablet
-            <View style={[ss.statGrid, { marginBottom: 16 }]}>
-              {[
-                { value: '13,570', label: 'TOTAL ACTIVE USERS', badge: '+4% MOM', highlight: true },
-                { value: '12,400', label: 'STUDENTS',           sub: '92% Engagement Rate' },
-                { value: '850',    label: 'FACULTY',            sub: '32 Current Sessions' },
-                { value: '320',    label: 'STAFF',              sub: '8 New Hires Registered' },
-              ].map((c) => (
-                <StatCard key={c.label} {...c} cardWidth={statCardW} />
-              ))}
+          {isDesktop ? (
+            // Desktop: Single row with 5 cards using flex
+            <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
+              {statsLoading ? (
+                // Loading state
+                Array(5).fill(0).map((_, i) => (
+                  <View key={i} style={{ flex: 1 }}>
+                    <View style={[ss.statCard, { backgroundColor: colors.surface, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', minHeight: 110 }]}>
+                      <ActivityIndicator size="small" color={colors.accent} />
+                    </View>
+                  </View>
+                ))
+              ) : (
+                [
+                  { value: stats.totalUsers.toLocaleString(), label: 'TOTAL USERS', badge: 'ALL', highlight: true },
+                  { value: stats.students.toLocaleString(), label: 'STUDENTS', sub: `${stats.totalUsers > 0 ? ((stats.students / stats.totalUsers) * 100).toFixed(1) : 0}% of Total` },
+                  { value: stats.faculty.toLocaleString(), label: 'FACULTY', sub: 'Teaching Staff' },
+                  { value: stats.parents.toLocaleString(), label: 'PARENTS', sub: 'Guardians' },
+                  { value: stats.staff.toLocaleString(), label: 'STAFF', sub: 'Faculty + Admin' },
+                ].map((c) => (
+                  <View key={c.label} style={{ flex: 1 }}>
+                    <StatCard {...c} />
+                  </View>
+                ))
+              )}
             </View>
+          ) : isTablet ? (
+            // Tablet: Horizontal scroll with all 5 cards
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={{ marginBottom: 16 }}
+              contentContainerStyle={{ gap: 12 }}
+            >
+              {statsLoading ? (
+                // Loading state
+                Array(5).fill(0).map((_, i) => (
+                  <View key={i} style={[ss.statCard, { backgroundColor: colors.surface, borderColor: colors.border, width: 180, alignItems: 'center', justifyContent: 'center', minHeight: 110 }]}>
+                    <ActivityIndicator size="small" color={colors.accent} />
+                  </View>
+                ))
+              ) : (
+                [
+                  { value: stats.totalUsers.toLocaleString(), label: 'TOTAL USERS', badge: 'ALL', highlight: true },
+                  { value: stats.students.toLocaleString(), label: 'STUDENTS', sub: `${stats.totalUsers > 0 ? ((stats.students / stats.totalUsers) * 100).toFixed(1) : 0}% of Total` },
+                  { value: stats.faculty.toLocaleString(), label: 'FACULTY', sub: 'Teaching Staff' },
+                  { value: stats.parents.toLocaleString(), label: 'PARENTS', sub: 'Guardians' },
+                  { value: stats.staff.toLocaleString(), label: 'STAFF', sub: 'Faculty + Admin' },
+                ].map((c) => (
+                  <StatCard key={c.label} {...c} cardWidth={180} />
+                ))
+              )}
+            </ScrollView>
           ) : (
             // Horizontal scroll on small mobile
             <ScrollView
@@ -560,63 +676,106 @@ export default function UniVerseDashboard({ isDark: isDarkProp, onToggleTheme, o
               style={{ marginBottom: 16, marginHorizontal: -contentPad }}
               contentContainerStyle={{ paddingHorizontal: contentPad, paddingRight: contentPad }}
             >
-              {[
-                { value: '13,570', label: 'TOTAL ACTIVE USERS', badge: '+4% MOM', highlight: true },
-                { value: '12,400', label: 'STUDENTS',           sub: '92% Engagement Rate' },
-                { value: '850',    label: 'FACULTY',            sub: '32 Current Sessions' },
-                { value: '320',    label: 'STAFF',              sub: '8 New Hires Registered' },
-              ].map((c, i) => (
-                <View key={c.label} style={{ marginRight: i < 3 ? 12 : 0 }}>
-                  <StatCard {...c} cardWidth={160} />
-                </View>
-              ))}
+              {statsLoading ? (
+                // Loading state
+                Array(5).fill(0).map((_, i) => (
+                  <View key={i} style={{ marginRight: i < 4 ? 12 : 0 }}>
+                    <View style={[ss.statCard, { backgroundColor: colors.surface, borderColor: colors.border, width: 160, alignItems: 'center', justifyContent: 'center', minHeight: 110 }]}>
+                      <ActivityIndicator size="small" color={colors.accent} />
+                    </View>
+                  </View>
+                ))
+              ) : (
+                [
+                  { value: stats.totalUsers.toLocaleString(), label: 'TOTAL USERS', badge: 'ALL', highlight: true },
+                  { value: stats.students.toLocaleString(), label: 'STUDENTS', sub: `${stats.totalUsers > 0 ? ((stats.students / stats.totalUsers) * 100).toFixed(1) : 0}% of Total` },
+                  { value: stats.faculty.toLocaleString(), label: 'FACULTY', sub: 'Teaching Staff' },
+                  { value: stats.parents.toLocaleString(), label: 'PARENTS', sub: 'Guardians' },
+                  { value: stats.staff.toLocaleString(), label: 'STAFF', sub: 'Faculty + Admin' },
+                ].map((c, i) => (
+                  <View key={c.label} style={{ marginRight: i < 4 ? 12 : 0 }}>
+                    <StatCard {...c} cardWidth={160} />
+                  </View>
+                ))
+              )}
             </ScrollView>
           )}
 
-          {/* ── Attendance + Broadcast row ── */}
-          <View style={[isDesktop ? ss.rowWrap : ss.colWrap, { marginBottom: 16 }]}>
-            {/* Attendance Card */}
-            <Card style={isDesktop ? { flex: 1.6 } : null}>
-              <View style={ss.cardHeader}>
-                <View style={ss.cardTitleRow}>
-                  <Icon name="reports" size={14} color={colors.accent} />
-                  <Text style={[ss.cardTitle, { color: colors.textPrim }]}>Monthly Student Attendance</Text>
-                </View>
-                <Text style={[ss.cardSub, { color: colors.textMuted }]}>Last 30 Days</Text>
+          {/* ── Attendance Card (Full Width) ── */}
+          <Card style={{ marginBottom: 16 }}>
+            <View style={ss.cardHeader}>
+              <View style={ss.cardTitleRow}>
+                <Icon name="reports" size={14} color={colors.accent} />
+                <Text style={[ss.cardTitle, { color: colors.textPrim }]}>Overall Student Attendance</Text>
               </View>
-              <View style={ss.attendanceStat}>
-                <View>
-                  <Text style={[ss.attendancePct, { color: colors.textPrim }]}>94.2%</Text>
-                  <Text style={[ss.attendanceLabel, { color: colors.textMuted }]}>AVG DAILY ATTENDANCE</Text>
+              <Text style={[ss.cardSub, { color: colors.textMuted }]}>
+                {attendanceLoading ? 'Loading…' : `${attendanceData.length} Students`}
+              </Text>
+            </View>
+
+            <View style={ss.attendanceStat}>
+              <View>
+                <Text style={[ss.attendancePct, { color: colors.textPrim }]}>
+                  {attendanceLoading ? '—' : attendanceStats.avg !== null ? `${attendanceStats.avg}%` : 'N/A'}
+                </Text>
+                <Text style={[ss.attendanceLabel, { color: colors.textMuted }]}>AVG OVERALL ATTENDANCE</Text>
+              </View>
+              <View style={{ alignItems: 'flex-end' }}>
+                <View style={{ alignItems: 'flex-end', marginBottom: 6 }}>
+                  <Text style={[ss.attendanceMini, { color: colors.accent }]}>
+                    {attendanceLoading ? '—' : attendanceStats.peak !== null ? `${attendanceStats.peak}%` : '—'}
+                  </Text>
+                  <Text style={[ss.attendanceMiniLabel, { color: colors.textMuted }]}>PEAK</Text>
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
-                  <View style={{ alignItems: 'flex-end', marginBottom: 6 }}>
-                    <Text style={[ss.attendanceMini, { color: colors.accent }]}>98.5%</Text>
-                    <Text style={[ss.attendanceMiniLabel, { color: colors.textMuted }]}>PEAK</Text>
-                  </View>
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={[ss.attendanceMini, { color: colors.accentWarn }]}>89.1%</Text>
-                    <Text style={[ss.attendanceMiniLabel, { color: colors.textMuted }]}>LOW</Text>
-                  </View>
+                  <Text style={[ss.attendanceMini, { color: colors.accentRed }]}>
+                    {attendanceLoading ? '—' : attendanceStats.low !== null ? `${attendanceStats.low}%` : '—'}
+                  </Text>
+                  <Text style={[ss.attendanceMiniLabel, { color: colors.textMuted }]}>LOW</Text>
                 </View>
               </View>
-              <View style={{ marginTop: 8, overflow: 'hidden' }}>
-                <MiniBarChart chartWidth={attendanceCardW} />
-              </View>
-              <View style={ss.chartLabels}>
-                <Text style={[ss.chartLabel, { color: colors.textMuted }]}>30 DAYS AGO</Text>
-                <Text style={[ss.chartLabel, { color: colors.textMuted }]}>TODAY</Text>
-              </View>
-            </Card>
+            </View>
 
-            {/* Quick Broadcast Card */}
-            <Card style={isDesktop ? { flex: 1, minWidth: 200 } : { marginTop: 16 }}>
-              <View style={{ flexDirection: 'column' }}>
-                {/* Header */}
-                <View style={[ss.cardTitleRow, { marginBottom: 14, alignItems: 'center' }]}> 
-                  <Icon name="broadcast" size={14} color={colors.accentBlue} />
-                  <Text style={[ss.cardTitle, { color: colors.textPrim, marginLeft: 6 }]}>Quick Broadcast</Text>
+            <View style={{ marginTop: 8, overflow: 'hidden' }}>
+              <AttendanceBarChart
+                chartWidth={contentWidth - 64}
+                data={attendanceData}
+                loading={attendanceLoading}
+              />
+            </View>
+
+            {/* Legend */}
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
+              {[
+                { color: colors.accent,     label: '≥75% Good' },
+                { color: colors.accentWarn, label: '60–74% At Risk' },
+                { color: colors.accentRed,  label: '<60% Critical' },
+              ].map(({ color, label }) => (
+                <View key={label} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: color }} />
+                  <Text style={[ss.chartLabel, { color: colors.textMuted }]}>{label}</Text>
                 </View>
+              ))}
+            </View>
+
+            <View style={[ss.chartLabels, { marginTop: 4 }]}>
+              <Text style={[ss.chartLabel, { color: colors.textMuted }]}>
+                {attendanceLoading ? 'Loading…' : attendanceData.length > 0 ? `1st student` : 'No attendance recorded yet'}
+              </Text>
+              <Text style={[ss.chartLabel, { color: colors.textMuted }]}>
+                {!attendanceLoading && attendanceData.length > 0 ? `${attendanceData.length}th student` : ''}
+              </Text>
+            </View>
+          </Card>
+
+          {/* ── Quick Broadcast Card (Full Width) ── */}
+          <Card style={{ marginBottom: 16 }}>
+            <View style={{ flexDirection: 'column' }}>
+              {/* Header */}
+              <View style={[ss.cardTitleRow, { marginBottom: 14, alignItems: 'center' }]}> 
+                <Icon name="broadcast" size={14} color={colors.accentBlue} />
+                <Text style={[ss.cardTitle, { color: colors.textPrim, marginLeft: 6 }]}>Quick Broadcast</Text>
+              </View>
 
                 {/* Broadcast Form */}
                 <View style={{ marginBottom: 12 }}>
@@ -748,7 +907,6 @@ export default function UniVerseDashboard({ isDark: isDarkProp, onToggleTheme, o
                 </View>
               </View>
             </Card>
-          </View>
 
           {/* ── Year Picker Modal ── */}
           <Modal visible={showYearPicker} transparent animationType="fade" onRequestClose={() => setShowYearPicker(false)}>
@@ -775,65 +933,42 @@ export default function UniVerseDashboard({ isDark: isDarkProp, onToggleTheme, o
             </Pressable>
           </Modal>
 
-          {/* ── Audit Logs + Storage row ── */}
-          <View style={isDesktop ? ss.rowWrap : ss.colWrap}>
-            {/* Audit Logs */}
-            <Card style={isDesktop ? { flex: 1.6 } : null}>
-              <View style={ss.cardHeader}>
-                <View style={ss.cardTitleRow}>
-                  <View style={[ss.auditDot, { backgroundColor: colors.accentWarn }]} />
-                  <Text style={[ss.cardTitle, { color: colors.textPrim }]}>Recent Audit Logs</Text>
-                </View>
-                <TouchableOpacity hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                  <Text style={[ss.cardSub, { color: colors.accentBlue }]}>View All</Text>
-                </TouchableOpacity>
+          {/* ── Audit Logs (Full Width) ── */}
+          <Card style={{ marginBottom: 16 }}>
+            <View style={ss.cardHeader}>
+              <View style={ss.cardTitleRow}>
+                <View style={[ss.auditDot, { backgroundColor: colors.accentWarn }]} />
+                <Text style={[ss.cardTitle, { color: colors.textPrim }]}>Recent Audit Logs</Text>
               </View>
+              <TouchableOpacity hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Text style={[ss.cardSub, { color: colors.accentBlue }]}>View All</Text>
+              </TouchableOpacity>
+            </View>
 
-              {/* Table header — desktop only */}
-              {!isMobile && (
-                <View style={[ss.auditRow, { marginBottom: 4, borderBottomColor: colors.border }]}>
-                  {['TIMESTAMP', 'ACTOR', 'ACTION', 'STATUS'].map((h) => (
-                    <Text
-                      key={h}
-                      style={[
-                        ss.auditCell,
-                        ss.auditHeader,
-                        { color: colors.textMuted },
-                        h === 'TIMESTAMP' && { width: 76 },
-                        h === 'ACTION' && { flex: 1.4 },
-                      ]}
-                    >
-                      {h}
-                    </Text>
-                  ))}
-                </View>
-              )}
-
-              {auditLogs.map((log) => (
-                <AuditRow key={log.time} {...log} isMobile={isMobile} />
-              ))}
-            </Card>
-
-            {/* Storage Distribution */}
-            <Card style={isDesktop ? { flex: 1, minWidth: 200 } : { marginTop: 16 }}>
-              <View style={[ss.cardTitleRow, { marginBottom: 16 }]}>
-                <Icon name="storage" size={14} color={colors.accent} />
-                <Text style={[ss.cardTitle, { color: colors.textPrim }]}>Storage Distribution</Text>
+            {/* Table header — desktop only */}
+            {!isMobile && (
+              <View style={[ss.auditRow, { marginBottom: 4, borderBottomColor: colors.border }]}>
+                {['TIMESTAMP', 'ACTOR', 'ACTION', 'STATUS'].map((h) => (
+                  <Text
+                    key={h}
+                    style={[
+                      ss.auditCell,
+                      ss.auditHeader,
+                      { color: colors.textMuted },
+                      h === 'TIMESTAMP' && { width: 76 },
+                      h === 'ACTION' && { flex: 1.4 },
+                    ]}
+                  >
+                    {h}
+                  </Text>
+                ))}
               </View>
+            )}
 
-              <View style={{ alignItems: 'center', marginBottom: 16 }}>
-                <DonutChart percent={72} size={donutSize} />
-              </View>
-
-              {storageItems.map(({ label, val, color }) => (
-                <View key={label} style={ss.storageRow}>
-                  <View style={[ss.storageDot, { backgroundColor: color }]} />
-                  <Text style={[ss.storageLabel, { color: colors.textSec }]}>{label}</Text>
-                  <Text style={[ss.storageVal, { color: colors.textPrim }]}>{val}</Text>
-                </View>
-              ))}
-            </Card>
-          </View>
+            {auditLogs.map((log) => (
+              <AuditRow key={log.time} {...log} isMobile={isMobile} />
+            ))}
+          </Card>
 
           {/* Bottom breathing room for tab bars */}
           <View style={{ height: Platform.OS === 'ios' ? 20 : 8 }} />
@@ -922,8 +1057,6 @@ const ss = StyleSheet.create({
   statValue: { fontSize: 22, fontWeight: '700', letterSpacing: -0.5 },
   statLabel: { fontSize: 10, fontWeight: '600', letterSpacing: 0.5, marginTop: 2 },
   statSub:   { fontSize: 11, marginTop: 4 },
-  statBar:   { height: 3, borderRadius: 2, marginTop: 14, overflow: 'hidden' },
-  statBarFill: { height: '100%', borderRadius: 2 },
 
   // Layout helpers
   rowWrap: { flexDirection: 'row', gap: 12 },
@@ -1096,17 +1229,4 @@ const ss = StyleSheet.create({
   },
   badgeDot: { width: 5, height: 5, borderRadius: 3 },
   badgeText: { fontSize: 10, fontWeight: '600' },
-
-  // Storage
-  donutPct:   { fontWeight: '700', textAlign: 'center' },
-  donutLabel: { fontSize: 9, letterSpacing: 0.5, textAlign: 'center' },
-  storageRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-    gap: 8,
-  },
-  storageDot:   { width: 8, height: 8, borderRadius: 4 },
-  storageLabel: { fontSize: 12, flex: 1 },
-  storageVal:   { fontSize: 12, fontWeight: '600' },
 });

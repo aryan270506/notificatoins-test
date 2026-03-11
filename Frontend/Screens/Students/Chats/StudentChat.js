@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import * as Sharing from 'expo-sharing';
 import axiosInstance from '../../../Src/Axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width } = Dimensions.get('window');
 const isLaptop = width >= 768;
@@ -306,6 +307,9 @@ export default function StudentChat({ C, onThemeToggle, user }) {
       console.log(`[StudentChat] Received ${data.count} message(s)`);
       setMessages(data.data.map(mapMessage));
       setUpdatedAt(new Date());
+
+      // Mark messages as read
+      await AsyncStorage.setItem('lastReadChat', new Date().toISOString());
     } catch (err) {
       console.error('[StudentChat] fetch error:', err);
       if (!silent) setError('Could not load messages. Pull down to retry.');

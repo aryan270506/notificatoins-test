@@ -9,9 +9,16 @@ import {
   SafeAreaView,
   StatusBar,
   RefreshControl,
+  Alert,
+  ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { Image } from 'react-native';
 import axiosInstance from '../../../Src/Axios';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const isTabletOrDesktop = SCREEN_WIDTH >= 768;
@@ -22,6 +29,7 @@ export default function StudentExamResults({ C, onThemeToggle, user }) {
   const [marksData,  setMarksData]  = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [pressedRow, setPressedRow] = useState(null);
+  const [downloadLoading, setDownloadLoading] = useState(false);
 
   // ── Theme fallbacks ───────────────────────────────────────────────────────
   const bg        = C?.bg          ?? '#0d1b2e';
@@ -168,6 +176,260 @@ export default function StudentExamResults({ C, onThemeToggle, user }) {
   // Format "obtained/max" — shows "—" if max is 0 (exam not uploaded yet)
   const fmtMark = (obtained, max) => max === 0 ? '—' : `${obtained}/${max}`;
 
+  // ── PDF Download Function (Mobile & Web Compatible) ────────────────────────
+  const downloadTranscriptAsPDF = async () => {
+    try {
+      setDownloadLoading(true);
+      
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+      });
+
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      let yPosition = 15;
+
+      // Header Title
+      pdf.setFontSize(20);
+      pdf.setTextColor(37, 99, 235);
+      pdf.text('CAT Exam Results', pageWidth / 2, yPosition, { align: 'center' });
+      yPosition += 10;
+
+      // Subtitle
+      pdf.setFontSize(10);
+      pdf.setTextColor(100, 100, 100);
+      pdf.text('Continuous Assessment Test', pageWidth / 2, yPosition, { align: 'center' });
+      yPosition += 12;
+
+      // Student Information
+      pdf.setFontSize(11);
+      pdf.setTextColor(50, 50, 50);
+      pdf.text(`Student Name: ${user?.name || 'N/A'}`, 15, yPosition);
+      yPosition += 7;
+      pdf.text(`Student ID: ${user?.id || 'N/A'}`, 15, yPosition);
+      yPosition += 7;
+      pdf.text(`Department: ${user?.department || 'N/A'}`, 15, yPosition);
+      yPosition += 7;
+      pdf.text(`Generated: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`, 15, yPosition);
+      yPosition += 12;
+
+      // Overall Performance Section
+      pdf.setFontSize(12);
+      pdf.setTextColor(37, 99, 235);
+      pdf.text('Overall Performance', 15, yPosition);
+      yPosition += 7;
+
+      pdf.setFontSize(10);
+      pdf.setTextColor(50, 50, 50);
+      pdf.text(`Performance Score: ${overallPerf.pct}`, 15, yPosition);
+      yPosition += 6;
+      pdf.text(`Status: ${overallPerf.label}`, 15, yPosition);
+      yPosition += 6;
+      pdf.text(`Subjects Passed: ${passedCount} / ${marksData.length}`, 15, yPosition);
+      yPosition += 10;
+
+      // Prepare table data
+      const tableData = marksData.map((subject) => [
+        subject.name,
+        `${subject.internal}/${subject.internalMax}`,
+        subject.cat1Max > 0 ? `${subject.cat1}/${subject.cat1Max}` : '—',
+        subject.cat2Max > 0 ? `${subject.cat2}/${subject.cat2Max}` : '—',
+        subject.fetMax > 0 ? `${subject.fet}/${subject.fetMax}` : '—',
+        subject.status,
+      ]);
+
+      // Add table with autoTable or manual fallback
+      if (typeof pdf.autoTable === 'function') {
+        // Use autoTable if available (mobile)
+        pdf.autoTable({
+          head: [['Subject Name', 'Internal', 'CAT 1', 'CAT 2', 'FET', 'Status']],
+          body: tableData,
+          startY: yPosition,
+          theme: 'grid',
+          headStyles: {
+            fillColor: [37, 99, 235],
+            textColor: [255, 255, 255],
+            fontStyle: 'bold',
+            fontSize: 10,
+            halign: 'center',
+          },
+          bodyStyles: {
+            textColor: [50, 50, 50],
+            fontSize: 9,
+            halign: 'center',
+          },
+          columnStyles: {
+            0: { halign: 'left', cellWidth: 50 },
+            1: { halign: 'center', cellWidth: 30 },
+            2: { halign: 'center', cellWidth: 30 },
+            3: { halign: 'center', cellWidth: 30 },
+            4: { halign: 'center', cellWidth: 30 },
+            5: { halign: 'center', cellWidth: 25 },
+          },
+          alternateRowStyles: {
+            fillColor: [245, 245, 245],
+          },
+          margin: { top: yPosition, left: 10, right: 10 },
+        });
+      } else {
+        // Manual table generation for web
+        const colWidth = [100, 20, 18, 18, 18, 18];  // Subject name gets more space
+        const rowHeight = 8;
+        const headers = ['Subject Name', 'Internal', 'CAT 1', 'CAT 2', 'FET', 'Status'];
+        const pageMargin = 15;
+        const maxTextWidth = colWidth[0] - 2;
+
+        // Helper function to wrap text in a fixed width
+        const wrapText = (pdf, text, maxWidth, lineHeight = 3) => {
+          const lines = [];
+          const words = String(text).split(' ');
+          let currentLine = '';
+
+          words.forEach(word => {
+            const testLine = currentLine + (currentLine ? ' ' : '') + word;
+            const textWidth = pdf.getStringUnitWidth(testLine) * pdf.internal.getFontSize() / pdf.internal.scaleFactor;
+            
+            if (textWidth > maxWidth && currentLine) {
+              lines.push(currentLine);
+              currentLine = word;
+            } else {
+              currentLine = testLine;
+            }
+          });
+
+          if (currentLine) lines.push(currentLine);
+          return lines;
+        };
+
+        // Draw header
+        pdf.setFillColor(37, 99, 235);
+        pdf.setTextColor(255, 255, 255);
+        pdf.setFontSize(9);
+        pdf.setFont(undefined, 'bold');
+
+        let xPos = pageMargin;
+        let headerY = yPosition;
+        headers.forEach((header, idx) => {
+          pdf.rect(xPos, headerY, colWidth[idx], rowHeight, 'F');
+          pdf.text(header, xPos + colWidth[idx] / 2, headerY + 5, { align: 'center', maxWidth: colWidth[idx] - 1 });
+          xPos += colWidth[idx];
+        });
+
+        yPosition += rowHeight;
+
+        // Draw rows
+        pdf.setTextColor(50, 50, 50);
+        pdf.setFont(undefined, 'normal');
+        pdf.setFontSize(8);
+
+        tableData.forEach((row, rowIdx) => {
+          xPos = pageMargin;
+          const isAlternate = rowIdx % 2 === 1;
+          
+          // Calculate row height based on wrapped text
+          let maxLines = 1;
+          const wrappedCells = row.map((cell, idx) => {
+            if (idx === 0) {
+              const lines = wrapText(pdf, cell, maxTextWidth);
+              maxLines = Math.max(maxLines, lines.length);
+              return lines;
+            }
+            return [String(cell)];
+          });
+
+          const dynamicRowHeight = 3 + (maxLines * 3);
+          
+          if (isAlternate) {
+            pdf.setFillColor(245, 245, 245);
+            let fillWidth = colWidth.reduce((a, b) => a + b, 0);
+            pdf.rect(pageMargin, yPosition, fillWidth, dynamicRowHeight, 'F');
+          }
+
+          // Draw borders and content
+          pdf.setDrawColor(200, 200, 200);
+          pdf.setLineWidth(0.3);
+          let cellX = pageMargin;
+
+          row.forEach((cell, cellIdx) => {
+            // Draw cell border
+            pdf.rect(cellX, yPosition, colWidth[cellIdx], dynamicRowHeight);
+
+            // Draw cell content
+            pdf.setTextColor(50, 50, 50);
+            const cellText = String(cell);
+            const align = cellIdx === 0 ? 'left' : 'center';
+
+            if (cellIdx === 0) {
+              // Subject name - handle wrapped text
+              const lines = wrappedCells[cellIdx];
+              lines.forEach((line, lineIdx) => {
+                pdf.text(line, cellX + 2, yPosition + 3 + (lineIdx * 3), { maxWidth: colWidth[cellIdx] - 4 });
+              });
+            } else {
+              // Other columns - centered
+              pdf.text(cellText, cellX + colWidth[cellIdx] / 2, yPosition + 5, { align, maxWidth: colWidth[cellIdx] - 1 });
+            }
+
+            cellX += colWidth[cellIdx];
+          });
+
+          yPosition += dynamicRowHeight;
+        });
+      }
+
+      // Footer
+      const footerY = pageHeight - 10;
+      pdf.setFontSize(8);
+      pdf.setTextColor(150, 150, 150);
+      pdf.text(
+        `Page 1 of 1 | Generated on ${new Date().toLocaleString()}`,
+        pageWidth / 2,
+        footerY,
+        { align: 'center' }
+      );
+
+      const fileName = `CAT_Results_${user?.id || 'Student'}_${Date.now()}.pdf`;
+
+      // Handle Web/Desktop and Mobile differently
+      if (Platform.OS === 'web') {
+        // Web/Desktop: Use browser download
+        const pdfDataUri = pdf.output('datauristring');
+        const link = document.createElement('a');
+        link.href = pdfDataUri;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        Alert.alert('Success', 'CAT Results PDF downloaded successfully!');
+      } else {
+        // Mobile: Use Expo FileSystem and Sharing
+        const fileUri = `${FileSystem.documentDirectory}${fileName}`;
+        const pdfData = pdf.output('datauristring');
+        const base64Data = pdfData.split(',')[1];
+
+        await FileSystem.writeAsStringAsync(fileUri, base64Data, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'application/pdf',
+          dialogTitle: 'Share CAT Exam Results',
+          UTI: 'com.adobe.pdf',
+        });
+
+        Alert.alert('Success', 'CAT Results PDF downloaded successfully!');
+      }
+
+      setDownloadLoading(false);
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      setDownloadLoading(false);
+      Alert.alert('Error', 'Failed to generate PDF. Please try again.');
+    }
+  };
+
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: bg }]}>
@@ -246,16 +508,22 @@ export default function StudentExamResults({ C, onThemeToggle, user }) {
             </View>
           </View>
           <View style={styles.profileActions}>
-            <TouchableOpacity style={[styles.downloadBtn, { backgroundColor: accent }]} activeOpacity={0.75}>
-              <Text style={styles.downloadIcon}>↓</Text>
-              <Text style={styles.downloadText}>Download Transcript</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.arrowBtn, { backgroundColor: C?.accentBg ?? '#1e3a5f', borderColor: border }]}
+            <TouchableOpacity 
+              style={[styles.downloadBtn, { backgroundColor: accent, opacity: downloadLoading ? 0.6 : 1 }]} 
               activeOpacity={0.75}
+              onPress={downloadTranscriptAsPDF}
+              disabled={downloadLoading}
             >
-              <Text style={[styles.arrowBtnText, { color: accent }]}>→</Text>
+              {downloadLoading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <Text style={styles.downloadIcon}>↓</Text>
+                  <Text style={styles.downloadText}>Download Transcript</Text>
+                </>
+              )}
             </TouchableOpacity>
+            
           </View>
         </View>
 
@@ -346,12 +614,11 @@ export default function StudentExamResults({ C, onThemeToggle, user }) {
                     onPressIn={() => setPressedRow(index)}
                     onPressOut={() => setPressedRow(null)}
                   >
-                    {/* Subject name + type badge */}
+                    {/* Subject name */}
                     <View style={{ width: 220, paddingRight: 8 }}>
                       <Text style={[styles.subjectName, { color: textPri }]} numberOfLines={2}>
                         {subject.name}
                       </Text>
-                      
                     </View>
 
                     {/* Internal — obtained/total from backend */}

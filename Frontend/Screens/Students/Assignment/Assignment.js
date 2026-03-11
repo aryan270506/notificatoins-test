@@ -317,19 +317,7 @@ export default function StudentAssignment({ C, user }) {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.accent} />}
       >
         {/* ── DEBUG PANEL — remove once fetching works ── */}
-        <View style={{ backgroundColor: '#1a1a2e', borderRadius: 8, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: '#ff6b6b' }}>
-          <Text style={{ color: '#ff6b6b', fontSize: 9, fontWeight: '800', marginBottom: 4 }}>🔍 DEBUG (remove after fix)</Text>
-          <Text style={{ color: '#ffd93d', fontSize: 10, lineHeight: 16 }}>
-            {`stored year: ${studentInfo?.year ?? studentInfo?.class ?? 'NOT FOUND'}\n`}
-            {`stored div:  ${studentInfo?.division ?? studentInfo?.div ?? studentInfo?.section ?? 'NOT FOUND'}\n`}
-            {`studentId:   ${String(studentInfo?._id ?? studentInfo?.id ?? 'NOT FOUND')}\n`}
-            {`assignments: ${assignments.length}\n`}
-            {`status: ${debugInfo}`}
-          </Text>
-          <Text style={{ color: '#6bcbff', fontSize: 9, marginTop: 4 }}>
-            {`All keys in studentData: ${studentInfo ? Object.keys(studentInfo).join(', ') : 'none'}`}
-          </Text>
-        </View>
+    
 
         {/* ── Header ── */}
         <View style={styles.header}>

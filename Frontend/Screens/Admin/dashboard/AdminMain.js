@@ -249,35 +249,6 @@ export default function AdminMain({ navigation, route }) {
 
   const [activeRoute, setActiveRoute] = useState('dashboard');
   const [isOpen,      setIsOpen]      = useState(false);
-
-    // ── Quick Broadcast State ──
-    const [recentBroadcast, setRecentBroadcast] = useState(null);
-    const [editBroadcastMode, setEditBroadcastMode] = useState(false);
-    const [editBroadcastMsg, setEditBroadcastMsg] = useState('');
-
-    // ── Broadcast Send Handler ──
-    const handleSendBroadcast = async (msg, year, priority) => {
-      // Simulate send, update recentBroadcast
-      const sent = {
-        message: msg,
-        year,
-        priority,
-        time: new Date().toLocaleString(),
-      };
-      setRecentBroadcast(sent);
-    };
-    const handleEditBroadcast = () => {
-      setEditBroadcastMode(true);
-      setEditBroadcastMsg(recentBroadcast?.message || '');
-    };
-    const handleSaveEditBroadcast = () => {
-      setRecentBroadcast({ ...recentBroadcast, message: editBroadcastMsg });
-      setEditBroadcastMode(false);
-    };
-    const handleCancelEditBroadcast = () => {
-      setEditBroadcastMode(false);
-      setEditBroadcastMsg('');
-    };
   const [notifications,    setNotifications]    = useState([]);
   const [showNotifPanel,   setShowNotifPanel]   = useState(false);
   const [lastSeenAt,       setLastSeenAt]       = useState(() => new Date().toISOString());
@@ -439,60 +410,6 @@ export default function AdminMain({ navigation, route }) {
               <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
                 {notifications.length === 0 ? (
                   <View style={ns.emptyBox}>
-              {/* Quick Broadcast Section */}
-              <View style={{ flexDirection: 'column', marginBottom: 24 }}>
-                {/* Top Half: Send Broadcast */}
-                <View style={{ borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 16 }}>
-                  <Text style={{ fontSize: 16, fontWeight: '700', marginBottom: 8, color: colors.textPrim }}>Quick Broadcast</Text>
-                  {/* Input for new broadcast */}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 12, color: colors.textMuted }}>Message:</Text>
-                      <View style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 8 }}>
-                        <Text>{'Type your broadcast message here...'}</Text>
-                      </View>
-                    </View>
-                    <TouchableOpacity style={{ backgroundColor: colors.accent, borderRadius: 8, padding: 10 }} onPress={() => handleSendBroadcast('Sample message', 'all', false)}>
-                      <Text style={{ color: '#fff', fontWeight: '600' }}>Send</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-                {/* Bottom Half: Recent Broadcast */}
-                <View style={{ paddingTop: 16 }}>
-                  <Text style={{ fontSize: 14, fontWeight: '600', marginBottom: 6, color: colors.textSec }}>Most Recent Broadcast</Text>
-                  {recentBroadcast ? (
-                    editBroadcastMode ? (
-                      <View>
-                        <View style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 8, marginBottom: 8 }}>
-                          <TextInput
-                            value={editBroadcastMsg}
-                            onChangeText={setEditBroadcastMsg}
-                            style={{ color: colors.textPrim, fontSize: 13 }}
-                          />
-                        </View>
-                        <View style={{ flexDirection: 'row', gap: 8 }}>
-                          <TouchableOpacity style={{ backgroundColor: colors.accent, borderRadius: 8, padding: 8 }} onPress={handleSaveEditBroadcast}>
-                            <Text style={{ color: '#fff' }}>Save</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity style={{ backgroundColor: colors.accentRed, borderRadius: 8, padding: 8 }} onPress={handleCancelEditBroadcast}>
-                            <Text style={{ color: '#fff' }}>Cancel</Text>
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    ) : (
-                      <View style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 8 }}>
-                        <Text style={{ color: colors.textPrim, fontSize: 13 }}>{recentBroadcast.message}</Text>
-                        <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 4 }}>Year: {recentBroadcast.year} | Priority: {recentBroadcast.priority ? 'High' : 'Normal'} | Sent: {recentBroadcast.time}</Text>
-                        <TouchableOpacity style={{ marginTop: 8, backgroundColor: colors.accentBlue, borderRadius: 8, padding: 8, alignSelf: 'flex-end' }} onPress={handleEditBroadcast}>
-                          <Text style={{ color: '#fff', fontWeight: '600' }}>Edit Message</Text>
-                        </TouchableOpacity>
-                      </View>
-                    )
-                  ) : (
-                    <Text style={{ color: colors.textMuted }}>No broadcast sent yet.</Text>
-                  )}
-                </View>
-              </View>
                     <Text style={{ fontSize: 36 }}>📭</Text>
                     <Text style={[ns.emptyText, { color: isDark ? '#8b949e' : '#9aa5b4' }]}>No notifications yet</Text>
                   </View>
