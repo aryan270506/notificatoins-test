@@ -150,17 +150,30 @@ const AnalysisModal = ({ visible, results, onSubmit, onCancel, C, submitting }) 
             </View>
           </View>
 
-          <View style={[s.statusBanner, {
-            backgroundColor: (overallOk ? successColor : warnColor) + '22',
-            borderColor:      overallOk ? successColor : warnColor,
-          }]}>
-            <Icon name={overallOk ? 'checkCircle' : 'warning'} size={16} />
-            <Text style={[s.statusText, { color: overallOk ? successColor : warnColor }]}>
-              {overallOk
-                ? 'Your submission passes integrity checks.'
-                : 'High AI or similarity detected. Proceed with caution.'}
-            </Text>
-          </View>
+          {results.analysisUnavailable && (
+  <View style={[s.statusBanner, {
+    backgroundColor: (C.orange ?? '#e67700') + '22',
+    borderColor: C.orange ?? '#e67700',
+    marginBottom: 8,
+  }]}>
+    <Icon name="warning" size={16} />
+    <Text style={[s.statusText, { color: C.orange ?? '#e67700' }]}>
+      AI analysis service is offline. Showing 0% — you can still submit.
+    </Text>
+  </View>
+)}
+
+<View style={[s.statusBanner, {
+  backgroundColor: (overallOk ? successColor : warnColor) + '22',
+  borderColor:      overallOk ? successColor : warnColor,
+}]}>
+  <Icon name={overallOk ? 'checkCircle' : 'warning'} size={16} />
+  <Text style={[s.statusText, { color: overallOk ? successColor : warnColor }]}>
+    {overallOk
+      ? 'Your submission passes integrity checks.'
+      : 'High AI or similarity detected. Proceed with caution.'}
+  </Text>
+</View>
 
           <View style={s.modalActions}>
             <TouchableOpacity
@@ -315,37 +328,33 @@ const WorkPanel = ({ C, assignment, studentId, studentName, onSubmitted }) => {
 
   // ── Step 1: run integrity check ─────────────────────────────────────────────
   const handleCheckIn = async () => {
-    if (uploadedFiles.length === 0) {
-      Alert.alert('No file', 'Please upload a file before checking in.');
-      return;
-    }
-    const asset = uploadedFiles[uploadedFiles.length - 1];
-    setChecking(true);
-    setCheckStep('upload');
+  if (uploadedFiles.length === 0) {
+    Alert.alert('No file', 'Please upload a file before checking in.');
+    return;
+  }
+  const asset = uploadedFiles[uploadedFiles.length - 1];
+  setChecking(true);
+  setCheckStep('upload');
 
-    try {
-      const formData = await buildFormData(asset);
-      setCheckStep('ai');
+  try {
+    const formData = await buildFormData(asset);
+    setCheckStep('ai');
 
-      const baseURL = axiosInstance.defaults.baseURL;
-      const token   = getAuthToken();
+    const baseURL = axiosInstance.defaults.baseURL;
+    const token   = getAuthToken();
 
-      const response = await fetch(`${baseURL}/ai/analyze`, {
-        method: 'POST',
-        body:   formData,
-        headers: { Accept: 'application/json', ...(token ? { Authorization: token } : {}) },
-      });
+    const response = await fetch(`${baseURL}/ai/analyze`, {
+      method: 'POST',
+      body:   formData,
+      headers: { Accept: 'application/json', ...(token ? { Authorization: token } : {}) },
+    });
 
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error ?? `Server error ${response.status}`);
-      }
+    setCheckStep('sim');
+    setCheckStep('done');
+    await new Promise(r => setTimeout(r, 600));
 
+    if (response.ok) {
       const data = await response.json();
-      setCheckStep('sim');
-      setCheckStep('done');
-      await new Promise(r => setTimeout(r, 600));
-
       const ai = data.ai_detection ?? {};
       const cp = data.copy_detection ?? {};
 
@@ -354,22 +363,32 @@ const WorkPanel = ({ C, assignment, studentId, studentName, onSubmitted }) => {
         aiPercent:         Math.round(ai.final_ai_probability_percent ?? 0),
         similarityPercent: Math.round(cp.final_copy_percent ?? 0),
       });
-      setShowResult(true);
-    } catch (err) {
-      console.error('Check-in error:', err.message);
-      // If AI service is unavailable, still allow submission with a warning
-      Alert.alert(
-        'Analysis Unavailable',
-        'Could not run the integrity check. Would you like to submit directly?',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Submit Anyway', onPress: () => saveSubmissionToMongo() },
-        ]
-      );
-    } finally {
-      setChecking(false);
+    } else {
+      // Server returned error — show modal with 0% so student can still submit
+      setAnalysisResult({
+        fileName:          asset.name,
+        aiPercent:         0,
+        similarityPercent: 0,
+        analysisUnavailable: true,
+      });
     }
-  };
+
+    setShowResult(true);
+
+  } catch (err) {
+    console.warn('Check-in error:', err.message);
+    // Network error — show modal with 0% so student can still submit
+    setAnalysisResult({
+      fileName:          asset.name,
+      aiPercent:         0,
+      similarityPercent: 0,
+      analysisUnavailable: true,
+    });
+    setShowResult(true);
+  } finally {
+    setChecking(false);
+  }
+};
 
   // ── Step 2: save submission in MongoDB ──────────────────────────────────────
   const saveSubmissionToMongo = async () => {

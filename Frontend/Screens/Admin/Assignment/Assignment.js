@@ -149,12 +149,7 @@ export default function Assignment({ onBack }) {
                       <Text style={[s.yearLabel, { color: isActive ? year.color : C.textPrim }]}>
                         {year.label}
                       </Text>
-                      <Text style={[s.yearSub, { color: C.textSec }]}>
-                        {year.short === '1st' ? '~3,200 students'
-                          : year.short === '2nd' ? '~3,050 students'
-                          : year.short === '3rd' ? '~3,100 students'
-                          : '~3,130 students'}
-                      </Text>
+                      
                     </View>
                     <View style={[s.radioOuter, { borderColor: isActive ? year.color : C.border }]}>
                       {isActive && <View style={[s.radioInner, { backgroundColor: year.color }]} />}
@@ -206,7 +201,7 @@ export default function Assignment({ onBack }) {
                         </Text>
                       </View>
                       <Text style={[s.divLabel2,   { color: isActive ? accentColor : C.textSec }]}>Division</Text>
-                      <Text style={[s.divStudents, { color: C.textSec }]}>~1,050</Text>
+                      <Text style={[s.divStudents, { color: C.textSec }]}></Text>
                       {isActive && (
                         <View style={[s.divCheck, { backgroundColor: accentColor }]}>
                           <Text style={s.divCheckText}>✓</Text>

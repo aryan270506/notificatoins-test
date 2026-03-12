@@ -17,15 +17,15 @@ const showAlert = (title, message) => {
 
 // ─── Mock Data ────────────────────────────────────────────────────────────────
 const YEARS = [
-  { id: 1, label: '1st Year', students: '~3,200 students', icon: '🎒' },
-  { id: 2, label: '2nd Year', students: '~3,050 students', icon: '📚' },
-  { id: 3, label: '3rd Year', students: '~3,100 students', icon: '🔬' },
-  { id: 4, label: '4th Year', students: '~3,130 students', icon: '🏆' },
+  { id: 1, label: '1st Year', icon: '🎒' },
+  { id: 2, label: '2nd Year', icon: '📚' },
+  { id: 3, label: '3rd Year', icon: '🔬' },
+  { id: 4, label: '4th Year', icon: '🏆' },
 ];
 const DIVISIONS = [
-  { id: 'A', students: '~1,050' },
-  { id: 'B', students: '~1,050' },
-  { id: 'C', students: '~1,050' },
+  { id: 'A' },
+  { id: 'B' },
+  { id: 'C' },
 ];
 
 const FEE_CATEGORIES = [

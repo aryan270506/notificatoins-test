@@ -1072,12 +1072,7 @@ export default function DataImportCenter() {
         <View style={[s.sectionHeader, !isTablet && s.sectionHeaderMobile]}>
           <Text style={[s.sectionTitle, { color: colors.textPrim }]}>Import Data Sources</Text>
           <View style={[s.sectionActions, !isTablet && s.sectionActionsMobile]}>
-            <TouchableOpacity style={s.actionBtn} onPress={() => Alert.alert('Process Queue', '3 files queued for processing.')} activeOpacity={0.8}>
-              <Text style={s.actionBtnTxt}>▶  Process Queue</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[s.actionBtn, s.actionBtnOutline, { borderColor: colors.border }]} onPress={() => Alert.alert('Export Logs', 'Activity logs exported.')} activeOpacity={0.8}>
-              <Text style={[s.actionBtnTxt, { color: colors.textPrim }]}>📄  Export Logs</Text>
-            </TouchableOpacity>
+            
           </View>
         </View>
 
@@ -1145,9 +1140,7 @@ export default function DataImportCenter() {
         <View style={[s.historySection, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <View style={[s.historyHeader, { borderBottomColor: colors.border }]}>
             <Text style={[s.sectionTitle, { color: colors.textPrim }]}>Recent Upload History</Text>
-            <TouchableOpacity onPress={() => Alert.alert('History', 'Navigating to full history…')} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={[s.viewAllTxt, { color: colors.accentWarn }]}>View All →</Text>
-            </TouchableOpacity>
+            
           </View>
 
           {isTablet && (
@@ -1157,7 +1150,7 @@ export default function DataImportCenter() {
               <Text style={[s.thTxt, { flex: 1, color: colors.textMuted }]}>STATUS</Text>
               <Text style={[s.thTxt, { flex: 1.6, color: colors.textMuted }]}>DATE</Text>
               <Text style={[s.thTxt, { flex: 1.2, color: colors.textMuted }]}>ADMIN</Text>
-              <Text style={[s.thTxt, { flex: 0.4, textAlign: 'center', color: colors.textMuted }]}>⋮</Text>
+             
             </View>
           )}
 
