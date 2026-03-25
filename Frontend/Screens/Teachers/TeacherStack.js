@@ -170,9 +170,11 @@ export default function TeacherStack({ route }) {
         {/* ── Full-screen screens — no Sidebar, no lock needed ─────────── */}
         <Stack.Screen
           name="DoubtSolveScreen"
-          component={DoubtSolveScreen}
           options={{ animation: 'slide_from_right' }}
-        />
+        >
+          {props => <DoubtSolveScreen {...props} user={user} />}
+        </Stack.Screen>
+        {props => <DoubtSolveScreen {...props} user={user} />}
         <Stack.Screen name="SelectionScreen"  component={SelectionScreen}  />
         <Stack.Screen name="MessagingScreen"  component={MessagingScreen}  />
         <Stack.Screen name="AttendanceRecord">

@@ -21,9 +21,10 @@ const lessonPlannerRoutes = require("./Routes/Lessonplannerroutes");
 const quizRoutes = require("./Routes/QuizRoutes");
 const studentFinanceRoutes = require("./Routes/FinanceRoutes");
 const timeTableRoutes = require("./Routes/TimeTableRoutes");
-const DoubtRoutes = require("./Routes/DoubtsRoutes");
 const StudentFinanceRoutes = require("./Routes/FinanceRoutes");
-const aiDoubtRoutes = require('./Routes/AI-DoubtRoutes.js'); // AI Doubt Resolver routes
+const aiDoubtRoutes = require('./Routes/AI-DoubtRoutes.js');
+const subjectRoomsRoutes = require("./Routes/DoubtsRoutes");
+
 
 const permissionRoutes = require("./Routes/PermissionRoutes");
 
@@ -40,7 +41,7 @@ const server = http.createServer(app);
 // ─── CORS Configuration ────────────────────────────────────────────
 app.use(
   cors({
-    origin: "*", // Allow all (for development)
+    origin: "*",
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
     allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,
@@ -138,12 +139,10 @@ app.use("/api/lesson-planner", lessonPlannerRoutes);
 app.use("/api/quiz", quizRoutes);
 app.use("/api/student-finance", studentFinanceRoutes);
 app.use("/api/timetable", timeTableRoutes);
-app.use("/api/doubts", DoubtRoutes);
-app.use('/api/ai-doubts', aiDoubtRoutes); // AI Doubt Resolver routes 
+app.use('/api/ai-doubts', aiDoubtRoutes);
+app.use("/api/subject-rooms", subjectRoomsRoutes); // ← Subject chat rooms
 app.use("/api/permissions", permissionRoutes);
-
-app.use("/api/finance", StudentFinanceRoutes); // Added finance route
-// AI endpoints
+app.use("/api/finance", StudentFinanceRoutes);
 app.use("/api/ai", aiRoutes);
 
 // ─── Static Files ─────────────────────────────────────────────────
@@ -178,7 +177,6 @@ server.listen(PORT, async () => {
   console.log(`📍 Environment: ${process.env.NODE_ENV || "development"}`);
   console.log(`🔗 API Base URL: http://localhost:${PORT}/api`);
 
-  // Check if AI server is reachable
   try {
     const axios = require("axios");
     const res = await axios.get("http://localhost:8000/health", { timeout: 5000 });

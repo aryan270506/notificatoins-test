@@ -164,6 +164,7 @@ export default function AssignmentPortal({
     return (
       <AssignmentSubmission
         assignment={selectedAssignment}
+           
         onBack={() => setSelectedAssignment(null)}
         C={C}
         studentId={studentId}

@@ -1,384 +1,279 @@
-  const express  = require('express');
-  const router   = express.Router();
-  const Doubt    = require('../Models/Doubt');
-  const Student  = require('../Models/Student');
-  const Teacher  = require('../Models/Teacher');
-  const mongoose = require('mongoose');
+// routes/subjectRooms.js
+// ONE room per subject + year — shared by ALL divisions and ALL teachers.
+// Subject name is always normalized to UPPERCASE before any DB operation.
+// Supports text messages (JSON) AND file/image uploads (multipart/form-data).
 
-  // ═══════════════════════════════════════════════════════════════════════════════
-  //  STATUS MAPPING
-  //  DB stores:   'OPEN' | 'RESOLVED'
-  //  Frontend UI: 'PENDING' | 'IN REVIEW' | 'RESOLVED'
-  //
-  //  Mapping:
-  //    DB 'OPEN'     → UI 'PENDING'   (no teacher reply yet)
-  //    DB 'OPEN'     → UI 'IN REVIEW' (at least one teacher reply exists)
-  //    DB 'RESOLVED' → UI 'RESOLVED'
-  // ═══════════════════════════════════════════════════════════════════════════════
+const express  = require("express");
+const router   = express.Router();
+const Doubt    = require("../Models/Doubt");
+const mongoose = require("mongoose");
+const multer   = require("multer");
+const path     = require("path");
+const fs       = require("fs");
 
-  /**
-   * Derive the UI status from a doubt document.
-   * - RESOLVED  → 'RESOLVED'
-   * - OPEN with a teacher message → 'IN REVIEW'
-   * - OPEN with no teacher message → 'PENDING'
-   */
-  function deriveUiStatus(doubt) {
-    if (doubt.status === 'RESOLVED') return 'RESOLVED';
-    const hasTeacherReply = (doubt.messages || []).some(
-      (m) => m.sender === 'teacher'
-    );
-    return hasTeacherReply ? 'IN REVIEW' : 'PENDING';
+// ── Ensure uploads/chat directory exists ──────────────────────────────────────
+const UPLOAD_DIR = path.join(__dirname, "../uploads/chat");
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+// ── Multer config — ONLY used for multipart/form-data requests ────────────────
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
+  filename: (_req, file, cb) => {
+    const ext  = path.extname(file.originalname);
+    const base = path.basename(file.originalname, ext)
+      .replace(/[^a-zA-Z0-9_-]/g, "_")
+      .slice(0, 60);
+    cb(null, `${Date.now()}_${base}${ext}`);
+  },
+});
+
+const fileFilter = (_req, file, cb) => {
+  const allowed = [
+    "image/jpeg", "image/png", "image/gif", "image/webp",
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "text/plain",
+    // React Native sometimes sends octet-stream — accept and trust the filename
+    "application/octet-stream",
+  ];
+  if (allowed.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error(`File type not allowed: ${file.mimetype}`), false);
   }
+};
 
-  /**
-   * Attach a virtual `uiStatus` field to a plain doubt object.
-   */
-  function withUiStatus(doubt) {
-    const obj = doubt.toObject ? doubt.toObject() : { ...doubt };
-    obj.uiStatus = deriveUiStatus(obj);
-    // Mirror as `status` so existing frontend code that reads `d.status` works
-    obj.status   = obj.uiStatus;
-    return obj;
+const multerUpload = multer({
+  storage,
+  fileFilter,
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
+});
+
+// ── Smart middleware: run multer ONLY for multipart, skip for JSON ────────────
+// This avoids multer consuming JSON bodies and leaving req.body empty.
+const smartUpload = (req, res, next) => {
+  const ct = (req.headers["content-type"] || "").toLowerCase();
+  if (ct.includes("multipart/form-data")) {
+    // multipart request — let multer parse body + file
+    multerUpload.single("file")(req, res, (err) => {
+      if (!err) return next();
+      const msg =
+        err.code === "LIMIT_FILE_SIZE"
+          ? "File too large. Maximum is 20 MB."
+          : err.message || "File upload error.";
+      return res.status(400).json({ success: false, error: msg });
+    });
+  } else {
+    // JSON / url-encoded request — express.json() already parsed req.body, skip multer
+    next();
   }
+};
 
-  // ── GET /api/doubts  ───────────────────────────────────────────────────────────
-  // Returns ALL doubts (teacher dashboard).
-  // Excludes doubts whose DB status is 'RESOLVED' so they disappear from teacher view.
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const normalizeSubject = (subject) =>
+  subject ? subject.trim().toUpperCase().replace(/\s+/g, " ") : "";
 
+const roomKey = (subject, year) => `${normalizeSubject(subject)}_${year}`;
 
-  // ── POST /api/doubts  ──────────────────────────────────────────────────────────
-  // Body: { studentId, subject, title, messageText, teacherId }
-  router.post('/', async (req, res) => {
-    try {
-      const { studentId, subject, title, messageText, teacherId } = req.body;
+const buildFileUrl = (req, filename) =>
+  `${req.protocol}://${req.get("host")}/uploads/chat/${filename}`;
 
-      if (!studentId || !subject || !messageText) {
-        return res.status(400).json({
-          error: 'studentId, subject, and messageText are required.',
-        });
-      }
-
-      const student = await Student.findById(studentId);
-      if (!student) {
-        return res.status(404).json({ error: 'Student not found.' });
-      }
-
-      // Resolve teacherId
-      let resolvedTeacherId   = teacherId;
-      let resolvedTeacherName = 'Faculty';
-
-      if (!resolvedTeacherId) {
-        const subjectRegex = new RegExp(`^${subject}$`, 'i');
-        const teacher = await Teacher.findOne({
-          years:     { $in: [parseInt(student.year)] },
-          divisions: { $in: [student.division]       },
-          $or: [
-            { [`subjects.year${student.year}`]:     { $regex: subjectRegex } },
-            { [`course_codes.year${student.year}`]: { $regex: subjectRegex } },
-          ],
-        });
-        if (teacher) {
-          resolvedTeacherId   = teacher._id.toString();
-          resolvedTeacherName = teacher.name || 'Faculty';
-        }
-      }
-
-      if (!resolvedTeacherId) {
-        return res.status(400).json({
-          error: 'Could not resolve a teacher for this subject.',
-        });
-      }
-
-      const studentInitials = student.name
-        ? student.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
-        : 'ST';
-
-      const doubt = new Doubt({
-        studentId,
-        studentName:     student.name,
-        studentClass:    student.year    || '',
-        division:        student.division || '',
-        studentInitials,
-        teacherId:       resolvedTeacherId,
-        subject,
-        title:           title || messageText.substring(0, 80),
-        status:          'OPEN',
-        messages: [{
-          sender:   'student',
-          senderId: studentId,
-          text:     messageText,
-        }],
-      });
-
-      await doubt.save();
-      res.status(201).json({ success: true, doubt: withUiStatus(doubt) });
-    } catch (err) {
-      console.error('POST /doubts:', err);
-      res.status(500).json({ error: 'Server error while creating doubt.' });
-    }
-  });
-
-  // ── POST /api/doubts/broadcast  ───────────────────────────────────────────────
-  // Body: { teacherId, subject, message }
-  router.post('/broadcast', async (req, res) => {
-    try {
-      const { teacherId, subject, message } = req.body;
-
-      if (!teacherId || !message) {
-        return res.status(400).json({ error: 'teacherId and message are required.' });
-      }
-
-      // Find all open doubts for this teacher (optionally filtered by subject)
-      const query = { teacherId, status: { $ne: 'RESOLVED' } };
-      if (subject) query.subject = new RegExp(`^${subject}$`, 'i');
-
-      const doubts = await Doubt.find(query);
-
-      // Append the broadcast message to every matching doubt
-      await Promise.all(
-        doubts.map((d) => {
-          d.messages.push({
-            sender:   'teacher',
-            senderId: teacherId,
-            text:     `📢 Broadcast: ${message}`,
-          });
-          return d.save();
-        })
-      );
-
-      res.status(200).json({
-        success: true,
-        message: `Broadcast sent to ${doubts.length} student(s).`,
-        count:   doubts.length,
-      });
-    } catch (err) {
-      console.error('POST /doubts/broadcast:', err);
-      res.status(500).json({ error: 'Server error while sending broadcast.' });
-    }
-  });
-
-  // ── POST /api/doubts/:doubtId/messages  ───────────────────────────────────────
-  // Body: { sender, senderId, text }
-  // sender must be 'student' or 'teacher'  (frontend was sending 'instructor' — fixed in DoubtSolveScreen)
-  router.post('/:doubtId/messages', async (req, res) => {
-    try {
-      const { sender, senderId, text } = req.body;
-
-      if (!sender || !text) {
-        return res.status(400).json({ error: 'sender and text are required.' });
-      }
-
-      // Accept 'instructor' as an alias for 'teacher' to stay backward-compatible
-      const normalizedSender = sender === 'instructor' ? 'teacher' : sender;
-
-      if (!['student', 'teacher'].includes(normalizedSender)) {
-        return res.status(400).json({
-          error: "sender must be 'student' or 'teacher'.",
-        });
-      }
-
-      const doubt = await Doubt.findById(req.params.doubtId);
-      if (!doubt) return res.status(404).json({ error: 'Doubt not found.' });
-
-      doubt.messages.push({
-        sender:   normalizedSender,
-        senderId: senderId || 'unknown',
-        text,
-      });
-
-      await doubt.save();
-      res.status(200).json({ success: true, doubt: withUiStatus(doubt) });
-    } catch (err) {
-      console.error('POST /doubts/:id/messages:', err);
-      res.status(500).json({ error: 'Server error while adding message.' });
-    }
-  });
-
-  // ── DELETE /api/doubts/:doubtId/messages/:messageId  ──────────────────────────
-  router.delete('/:doubtId/messages/:messageId', async (req, res) => {
-    try {
-      const { doubtId, messageId } = req.params;
-
-      if (
-        !mongoose.Types.ObjectId.isValid(doubtId) ||
-        !mongoose.Types.ObjectId.isValid(messageId)
-      ) {
-        return res.status(400).json({ error: 'Invalid doubtId or messageId.' });
-      }
-
-      const doubtObjId = new mongoose.Types.ObjectId(doubtId);
-      const msgObjId   = new mongoose.Types.ObjectId(messageId);
-
-      // Verify the message exists and belongs to a student
-      const peek = await Doubt.findOne(
-        { _id: doubtObjId, 'messages._id': msgObjId },
-        { 'messages.$': 1 }
-      );
-
-      if (!peek || !peek.messages || peek.messages.length === 0) {
-        return res.status(404).json({ error: 'Doubt or message not found.' });
-      }
-
-      const message = peek.messages[0];
-      if (message.sender !== 'student') {
-        return res.status(403).json({ error: 'Only student messages can be deleted.' });
-      }
-
-      const updated = await Doubt.findByIdAndUpdate(
-        doubtObjId,
-        { $pull: { messages: { _id: msgObjId } } },
-        { new: true }
-      );
-
-      if (!updated) return res.status(404).json({ error: 'Doubt not found.' });
-
-      res.status(200).json({
-        success: true,
-        message: 'Message deleted successfully.',
-        doubt:   withUiStatus(updated),
-      });
-    } catch (err) {
-      console.error('DELETE /doubts/:id/messages/:msgId:', err);
-      res.status(500).json({ error: 'Server error while deleting message.' });
-    }
-  });
-
-  // ── DELETE /api/doubts/:doubtId  ──────────────────────────────────────────────
-  router.delete('/:doubtId', async (req, res) => {
-    try {
-      if (!mongoose.Types.ObjectId.isValid(req.params.doubtId)) {
-        return res.status(400).json({ error: 'Invalid doubtId.' });
-      }
-
-      const doubt = await Doubt.findByIdAndDelete(req.params.doubtId);
-      if (!doubt) return res.status(404).json({ error: 'Doubt not found.' });
-
-      res.status(200).json({
-        success: true,
-        message: `Doubt "${doubt.title || doubt.subject}" deleted successfully.`,
-      });
-    } catch (err) {
-      console.error('DELETE /doubts/:id:', err);
-      res.status(500).json({ error: 'Server error while deleting doubt.' });
-    }
-  });
-
-  // ── GET /api/doubts/student/:studentId  ───────────────────────────────────────
-  // Returns ALL doubts for a student (including resolved — student can still see them)
-  router.get('/student/:studentId', async (req, res) => {
-    try {
-      const doubts = await Doubt.find({ studentId: req.params.studentId })
-        .sort({ updatedAt: -1 });
-
-      res.status(200).json({
-        success: true,
-        doubts:  doubts.map(withUiStatus),
-      });
-    } catch (err) {
-      console.error('GET /doubts/student/:id:', err);
-      res.status(500).json({ error: 'Server error while fetching doubts.' });
-    }
-  });
-
-  // ── GET /api/doubts/:doubtId  ─────────────────────────────────────────────────
-  router.get('/:doubtId', async (req, res) => {
-    try {
-      if (req.params.doubtId === 'recent') {
-        // Return recent doubts for user (limit 6, sorted by createdAt desc)
-        const userId = req.query.userId;
-        const filter = userId ? { user: userId } : {};
-        const recentDoubts = await Doubt.find(filter)
-          .sort({ createdAt: -1 })
-          .limit(6);
-        return res.status(200).json({ success: true, doubts: recentDoubts.map(withUiStatus) });
-      }
-      const doubt = await Doubt.findById(req.params.doubtId);
-      if (!doubt) return res.status(404).json({ error: 'Doubt not found.' });
-      res.status(200).json({ success: true, doubt: withUiStatus(doubt) });
-    } catch (err) {
-      console.error('GET /doubts/:id:', err);
-      res.status(500).json({ error: 'Server error while fetching doubt.' });
-    }
-  });
-
-  // ── PATCH /api/doubts/:doubtId/status  ────────────────────────────────────────
-  // Body: { status }  — accepts both UI values and DB values
-  // UI  values: 'PENDING' | 'IN REVIEW' | 'RESOLVED'
-  // DB  values: 'OPEN'    | 'RESOLVED'
-  router.patch('/:doubtId/status', async (req, res) => {
-    try {
-      const { status } = req.body;
-
-      // Map UI status → DB status
-      const uiToDb = {
-        'PENDING':   'OPEN',
-        'IN REVIEW': 'OPEN',
-        'RESOLVED':  'RESOLVED',
-        'OPEN':      'OPEN',       // pass-through
-      };
-
-      const dbStatus = uiToDb[status];
-      if (!dbStatus) {
-        return res.status(400).json({
-          error: `status must be one of: PENDING, IN REVIEW, RESOLVED`,
-        });
-      }
-
-      const doubt = await Doubt.findByIdAndUpdate(
-        req.params.doubtId,
-        { status: dbStatus },
-        { new: true }
-      );
-
-      if (!doubt) return res.status(404).json({ error: 'Doubt not found.' });
-
-      res.status(200).json({ success: true, doubt: withUiStatus(doubt) });
-    } catch (err) {
-      console.error('PATCH /doubts/:id/status:', err);
-      res.status(500).json({ error: 'Server error while updating status.' });
-    }
-  });
-
-  // ── GET /api/doubts  ───────────────────────────────────────────────────────────
-// Returns active (non-resolved) doubts for the card grid,
-// PLUS a `stats` object that includes resolved count for the stat chips.
-router.get('/', async (req, res) => {
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/subject-rooms/by-subject?subject=X&year=Y
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/by-subject", async (req, res) => {
   try {
-    // 1. All doubts — used only for counting (never sent as full objects)
-    const allDoubts = await Doubt.find({}, { messages: 1, status: 1 }).lean();
+    const subject = normalizeSubject(req.query.subject);
+    const { year } = req.query;
 
-    // 2. Active doubts — shown as cards (resolved hidden from grid)
-    // 2. All doubts — resolved ones show with a resolved banner on the card
-    const activeDoubts = await Doubt.find({})
-      .sort({ updatedAt: -1 });
+    if (!subject || !year)
+      return res.status(400).json({ success: false, error: "subject and year are required." });
 
-    // 3. Build stats from ALL doubts
-    const stats = {
-      total:    allDoubts.length,
-      resolved: allDoubts.filter(d => d.status === 'RESOLVED').length,
-      pending:  0,
-      review:   0,
-      urgent:   0,
-    };
-
-    // Derive pending / review from active doubts
-    activeDoubts.forEach(d => {
-      const ui = deriveUiStatus(d);
-      if (ui === 'PENDING')   stats.pending++;
-      if (ui === 'IN REVIEW') stats.review++;
-      // priority lives on active doubts only
-      if (d.priority === 'HIGH') stats.urgent++;
-    });
-
-    res.status(200).json({
-      success: true,
-      doubts:  activeDoubts.map(withUiStatus),
-      stats,                                    // ← NEW field
-    });
+    const room = await Doubt.findOne({ subject, year }).lean();
+    return res.status(200).json({ success: true, room: room || null });
   } catch (err) {
-    console.error('GET /doubts:', err);
-    res.status(500).json({ error: 'Server error while fetching doubts.' });
+    console.error("GET /by-subject:", err);
+    return res.status(500).json({ success: false, error: "Server error fetching room." });
   }
 });
 
-  module.exports = router;
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/subject-rooms/message
+//
+//  Case A — text only (Content-Type: application/json):
+//    Body: { subject, year, division?, senderId, senderName, text, sender }
+//    → express.json() parses req.body, multer is skipped, req.file = undefined
+//
+//  Case B — file upload (Content-Type: multipart/form-data):
+//    Same fields as form fields + `file` field
+//    → multer parses everything, req.body has all text fields, req.file has the file
+// ─────────────────────────────────────────────────────────────────────────────
+router.post("/message", smartUpload, async (req, res) => {
+  try {
+    // Debug — remove once confirmed working
+    console.log("[POST /message] content-type:", req.headers["content-type"]);
+    console.log("[POST /message] body :", req.body);
+    console.log("[POST /message] file :", req.file?.originalname ?? "none");
+
+    const subject    = normalizeSubject(req.body.subject);
+    const year       = (req.body.year       || "").trim();
+    const division   = (req.body.division   || "").trim();
+    const senderId   = (req.body.senderId   || "").trim();
+    const senderName = (req.body.senderName || "").trim();
+    const sender     = (req.body.sender     || "student").trim();
+    const text       = (req.body.text       || "").trim();
+
+    // ── Validation ─────────────────────────────────────────────────────────
+    if (!subject || !year)
+      return res.status(400).json({ success: false, error: "subject and year are required." });
+    if (!senderId)
+      return res.status(400).json({ success: false, error: "senderId is required." });
+    if (!text && !req.file)
+      return res.status(400).json({ success: false, error: "text or a file is required." });
+
+    const senderRole = ["student", "teacher"].includes(sender) ? sender : "student";
+
+    // ── Find or create room ─────────────────────────────────────────────────
+    let room = await Doubt.findOne({ subject, year });
+    if (!room) {
+      room = new Doubt({
+        subject,
+        year,
+        teacherId: senderRole === "teacher" ? String(senderId) : null,
+        messages:  [],
+      });
+    } else if (senderRole === "teacher" && !room.teacherId) {
+      room.teacherId = String(senderId);
+    }
+
+    // ── Build message payload ───────────────────────────────────────────────
+    const msgPayload = {
+      sender:         senderRole,
+      senderId:       String(senderId),
+      senderName:     senderName || (senderRole === "teacher" ? "Teacher" : "Student"),
+      senderDivision: String(division),
+      text:           text || "",
+    };
+
+    if (req.file) {
+      msgPayload.fileUrl  = buildFileUrl(req, req.file.filename);
+      msgPayload.fileName = req.file.originalname;
+      msgPayload.fileSize = req.file.size;
+      msgPayload.mimeType = req.file.mimetype;
+    }
+
+    room.messages.push(msgPayload);
+    await room.save();
+
+    const savedMsg = room.messages[room.messages.length - 1];
+
+    // ── Socket emit ─────────────────────────────────────────────────────────
+    const io = req.app.get("io");
+    if (io) io.to(roomKey(subject, year)).emit("new-message", savedMsg.toObject());
+
+    return res.status(201).json({ success: true, room });
+  } catch (err) {
+    console.error("POST /message error:", err);
+    return res.status(500).json({ success: false, error: "Server error sending message." });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DELETE /api/subject-rooms/:roomId/messages/:messageId
+// ─────────────────────────────────────────────────────────────────────────────
+router.delete("/:roomId/messages/:messageId", async (req, res) => {
+  try {
+    const { roomId, messageId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(roomId))
+      return res.status(400).json({ success: false, error: "Invalid roomId." });
+    if (!mongoose.Types.ObjectId.isValid(messageId))
+      return res.status(400).json({ success: false, error: "Invalid messageId." });
+
+    const room = await Doubt.findById(roomId);
+    if (!room) return res.status(404).json({ success: false, error: "Room not found." });
+
+    // Delete physical file if present
+    const msg = room.messages.id(messageId);
+    if (msg?.fileUrl) {
+      const filename = path.basename(msg.fileUrl);
+      fs.unlink(path.join(UPLOAD_DIR, filename), () => {});
+    }
+
+    const updated = await Doubt.findByIdAndUpdate(
+      roomId,
+      { $pull: { messages: { _id: new mongoose.Types.ObjectId(messageId) } } },
+      { new: true }
+    );
+
+    const io = req.app.get("io");
+    if (io) io.to(roomKey(updated.subject, updated.year)).emit("message-deleted", { messageId });
+
+    return res.status(200).json({ success: true, room: updated });
+  } catch (err) {
+    console.error("DELETE /:roomId/messages/:messageId:", err);
+    return res.status(500).json({ success: false, error: "Server error deleting message." });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/subject-rooms/teacher-rooms?teacherId=xxx
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/teacher-rooms", async (req, res) => {
+  try {
+    const { teacherId } = req.query;
+    if (!teacherId)
+      return res.status(400).json({ success: false, error: "teacherId is required." });
+
+    const rooms = await Doubt.find({
+      $or: [
+        { teacherId },
+        { "messages.senderId": String(teacherId), "messages.sender": "teacher" },
+      ],
+    }).lean();
+
+    return res.status(200).json({
+      success: true,
+      rooms: rooms.map((r) => ({ ...r, messageCount: r.messages.length })),
+    });
+  } catch (err) {
+    console.error("GET /teacher-rooms:", err);
+    return res.status(500).json({ success: false, error: "Server error fetching teacher rooms." });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Legacy: GET /api/subject-rooms/:subject/:year/messages
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/:subject/:year/messages", async (req, res) => {
+  try {
+    const subject = normalizeSubject(decodeURIComponent(req.params.subject));
+    const { year } = req.params;
+    const room = await Doubt.findOne({ subject, year }).lean();
+    return res.status(200).json({ success: true, messages: room?.messages || [] });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: "Server error." });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Legacy: DELETE /api/subject-rooms/:subject/:year
+// ─────────────────────────────────────────────────────────────────────────────
+router.delete("/:subject/:year", async (req, res) => {
+  try {
+    const subject = normalizeSubject(decodeURIComponent(req.params.subject));
+    const { year } = req.params;
+    const room = await Doubt.findOneAndDelete({ subject, year });
+    if (!room) return res.status(404).json({ success: false, error: "Room not found." });
+    return res.status(200).json({ success: true, message: `Room "${room.subject}" deleted.` });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: "Server error." });
+  }
+});
+
+module.exports = router;

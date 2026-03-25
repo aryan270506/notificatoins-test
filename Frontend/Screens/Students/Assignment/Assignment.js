@@ -136,25 +136,23 @@ export default function StudentAssignment({ C, user }) {
   const [assignments,   setAssignments]   = useState([]);
   const [loading,       setLoading]       = useState(true);
   const [refreshing,    setRefreshing]    = useState(false);
-  const [studentInfo,   setStudentInfo]   = useState(null);
+  const [studentInfo, setStudentInfo] = useState(user ?? null);
   const [debugInfo,     setDebugInfo]     = useState('initialising…');
 
   // ── Load student info ─────────────────────────────────────────────────────
   const loadStudent = useCallback(async () => {
-    try {
-      const raw = await AsyncStorage.getItem('studentData');
-      console.log('[StudentAssignment] raw studentData from AsyncStorage:', raw);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        console.log('[StudentAssignment] parsed studentData keys:', Object.keys(parsed));
-        console.log('[StudentAssignment] year:', parsed.year, '| division:', parsed.division,
-          '| class:', parsed.class, '| batch:', parsed.batch);
-        return parsed;
-      }
-    } catch (e) { console.warn('[StudentAssignment] AsyncStorage error:', e); }
-    console.log('[StudentAssignment] falling back to user prop:', user);
-    return user ?? null;
-  }, [user]);
+  try {
+    const raw = await AsyncStorage.getItem('studentData');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return parsed;
+    }
+  } catch (e) {
+    console.warn('[StudentAssignment] AsyncStorage error:', e);
+  }
+  // fallback to user prop passed from StudentMain
+  return user ?? null;
+}, [user]);
 
   // ── Fetch assignments for this student's year + division ──────────────────
   const fetchAssignments = useCallback(async (info) => {

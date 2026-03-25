@@ -2,12 +2,45 @@
 
 const mongoose = require("mongoose");
 
+/* ── Resource (teacher-attached file / photo) ─────────────────────────────── */
+const ResourceSchema = new mongoose.Schema({
+  name:     { type: String, required: true },   // original filename
+  url:      { type: String, required: true },   // storage URL or base64 data-uri
+  mimeType: { type: String, default: "" },       // "application/pdf" | "image/jpeg" …
+  size:     { type: Number, default: 0 },        // bytes
+  type:     { type: String, enum: ["document", "image"], default: "document" },
+}, { _id: true });
+
+/* ── Per-student submission ───────────────────────────────────────────────── */
 const SubmissionSchema = new mongoose.Schema({
   studentId:   { type: String, required: true },
   name:        { type: String, required: true },
   roll:        { type: String, default: "" },
+  comment:     { type: String, default: "" },
   submittedAt: { type: Date,   default: Date.now },
-}, { _id: false });
+
+  // Uploaded file metadata
+  fileName:    { type: String, default: "" },
+  fileUrl:     { type: String, default: "" },   // storage URL (if saved server-side)
+  fileMime:    { type: String, default: "" },
+
+  // AI analysis results
+  aiPercent:         { type: Number, default: null },  // 0-100
+  similarityPercent: { type: Number, default: null },  // 0-100
+  analysisAvailable: { type: Boolean, default: false },
+
+  // Teacher review
+  // "pending"  → submitted, awaiting teacher review
+  // "verified" → teacher approved this individual submission
+  // "rejected" → teacher rejected
+  verificationStatus: {
+    type:    String,
+    enum:    ["pending", "verified", "rejected"],
+    default: "pending",
+  },
+  teacherNote:     { type: String, default: "" },
+  verifiedAt:      { type: Date,   default: null },
+}, { _id: true });   // ← _id:true so teacher can reference each submission by ID
 
 const TagSchema = new mongoose.Schema({
   label: { type: String },
@@ -15,12 +48,16 @@ const TagSchema = new mongoose.Schema({
   icon:  { type: String },
 }, { _id: false });
 
+/* ── Assignment ───────────────────────────────────────────────────────────── */
 const AssignmentSchema = new mongoose.Schema({
   // Core
   title:       { type: String, required: true, trim: true },
   subject:     { type: String, required: true, trim: true },
   unit:        { type: String, default: "" },
   description: { type: String, default: "" },
+
+  // Teacher-attached resources (optional)
+  resources: { type: [ResourceSchema], default: [] },
 
   // Target class
   year:     { type: String, required: true },   // "FY" | "SY" | "TY"
