@@ -1,0 +1,13 @@
+diff --git a/node_modules/jspdf/dist/jspdf.umd.js b/node_modules/jspdf/dist/jspdf.umd.js
+index 6a6d810..2c31443 100644
+--- a/node_modules/jspdf/dist/jspdf.umd.js
++++ b/node_modules/jspdf/dist/jspdf.umd.js
+@@ -22892,7 +22892,7 @@
+   // https://www.w3.org/TR/png/#11tEXt
+   const textChunkName = 'tEXt';
+   const NULL = 0;
+-  const latin1Decoder = new TextDecoder('latin1');
++  const latin1Decoder = new TextDecoder('utf-8');
+   function validateKeyword(keyword) {
+     validateLatin1(keyword);
+     if (keyword.length === 0 || keyword.length > 79) {

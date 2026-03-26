@@ -1,0 +1,26 @@
+diff --git a/node_modules/fast-png/lib-esm/helpers/text.js b/node_modules/fast-png/lib-esm/helpers/text.js
+index 8421446..444fac1 100644
+--- a/node_modules/fast-png/lib-esm/helpers/text.js
++++ b/node_modules/fast-png/lib-esm/helpers/text.js
+@@ -2,7 +2,7 @@ import { writeCrc } from './crc';
+ // https://www.w3.org/TR/png/#11tEXt
+ export const textChunkName = 'tEXt';
+ const NULL = 0;
+-const latin1Decoder = new TextDecoder('latin1');
++const latin1Decoder = new TextDecoder('utf-8');
+ function validateKeyword(keyword) {
+     validateLatin1(keyword);
+     if (keyword.length === 0 || keyword.length > 79) {
+diff --git a/node_modules/fast-png/lib/helpers/text.js b/node_modules/fast-png/lib/helpers/text.js
+index 1c6a927..6849bea 100644
+--- a/node_modules/fast-png/lib/helpers/text.js
++++ b/node_modules/fast-png/lib/helpers/text.js
+@@ -9,7 +9,7 @@ const crc_1 = require("./crc");
+ // https://www.w3.org/TR/png/#11tEXt
+ exports.textChunkName = 'tEXt';
+ const NULL = 0;
+-const latin1Decoder = new TextDecoder('latin1');
++const latin1Decoder = new TextDecoder('utf-8');
+ function validateKeyword(keyword) {
+     validateLatin1(keyword);
+     if (keyword.length === 0 || keyword.length > 79) {
