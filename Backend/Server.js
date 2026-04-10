@@ -24,12 +24,13 @@ const timeTableRoutes = require("./Routes/TimeTableRoutes");
 const StudentFinanceRoutes = require("./Routes/FinanceRoutes");
 const aiDoubtRoutes = require('./Routes/AI-DoubtRoutes.js');
 const subjectRoomsRoutes = require("./Routes/DoubtsRoutes");
-
+const configurationRoutes = require("./Routes/ConfigurationRoutes");
 
 const permissionRoutes = require("./Routes/PermissionRoutes");
 
 // additional routes
 const aiRoutes = require("./Routes/AiRoutes");
+const notificationRoutes = require('./Routes/NotificationRoutes');
 
 // ─── Socket ───────────────────────────────────────────────────────
 const { initSocket } = require("./socket");
@@ -114,6 +115,12 @@ app.use((req, res, next) => {
   next();
 });
 
+// Add logging middleware to debug routes
+app.use((req, res, next) => {
+  console.log(`📍 ${req.method} ${req.path}`);
+  next();
+});
+
 // ─── Database Connection ──────────────────────────────────────────
 mongoose
   .connect(process.env.MONGO_URI)
@@ -140,10 +147,14 @@ app.use("/api/quiz", quizRoutes);
 app.use("/api/student-finance", studentFinanceRoutes);
 app.use("/api/timetable", timeTableRoutes);
 app.use('/api/ai-doubts', aiDoubtRoutes);
-app.use("/api/subject-rooms", subjectRoomsRoutes); // ← Subject chat rooms
+app.use('/api/subject-rooms', subjectRoomsRoutes); // ← Subject chat rooms
 app.use("/api/permissions", permissionRoutes);
 app.use("/api/finance", StudentFinanceRoutes);
 app.use("/api/ai", aiRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/configuration', configurationRoutes);
+console.log('✅ Notification routes registered at /api/notifications');
+console.log('✅ Configuration routes registered at /api/configuration');
 
 // ─── Static Files ─────────────────────────────────────────────────
 app.use("/uploads", express.static("uploads"));
@@ -151,6 +162,11 @@ app.use("/uploads", express.static("uploads"));
 // ─── Health Check ─────────────────────────────────────────────────
 app.get("/", (req, res) => {
   res.json({ message: "Server working 🚀", timestamp: new Date() });
+});
+
+// Test route to verify server is working
+app.get('/api/test', (req, res) => {
+  res.json({ message: 'Server is running!', timestamp: new Date() });
 });
 
 // ─── 404 Handler ──────────────────────────────────────────────────

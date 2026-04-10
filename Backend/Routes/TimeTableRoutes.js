@@ -5,6 +5,8 @@ const mongoose  = require("mongoose");
 const Timetable = require("../Models/Timetable");
 const Teacher   = require("../Models/Teacher");
 const Student   = require("../Models/Student");
+const auth = require("../middleware/auth"); 
+const { sendNotificationToClass } = require('../utils/pushNotificationService');
 
 // ── Lazy-load Parent so we always get the fully-registered Mongoose model,
 //    even if this file is required before the Parent model is registered. ──────
@@ -960,6 +962,41 @@ router.get("/generate-pdf-get", async (req, res) => {
   } catch (err) {
     console.error("GET /generate-pdf-get error:", err);
     res.status(500).json({ success: false, message: "Failed to generate PDF: " + err.message });
+  }
+});
+
+
+// When timetable is updated
+router.put('/update-timetable', auth, async (req, res) => {
+  try {
+    const { year, division, changes } = req.body;
+    
+    // Update timetable (existing code)
+    // ...
+
+    // Send notification to all students in the class
+    const notificationData = {
+      type: 'timetable',
+      title: '📅 Timetable Updated',
+      body: 'Your class schedule has been updated. Check the new timetable.',
+      data: {
+        screen: 'Timetable',
+        year,
+        division
+      },
+      priority: 'high'
+    };
+
+    await sendNotificationToClass(year, division, notificationData);
+
+    res.json({
+      success: true,
+      message: 'Timetable updated and students notified'
+    });
+
+  } catch (error) {
+    console.error('Error updating timetable:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 

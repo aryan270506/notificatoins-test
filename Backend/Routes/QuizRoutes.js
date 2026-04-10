@@ -4,6 +4,8 @@
 const express = require("express");
 const router  = express.Router();
 const Quiz    = require("../Models/Quiz");
+const { sendNotificationToClass } = require('../utils/pushNotificationService');
+const { emitNotificationToUsers } = require('../socket');
 
 // ─────────────────────────────────────────────────────────────
 // 1. GET STATS  ← must be before /:id or Express matches "meta" as an id
@@ -236,6 +238,21 @@ router.post("/", async (req, res) => {
     });
 
     await quiz.save();
+
+    // Send notifications to students in the class
+    const notificationData = {
+      type: 'quiz',
+      title: '📊 New Quiz Available',
+      body: `${title} - ${subject}. Starts at ${new Date(startTime).toLocaleTimeString()}`,
+      data: {
+        screen: 'QuizPortal',
+        quizId: quiz._id.toString()
+      },
+      priority: 'high',
+      sound: 'default'
+    };
+
+    await sendNotificationToClass(year, division, notificationData);
 
     // Return shaped response matching what QuizSessionScreen expects
     res.status(201).json({

@@ -1,10 +1,11 @@
-
 import React, { useState, useEffect, useRef } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import axiosInstance from './Src/Axios';
+import pushNotificationManager from './utils/pushNotificationManager';
+import * as Notifications from 'expo-notifications';
 
 import LoginScreen from './Screens/Login/Login';
 import Parentmaindashboard from "./Screens/Parent/Dashboard/Dashboard";
@@ -143,9 +144,86 @@ function RootNavigator({ navigationRef }) {
 
 export default function App() {
   const navigationRef = useRef(null);
+  const notificationListener = useRef();
+  const responseListener = useRef();
 
   useEffect(() => {
     setNavigationRef(navigationRef);
+  }, []);
+
+  // Configure how notifications are handled when app is open
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+    }),
+  });
+
+  useEffect(() => {
+    console.log('🔔 App mounted - initializing notifications...');
+    initializeNotifications();
+  }, []);
+
+  const initializeNotifications = async () => {
+    try {
+      console.log('🔔 Starting notification initialization...');
+      
+      // Wait a bit for user to login
+      setTimeout(async () => {
+        const token = await AsyncStorage.getItem('authToken');
+        if (!token) {
+          console.log('⚠️  No auth token yet, skipping notification registration');
+          return;
+        }
+
+        console.log('✅ Auth token found, registering for push notifications...');
+
+        // Register for push notifications
+        const expoPushToken = await pushNotificationManager.registerForPushNotificationsAsync();
+        
+        if (expoPushToken) {
+          console.log('🎉 Got Expo Push Token:', expoPushToken);
+          
+          // Send token to backend
+          await pushNotificationManager.sendTokenToBackend(expoPushToken);
+          console.log('✅ Push notifications initialized successfully!');
+        } else {
+          console.log('❌ Failed to get Expo Push Token');
+        }
+      }, 2000);
+    } catch (error) {
+      console.error('❌ Error initializing notifications:', error);
+    }
+  };
+
+  const handleNotificationReceived = (notification) => {
+    console.log('Notification received in foreground:', notification);
+    // Optionally update badge count or show in-app alert
+  };
+
+  const handleNotificationTapped = (response) => {
+    console.log('Notification tapped:', response);
+    const data = response.notification.request.content.data;
+    
+    // Handle navigation based on notification data
+    if (data.screen) {
+      // Navigate to specific screen
+      // navigation.navigate(data.screen);
+    }
+  };
+
+  useEffect(() => {
+    // Initialize notifications
+    initializeNotifications();
+
+    // Setup notification listeners
+    const cleanup = pushNotificationManager.setupNotificationListeners(
+      handleNotificationReceived,
+      handleNotificationTapped
+    );
+
+    return cleanup;
   }, []);
 
   return (

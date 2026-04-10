@@ -21,6 +21,7 @@ const isMobile = width < 768;
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { connectSocket } from "../../utils/socket";
 import axiosInstance from "../../Src/Axios";
+import pushNotificationManager from '../../utils/pushNotificationManager';
 
 
 const LoginScreen = ({navigation}) => {
@@ -134,6 +135,22 @@ const LoginScreen = ({navigation}) => {
         alert("Unknown role");
     }
 
+    // After login is successful and token is saved:
+    console.log('✅ Login successful, registering for notifications...');
+    
+    // Register for push notifications
+    try {
+      const expoPushToken = await pushNotificationManager.registerForPushNotificationsAsync();
+      if (expoPushToken) {
+        console.log('🎉 Expo Push Token:', expoPushToken);
+        await pushNotificationManager.sendTokenToBackend(expoPushToken);
+        console.log('✅ Push notifications registered!');
+      }
+    } catch (notifError) {
+      console.error('⚠️  Notification registration failed (non-critical):', notifError.message);
+      // Don't block login if notifications fail
+    }
+    
   } catch (error) {
     console.log("Login error:", error.response?.data || error.message);
     alert(error.response?.data?.message || "Login failed");

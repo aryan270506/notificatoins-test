@@ -17,6 +17,7 @@
     "cors": "^2.8.6",
     "csv-parser": "^3.2.0",
     "dotenv": "^17.3.1",
+    "expo-server-sdk": "^3.15.0",
     "express": "^4.22.1",
     "jsonwebtoken": "^9.0.3",
     "mammoth": "^1.11.0",

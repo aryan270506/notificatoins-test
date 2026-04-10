@@ -99,9 +99,31 @@ const initSocket = (server) => {
   return io;
 };
 
+// Function to emit notification to specific user
+const emitNotificationToUser = (userId, notificationData) => {
+  io.to(userId.toString()).emit('new_notification', notificationData);
+};
+
+// Function to emit notification to multiple users
+const emitNotificationToUsers = (userIds, notificationData) => {
+  userIds.forEach(userId => {
+    io.to(userId.toString()).emit('new_notification', notificationData);
+  });
+};
+
+// Export socket functions
+// Function to get io instance
 const getIO = () => {
-  if (!io) throw new Error("Socket.io not initialized!");
+  if (!io) {
+    throw new Error("Socket.io not initialized!");
+  }
   return io;
 };
 
-module.exports = { initSocket, getIO };
+// Export socket functions
+module.exports = {
+  initSocket,
+  getIO,
+  emitNotificationToUser,
+  emitNotificationToUsers
+};

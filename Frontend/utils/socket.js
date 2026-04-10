@@ -2,6 +2,7 @@
 import { io } from "socket.io-client";
 import axiosInstance from "../Src/Axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import pushNotificationManager from './pushNotificationManager';
 
 let socket = null;
 
@@ -192,6 +193,18 @@ export const connectSocket = (user) => {
 
   socket.on("error", (error) => {
     console.error("❌ Socket error:", error);
+  });
+
+  // Listen for notification events from server
+  socket.on('new_notification', async (data) => {
+    console.log('New notification received:', data);
+    
+    // Show local notification if app is in foreground
+    await pushNotificationManager.showLocalNotification(
+      data.title,
+      data.body,
+      data.data
+    );
   });
 
   return socket;

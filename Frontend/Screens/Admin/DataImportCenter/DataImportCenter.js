@@ -30,6 +30,7 @@ import {
   useWindowDimensions,
   Platform,
   ActivityIndicator,
+  TextInput,
 } from 'react-native';
 
 // ─── Breakpoints ──────────────────────────────────────────────────────────────
@@ -940,6 +941,369 @@ function HistoryTableRow({ row, onPress, onMorePress, isAlt }) {
   );
 }
 
+// ...existing code...
+function ConfigurationModal({ visible, onClose, colors }) {
+  const [activeTab, setActiveTab] = useState('subjects');
+  const [year, setYear] = useState('1');
+  const [subjects, setSubjects] = useState({});
+  const [labs, setLabs] = useState({});
+  const [fees, setFees] = useState({});
+  const [currentInput, setCurrentInput] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  // Fetch existing configuration on modal open
+  useEffect(() => {
+    if (!visible) return;
+    
+    const fetchConfig = async () => {
+      setLoading(true);
+      try {
+        // Fetch all subjects
+        const subRes = await axiosInstance.get('/configuration/subjects');
+        if (subRes.data?.success && subRes.data.data.length > 0) {
+          const subjectsMap = {};
+          const labsMap = {};
+          
+          subRes.data.data.forEach(item => {
+            const yearKey = String(item.year); // Convert to string for consistency
+            subjectsMap[yearKey] = item.subjects || [];
+            labsMap[yearKey] = item.labs || [];
+          });
+          
+          console.log('📚 Loaded subjects:', subjectsMap);
+          console.log('🧪 Loaded labs:', labsMap);
+          
+          setSubjects(subjectsMap);
+          setLabs(labsMap);
+        }
+
+        // Fetch all fees
+        const feeRes = await axiosInstance.get('/configuration/fees');
+        if (feeRes.data?.success && feeRes.data.data.length > 0) {
+          const feesMap = {};
+          
+          feeRes.data.data.forEach(item => {
+            const yearKey = String(item.year); // Convert to string for consistency
+            feesMap[yearKey] = String(item.amount); // Store as string for TextInput
+          });
+          
+          console.log('💰 Loaded fees:', feesMap);
+          setFees(feesMap);
+        }
+      } catch (error) {
+        console.log('ℹ️ No existing configuration found - starting fresh:', error.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchConfig();
+  }, [visible]);
+
+  const addItem = (type) => {
+    if (!currentInput.trim()) {
+      Alert.alert('Error', 'Please enter a value');
+      return;
+    }
+
+    if (type === 'subjects') {
+      setSubjects(prev => ({
+        ...prev,
+        [year]: [...(prev[year] || []), currentInput.trim()]
+      }));
+    } else if (type === 'labs') {
+      setLabs(prev => ({
+        ...prev,
+        [year]: [...(prev[year] || []), currentInput.trim()]
+      }));
+    }
+    setCurrentInput('');
+  };
+
+  const removeItem = (type, index) => {
+    if (type === 'subjects') {
+      setSubjects(prev => ({
+        ...prev,
+        [year]: prev[year].filter((_, i) => i !== index)
+      }));
+    } else if (type === 'labs') {
+      setLabs(prev => ({
+        ...prev,
+        [year]: prev[year].filter((_, i) => i !== index)
+      }));
+    }
+  };
+
+  const setFee = (feeValue) => {
+    setFees(prev => ({
+      ...prev,
+      [year]: feeValue.trim()
+    }));
+  };
+
+  const handleSave = async () => {
+    try {
+      // Build payload with year1, year2, year3, year4 format
+      const payload = {
+        subjects: {},
+        labs: {},
+        fees: {},
+      };
+
+      // Add subjects and labs for each year
+      for (let y = 1; y <= 4; y++) {
+        const yearKey = String(y);
+        payload.subjects[`year${y}`] = subjects[yearKey] || [];
+        payload.labs[`year${y}`] = labs[yearKey] || [];
+        payload.fees[`year${y}`] = parseFloat(fees[yearKey]) || 0;
+      }
+
+      console.log('💾 Saving configuration:', payload);
+      
+      const response = await axiosInstance.post('/configuration/configuration/save', payload);
+      
+      Alert.alert('✅ Success', 'Configuration saved successfully!');
+      onClose();
+    } catch (error) {
+      console.error('Save error:', error);
+      Alert.alert('❌ Error', error.response?.data?.message || 'Failed to save configuration');
+    }
+  };
+
+  if (!visible) return null;
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.80)', justifyContent: 'flex-end' }} onPress={onClose}>
+        <Pressable style={{ borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, borderBottomWidth: 0, maxHeight: '95%', backgroundColor: colors.surface, borderColor: colors.border }} onPress={() => {}}>
+          {/* Handle */}
+          <View style={{ width: 40, height: 4, borderRadius: 2, alignSelf: 'center', marginTop: 12, backgroundColor: colors.border }} />
+          
+          {/* Header */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingTop: 12, paddingBottom: 12 }}>
+            <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: '#6366f1', alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+              <Text style={{ fontSize: 18 }}>⚙️</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 15, fontWeight: '700', color: colors.textPrim }}>Configuration</Text>
+              <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 1 }}>Manage subjects, labs & fees</Text>
+            </View>
+            <TouchableOpacity onPress={onClose} style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' }} activeOpacity={0.7}>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: colors.textSec }}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={{ height: 1, backgroundColor: colors.border }} />
+
+          {/* Tab Buttons */}
+          <View style={{ flexDirection: 'row', paddingHorizontal: 12, paddingTop: 12, paddingBottom: 8 }}>
+            {['subjects', 'labs', 'fees'].map(tab => (
+              <TouchableOpacity
+                key={tab}
+                onPress={() => setActiveTab(tab)}
+                style={{
+                  flex: 1,
+                  paddingVertical: 10,
+                  marginHorizontal: 4,
+                  borderRadius: 10,
+                  backgroundColor: activeTab === tab ? '#6366f1' : colors.bg,
+                  alignItems: 'center',
+                  borderWidth: 1,
+                  borderColor: activeTab === tab ? '#6366f1' : colors.border
+                }}
+                activeOpacity={0.75}>
+                <Text style={{
+                  fontWeight: '700',
+                  color: activeTab === tab ? '#fff' : colors.textSec,
+                  fontSize: 13
+                }}>
+                  {tab === 'subjects' ? '📚 Subjects' : tab === 'labs' ? '🧪 Labs' : '💰 Fees'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* Year Selector */}
+          <View style={{ paddingHorizontal: 18, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border }}>
+            <Text style={{ fontSize: 13, fontWeight: '700', color: colors.textPrim, marginRight: 10 }}>Year:</Text>
+            <View style={{ flex: 1, flexDirection: 'row' }}>
+              {['1', '2', '3', '4'].map(y => (
+                <TouchableOpacity
+                  key={y}
+                  onPress={() => setYear(y)}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 8,
+                    marginHorizontal: 4,
+                    borderRadius: 8,
+                    backgroundColor: year === y ? '#6366f1' : colors.bg,
+                    alignItems: 'center',
+                    borderWidth: 1,
+                    borderColor: year === y ? '#6366f1' : colors.border
+                  }}
+                  activeOpacity={0.7}>
+                  <Text style={{ fontWeight: '700', color: year === y ? '#fff' : colors.textSec }}>Year {y}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+            {/* Subjects Tab */}
+            {activeTab === 'subjects' && (
+              <View>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: colors.textMuted, marginBottom: 10, letterSpacing: 0.3 }}>ADD SUBJECT FOR YEAR {year}</Text>
+                
+                <View style={{ flexDirection: 'row', marginBottom: 14 }}>
+                  <TextInput
+                    style={{
+                      flex: 1,
+                      backgroundColor: colors.bg,
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                      borderRadius: 10,
+                      paddingHorizontal: 12,
+                      paddingVertical: 10,
+                      color: colors.textPrim,
+                      marginRight: 8
+                    }}
+                    placeholder="Enter subject name"
+                    placeholderTextColor={colors.textMuted}
+                    value={currentInput}
+                    onChangeText={setCurrentInput}
+                  />
+                  <TouchableOpacity
+                    onPress={() => addItem('subjects')}
+                    style={{
+                      backgroundColor: '#818cf8',
+                      paddingHorizontal: 16,
+                      borderRadius: 10,
+                      justifyContent: 'center',
+                      alignItems: 'center'
+                    }}
+                    activeOpacity={0.75}>
+                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: 18 }}>+</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View>
+                  {(subjects[year] || []).map((subject, index) => (
+                    <View key={index} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.bg, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 8, borderLeftWidth: 3, borderLeftColor: '#818cf8' }}>
+                      <Text style={{ flex: 1, color: colors.textPrim, fontWeight: '500' }}>{subject}</Text>
+                      <TouchableOpacity onPress={() => removeItem('subjects', index)} style={{ padding: 4 }} activeOpacity={0.6}>
+                        <Text style={{ fontSize: 16, color: '#ef4444' }}>✕</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {/* Labs Tab */}
+            {activeTab === 'labs' && (
+              <View>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: colors.textMuted, marginBottom: 10, letterSpacing: 0.3 }}>ADD LAB FOR YEAR {year}</Text>
+                
+                <View style={{ flexDirection: 'row', marginBottom: 14 }}>
+                  <TextInput
+                    style={{
+                      flex: 1,
+                      backgroundColor: colors.bg,
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                      borderRadius: 10,
+                      paddingHorizontal: 12,
+                      paddingVertical: 10,
+                      color: colors.textPrim,
+                      marginRight: 8
+                    }}
+                    placeholder="Enter lab name"
+                    placeholderTextColor={colors.textMuted}
+                    value={currentInput}
+                    onChangeText={setCurrentInput}
+                  />
+                  <TouchableOpacity
+                    onPress={() => addItem('labs')}
+                    style={{
+                      backgroundColor: '#a78bfa',
+                      paddingHorizontal: 16,
+                      borderRadius: 10,
+                      justifyContent: 'center',
+                      alignItems: 'center'
+                    }}
+                    activeOpacity={0.75}>
+                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: 18 }}>+</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View>
+                  {(labs[year] || []).map((lab, index) => (
+                    <View key={index} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.bg, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 8, borderLeftWidth: 3, borderLeftColor: '#a78bfa' }}>
+                      <Text style={{ flex: 1, color: colors.textPrim, fontWeight: '500' }}>{lab}</Text>
+                      <TouchableOpacity onPress={() => removeItem('labs', index)} style={{ padding: 4 }} activeOpacity={0.6}>
+                        <Text style={{ fontSize: 16, color: '#ef4444' }}>✕</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {/* Fees Tab */}
+            {activeTab === 'fees' && (
+              <View>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: colors.textMuted, marginBottom: 10, letterSpacing: 0.3 }}>ANNUAL FEE FOR YEAR {year}</Text>
+                
+                <View style={{ marginBottom: 14 }}>
+                  <TextInput
+                    style={{
+                      backgroundColor: colors.bg,
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                      borderRadius: 10,
+                      paddingHorizontal: 12,
+                      paddingVertical: 12,
+                      color: colors.textPrim,
+                      fontSize: 16,
+                      fontWeight: '700'
+                    }}
+                    placeholder="Enter annual fees (₹)"
+                    placeholderTextColor={colors.textMuted}
+                    value={fees[year] || ''}
+                    onChangeText={(val) => setFee(val)}
+                    keyboardType="decimal-pad"
+                  />
+                </View>
+
+                {fees[year] && (
+                  <View style={{ backgroundColor: '#052e16', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, borderWidth: 1, borderColor: '#22c55e' }}>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#94a3b8', marginBottom: 4 }}>CURRENT FEE</Text>
+                    <Text style={{ fontSize: 24, fontWeight: '800', color: '#22c55e' }}>₹{parseFloat(fees[year]).toLocaleString('en-IN')}</Text>
+                  </View>
+                )}
+              </View>
+            )}
+          </ScrollView>
+
+          {/* Save Button */}
+          <View style={{ paddingHorizontal: 16, paddingVertical: 14, borderTopWidth: 1, borderTopColor: colors.border }}>
+            <TouchableOpacity
+              onPress={handleSave}
+              style={{
+                backgroundColor: '#6366f1',
+                borderRadius: 12,
+                paddingVertical: 14,
+                alignItems: 'center'
+              }}
+              activeOpacity={0.8}>
+              <Text style={{ color: '#fff', fontSize: 16, fontWeight: '800' }}>💾 Save Configuration</Text>
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function DataImportCenter() {
   const { colors } = useContext(ThemeContext);
@@ -951,6 +1315,8 @@ export default function DataImportCenter() {
   const [actionRow,         setActionRow]         = useState(null);
   const [history,           setHistory]           = useState(UPLOAD_HISTORY_INIT);
   const [studentListVisible, setStudentListVisible] = useState(false);
+  const [configModalVisible, setConfigModalVisible] = useState(false);
+  const [configTab,         setConfigTab]         = useState('subjects'); // 'subjects', 'labs', 'fees'
 
   // ── Real stats from API ──────────────────────────────────────────────────
   const [statsLoading,   setStatsLoading]   = useState(true);
@@ -1136,6 +1502,36 @@ export default function DataImportCenter() {
           ))}
         </View>
 
+        {/* Configuration Section: Subjects, Labs, Fees */}
+        <View style={[s.configSection, { backgroundColor: colors.surface, borderColor: colors.border, marginTop: 20 }]}>
+          <View style={[s.configHeader, { borderBottomColor: colors.border }]}>
+            <Text style={[s.sectionTitle, { color: colors.textPrim }]}>Configuration Management</Text>
+            <TouchableOpacity
+              style={[s.configBtn, { backgroundColor: '#6366f1' }]}
+              onPress={() => setConfigModalVisible(true)}
+              activeOpacity={0.75}>
+              <Text style={s.configBtnTxt}>⚙️ Manage</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={[s.configGrid, !isTablet && s.configGridMobile]}>
+            <View style={[s.configCard, { borderColor: '#818cf8' }]}>
+              <Text style={s.configIcon}>📚</Text>
+              <Text style={[s.configLabel, { color: colors.textPrim }]}>Subjects</Text>
+              <Text style={[s.configDesc, { color: colors.textMuted }]}>Configure subjects for all years</Text>
+            </View>
+            <View style={[s.configCard, { borderColor: '#a78bfa' }]}>
+              <Text style={s.configIcon}>🧪</Text>
+              <Text style={[s.configLabel, { color: colors.textPrim }]}>Labs</Text>
+              <Text style={[s.configDesc, { color: colors.textMuted }]}>Manage lab courses</Text>
+            </View>
+            <View style={[s.configCard, { borderColor: '#f97316' }]}>
+              <Text style={s.configIcon}>💰</Text>
+              <Text style={[s.configLabel, { color: colors.textPrim }]}>Fees</Text>
+              <Text style={[s.configDesc, { color: colors.textMuted }]}>Set fees for each year</Text>
+            </View>
+          </View>
+        </View>
+
         {/* Upload History */}
         <View style={[s.historySection, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <View style={[s.historyHeader, { borderBottomColor: colors.border }]}>
@@ -1195,6 +1591,11 @@ export default function DataImportCenter() {
         onRetry={handleRetry}
         onDelete={handleDelete}
         onView={handleViewDetails}
+      />
+      <ConfigurationModal
+        visible={configModalVisible}
+        onClose={() => setConfigModalVisible(false)}
+        colors={colors}
       />
     </SafeAreaView>
   );
@@ -1338,4 +1739,14 @@ const s = StyleSheet.create({
   emptyHistory:         { paddingVertical: 40, alignItems: 'center' },
   emptyIcon:            { fontSize: 32, marginBottom: 10 },
   emptyTxt:             { fontSize: 14 },
+  configSection:        { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
+  configHeader:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1 },
+  configBtn:            { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  configBtnTxt:         { fontSize: 13, fontWeight: '700', color: '#fff' },
+  configGrid:           { flexDirection: 'row', paddingHorizontal: 14, paddingVertical: 14 },
+  configGridMobile:     { flexDirection: 'column' },
+  configCard:           { flex: 1, borderWidth: 1, borderRadius: 12, padding: 14, marginHorizontal: 6, alignItems: 'center' },
+  configIcon:           { fontSize: 28, marginBottom: 8 },
+  configLabel:          { fontSize: 13, fontWeight: '700', marginBottom: 4 },
+  configDesc:           { fontSize: 11, textAlign: 'center' },
 });

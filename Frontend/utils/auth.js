@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NavigationContainer } from '@react-navigation/native';
+import pushNotificationManager from './pushNotificationManager';
 
 /**
  * Handle user logout
@@ -78,5 +79,41 @@ export const getCurrentUser = async () => {
   } catch (error) {
     console.error('Error getting current user:', error);
     return null;
+  }
+};
+
+/**
+ * Updated login function
+ */
+export const login = async (token, userData) => {
+  try {
+    // Save token and user data
+    await AsyncStorage.setItem('authToken', token);
+    await AsyncStorage.setItem('userData', JSON.stringify(userData));
+    
+    return true;
+  } catch (error) {
+    console.error('Login error:', error);
+    return false;
+  }
+};
+
+/**
+ * Handle login success
+ * Registers the device for push notifications
+ */
+export const handleLoginSuccess = async (token, userData) => {
+  // Register for push notifications
+  if (userData.role === 'student' || userData.role === 'teacher' || userData.role === 'parent') {
+    try {
+      const expoPushToken = await pushNotificationManager.registerForPushNotificationsAsync();
+      if (expoPushToken) {
+        await pushNotificationManager.sendTokenToBackend(expoPushToken);
+        console.log('✅ Push notifications registered');
+      }
+    } catch (error) {
+      console.error('Failed to register push notifications:', error);
+      // Don't block login if notification registration fails
+    }
   }
 };

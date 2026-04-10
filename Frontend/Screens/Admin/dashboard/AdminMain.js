@@ -14,6 +14,7 @@ import Admissionfees from '../Fees/Admissionfees';
 import DataImportCenter from '../DataImportCenter/DataImportCenter';
 import SelectionScreen from '../Message/Selectionscreen';
 
+
 // ─── Nav Items — id keys MUST match PermissionDashboard ALL_TABS for Admin ───
 const NAV_ITEMS = [
   { id: 'dashboard',        label: 'Dashboard',       icon: '⊞' },
@@ -21,6 +22,7 @@ const NAV_ITEMS = [
   { id: 'reports',          label: 'Reports',         icon: '📊' },
   { id: 'assignment',       label: 'Assignment',      icon: '📝' },
   { id: 'admission-fee',    label: 'Admission Fee',   icon: '💰' },
+  { id: 'configuration',    label: 'Configuration',   icon: '⚙️' },
   { id: 'security-logs',    label: 'Security Logs',   icon: '🔒' },
   { id: 'dataimportcenter', label: 'DataImportCenter',icon: '📥' },
   { id: 'messages',         label: 'Messages',        icon: '✉️' },
@@ -103,7 +105,7 @@ function SidebarContent({
   tabAccess,
 }) {
   const { isDark } = useContext(ThemeContext);
-  const sidebarBg           = isDark ? '#0b1437' : '#ffffff';
+  const sidebarBg           = isDark ? '#030920ff' : '#ffffff';
   const borderColor         = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.08)';
   const logoTextColor       = isDark ? '#ffffff' : '#1a2130';
   const activeNavBg         = isDark ? 'rgba(59,130,246,0.18)' : 'rgba(26,111,212,0.12)';

@@ -3,6 +3,8 @@ const express    = require("express");
 const router     = express.Router();
 const mongoose   = require("mongoose");
 const Attendance = require("../Models/Attendance");
+const { sendNotificationToUsers } = require('../utils/pushNotificationService');
+const { emitNotificationToUsers } = require('../socket');
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 const toMidnightUTC = (d) => {
@@ -93,6 +95,28 @@ router.post("/mark", async (req, res) => {
     });
 
     await session.populate(STUDENT_POPULATE);
+
+    // Send notifications to students
+    const notifications = students.map(record => ({
+      studentId: record.studentId,
+      notificationData: {
+        type: 'attendance',
+        title: '✅ Attendance Marked',
+        body: `Your attendance for ${new Date(date).toLocaleDateString()} has been marked as ${record.status}`,
+        data: {
+          screen: 'Attendance',
+          date,
+          status: record.status
+        },
+        priority: record.status === 'absent' ? 'high' : 'normal'
+      }
+    }));
+
+    // Send notifications to all students
+    for (const { studentId, notificationData } of notifications) {
+      await sendNotificationToUsers(studentId, 'Student', notificationData);
+      emitNotificationToUser(studentId, notificationData);
+    }
 
     return res.status(201).json({
       success: true,

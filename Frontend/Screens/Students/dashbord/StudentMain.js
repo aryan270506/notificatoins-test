@@ -28,6 +28,8 @@ import StudentExamResults from '../Exam/StudentExam';
 import StudentsNotes from '../Note/NoteSubjectList';
 import StudentQuiz from '../Quiz.js/StudentQuiz';
 import StudentAssignment from '../Assignment/Assignment';
+import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const IS_DESKTOP = SCREEN_WIDTH >= 768;
@@ -647,6 +649,7 @@ export default function StudentMain({ onNavigate, navigation, route }) {
   const [isDark,         setIsDark]         = useState(true);
   const [avatarUri,      setAvatarUri]      = useState(user?.profilePhoto || null);
   const [previewVisible, setPreviewVisible] = useState(false);
+  const [unreadCount,    setUnreadCount]    = useState(0);
 
   const C = isDark ? DARK_THEME : LIGHT_THEME;
   const toggleTheme = () => setIsDark(prev => !prev);
@@ -798,6 +801,31 @@ export default function StudentMain({ onNavigate, navigation, route }) {
     setActiveTab(id);
     onNavigate?.(id);
     if (!IS_DESKTOP) setMobileOpen(false);
+  };
+
+  // ── Unread Notifications ───────────────────────────────────────────────────
+  useEffect(() => {
+    fetchUnreadCount();
+    
+    // Refresh unread count every 30 seconds
+    const interval = setInterval(fetchUnreadCount, 30000);
+    
+    return () => clearInterval(interval);
+  }, []);
+
+  const fetchUnreadCount = async () => {
+    try {
+      console.log('📊 Fetching unread notification count...');
+      const response = await axiosInstance.get('/notifications/unread-count');
+      console.log('✅ Unread count response:', response.data);
+      setUnreadCount(response.data.unreadCount);
+    } catch (error) {
+      console.error('❌ Error fetching unread count:', error.message);
+      console.error('📍 URL:', error.config?.url);
+      console.error('🔴 Status:', error.response?.status);
+      console.error('💬 Response:', error.response?.data);
+      setUnreadCount(0);
+    }
   };
 
   const avatarModal = (
@@ -1013,4 +1041,39 @@ const styles = StyleSheet.create({
   modalDeleteBtn:  { backgroundColor: 'rgba(239,68,68,0.15)', borderWidth: 1, borderColor: 'rgba(239,68,68,0.4)' },
   modalActionIcon: { fontSize: 15 },
   modalActionLabel:{ fontSize: 14, fontWeight: '600' },
+
+  // Header styles for dashboard
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    backgroundColor: '#FFF',
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  notificationButton: {
+    position: 'relative',
+    padding: 5,
+  },
+  badge: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    backgroundColor: '#E74C3C',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 5,
+  },
+  badgeText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
 });

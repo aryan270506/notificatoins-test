@@ -1,7 +1,25 @@
-const mongoose = require("mongoose");
+const mongoose = require('mongoose');
 
-const studentSchema = new mongoose.Schema(
-{
+const studentSchema = new mongoose.Schema({
+  // Push notification token
+  expoPushToken: {
+    type: String,
+    default: null
+  },
+  lastTokenUpdate: {
+    type: Date
+  },
+  notificationSettings: {
+    enabled: { type: Boolean, default: true },
+    assignment: { type: Boolean, default: true },
+    quiz: { type: Boolean, default: true },
+    attendance: { type: Boolean, default: true },
+    timetable: { type: Boolean, default: true },
+    messages: { type: Boolean, default: true },
+    doubts: { type: Boolean, default: true },
+    examResults: { type: Boolean, default: true },
+    finance: { type: Boolean, default: true }
+  },
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },

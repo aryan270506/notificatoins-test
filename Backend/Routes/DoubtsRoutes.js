@@ -10,6 +10,9 @@ const mongoose = require("mongoose");
 const multer   = require("multer");
 const path     = require("path");
 const fs       = require("fs");
+const auth = require("../middleware/auth"); 
+const { sendNotificationToUsers } = require('../utils/pushNotificationService');
+const { emitNotificationToUser } = require('../socket');
 
 // ── Ensure uploads/chat directory exists ──────────────────────────────────────
 const UPLOAD_DIR = path.join(__dirname, "../uploads/chat");
@@ -180,6 +183,56 @@ router.post("/message", smartUpload, async (req, res) => {
   } catch (err) {
     console.error("POST /message error:", err);
     return res.status(500).json({ success: false, error: "Server error sending message." });
+  }
+});
+
+// When teacher replies to a doubt
+router.post('/reply-doubt/:doubtId', auth, async (req, res) => {
+  try {
+    const { doubtId } = req.params;
+    const { reply } = req.body;
+    
+    // Find doubt and add reply
+    const doubt = await Doubt.findByIdAndUpdate(
+      doubtId,
+      {
+        reply,
+        status: 'resolved',
+        resolvedBy: req.user.id,
+        resolvedAt: new Date()
+      },
+      { new: true }
+    ).populate('studentId');
+
+    // Send notification to student
+    const notificationData = {
+      type: 'doubt_reply',
+      title: '💡 Your Doubt Has Been Resolved',
+      body: `Teacher has replied to your doubt about "${doubt.subject}"`,
+      data: {
+        screen: 'Doubts',
+        doubtId: doubtId
+      },
+      priority: 'high'
+    };
+
+    await sendNotificationToUsers(
+      doubt.studentId._id,
+      'Student',
+      notificationData
+    );
+    
+    emitNotificationToUser(doubt.studentId._id, notificationData);
+
+    res.json({
+      success: true,
+      message: 'Reply sent and student notified',
+      doubt
+    });
+
+  } catch (error) {
+    console.error('Error replying to doubt:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 

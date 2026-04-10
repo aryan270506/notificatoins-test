@@ -8,6 +8,8 @@ const multer     = require("multer");
 const path       = require("path");
 const fs         = require("fs");
 const Assignment = require("../Models/Assignment");
+const { sendNotificationToUsers, sendNotificationToClass } = require('../utils/pushNotificationService');
+const { emitNotificationToUsers } = require('../socket');
 
 /* ─── Multer — resource uploads (teacher-attached images + docs) ─────────── */
 const UPLOADS_DIR = path.join(__dirname, "../uploads/assignment-resources");
@@ -112,6 +114,32 @@ router.post("/", resourceUpload.array("resources", 10), async (req, res) => {
     });
 
     await assignment.save();
+
+    // Send notification to students
+    const Student = require('../Models/Student');
+    const students = await Student.find({ year, division }).select('_id');
+    const studentIds = students.map(s => s._id);
+
+    // Prepare notification data
+    const notificationData = {
+      type: 'assignment',
+      title: '📚 New Assignment Posted',
+      body: `${title} - Due: ${new Date(dueDate).toLocaleDateString()}`,
+      data: {
+        screen: 'AssignmentPortal',
+        assignmentId: assignment._id.toString(),
+        subject
+      },
+      priority: 'high',
+      sound: 'default'
+    };
+
+    // Send push notifications
+    await sendNotificationToUsers(studentIds, 'Student', notificationData);
+
+    // Emit socket event for real-time notification
+    emitNotificationToUsers(studentIds, notificationData);
+
     res.status(201).json({ success: true, message: "Assignment created.", data: assignment });
   } catch (err) {
     console.error(err);

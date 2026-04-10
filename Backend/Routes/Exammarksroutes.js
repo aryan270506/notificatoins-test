@@ -4,6 +4,8 @@ const router    = express.Router();
 const ExamMarks = require("../Models/Exammarks");
 const Student   = require("../Models/Student");
 const Teacher   = require("../Models/Teacher");
+const auth = require("../middleware/auth"); 
+const { sendNotificationToUsers } = require('../utils/pushNotificationService');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. UPSERT marks sheet
@@ -274,6 +276,41 @@ router.get("/student-results", async (req, res) => {
   } catch (err) {
     console.error("student-results error:", err);
     res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// When exam marks are published
+router.post('/publish-marks', async (req, res) => {
+  try {
+    const { examId, marks } = req.body;
+    
+    // Save marks (existing code)
+    // ...
+
+    // Send notification to each student
+    for (const mark of marks) {
+      const notificationData = {
+        type: 'exam_result',
+        title: '📈 Exam Results Published',
+        body: `Your exam results are now available. Check your performance!`,
+        data: {
+          screen: 'ExamResults',
+          examId: examId
+        },
+        priority: 'high'
+      };
+
+      await sendNotificationToUsers(mark.studentId, 'Student', notificationData);
+    }
+
+    res.json({
+      success: true,
+      message: 'Marks published and students notified'
+    });
+
+  } catch (error) {
+    console.error('Error publishing marks:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
