@@ -27,6 +27,15 @@ const toApiYear = (y) => {
   return YEAR_REVERSE[up] ?? up;
 };
 
+const normalizeYearValue = (y) => {
+  if (y === null || y === undefined) return null;
+  const raw = String(y).trim().toUpperCase();
+  if (!raw) return null;
+  if (['FY', 'SY', 'TY', 'LY'].includes(raw)) return toApiYear(raw);
+  const match = raw.match(/^(\d)/);
+  return match ? match[1] : raw;
+};
+
 const getDueLabel = (dueDate) => {
   if (!dueDate || dueDate === 'TBD') return 'No deadline';
   const due = new Date(dueDate);
@@ -678,10 +687,20 @@ export default function Dashboardpage({ C, onThemeToggle, onNavigateToTab, user 
     const mongoId  = user._id || user.id;
     try {
       setLoading(true);
-      const res  = await axiosInstance.get(`/students/subjects/${customId}`);
-      const data = res.data;
-      setSubjects(Array.isArray(data.subjects) ? data.subjects : []);
-      setLabs(Array.isArray(data.lab) ? data.lab : []);
+      const normalizedYear = normalizeYearValue(user?.year ?? user?.academicYear ?? user?.academic_year);
+
+      if (normalizedYear) {
+        const configRes = await axiosInstance.get(`/configuration/subjects/${normalizedYear}`);
+        const subjectDoc = configRes.data?.data || {};
+        setSubjects(Array.isArray(subjectDoc.subjects) ? subjectDoc.subjects : []);
+        setLabs(Array.isArray(subjectDoc.labs) ? subjectDoc.labs : []);
+      } else {
+        const res = await axiosInstance.get(`/students/subjects/${customId}`);
+        const data = res.data;
+        setSubjects(Array.isArray(data.subjects) ? data.subjects : []);
+        setLabs(Array.isArray(data.lab) ? data.lab : []);
+      }
+
       const attRes  = await axiosInstance.get(`/attendance/student/${mongoId}`);
       const attData = attRes.data;
       if (attData.success && Array.isArray(attData.subjectSummary)) {
