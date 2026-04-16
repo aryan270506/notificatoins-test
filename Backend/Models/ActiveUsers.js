@@ -6,7 +6,7 @@ const activeUserSchema = new mongoose.Schema(
     socketId: { type: String, required: true },
     name: { type: String, required: true },
     email: { type: String, required: true },
-    role: { type: String, required: true, enum: ["admin", "teacher", "student", "parent"] },
+    role: { type: String, required: true, enum: ["admin", "teacher", "student", "parent", "committee"] },
     profilePhoto: { type: String },
     isOnline: { type: Boolean, default: true },
     loginTime: { type: Date, default: Date.now },
