@@ -31,7 +31,7 @@ const studentSchema = new mongoose.Schema({
   division: { type: String }, 
   subBranch: { type: String, default: null },
 
-  batch: { type: String, enum: ['A', 'B', 'C', null], default: null },
+  batch: { type: String, default: null },
 
   profilePhoto: {
     type: String,
@@ -43,18 +43,12 @@ const studentSchema = new mongoose.Schema({
 /**
  * 🔥 AUTO GENERATION LOGIC
  */
-studentSchema.pre("save", async function (next) {
+studentSchema.pre("save", async function () {
   const student = this;
 
   // ✅ PRN
   if (!student.prn) {
     student.prn = `PRN${Date.now().toString().slice(-6)}`;
-  }
-
-  // ✅ Division (temporary until fetched properly)
-  if (!student.division) {
-    const divisions = ["A", "B", "C"];
-    student.division = divisions[Math.floor(Math.random() * divisions.length)];
   }
 
   // ✅ Roll number (per year + division)
@@ -72,7 +66,6 @@ studentSchema.pre("save", async function (next) {
     student.branch = "TEMP"; // you can later update it
   }
 
-  next();
 });
 
 module.exports = mongoose.model("Student", studentSchema);

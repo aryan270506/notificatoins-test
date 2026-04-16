@@ -28,11 +28,8 @@ function normalizeYearToNumber(value) {
   return firstDigit ? firstDigit[0] : null;
 }
 
-function escapeRegex(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function buildClassStudentFilter(classTeacher) {
+function buildClassStudentFilter(classTeacher, options = {}) {
+  const { strictDivision = false } = options;
   const mappedYear = normalizeYearToNumber(classTeacher?.year);
   const rawYear = String(classTeacher?.year || "").trim();
   const division = String(classTeacher?.division || "").trim();
@@ -43,10 +40,15 @@ function buildClassStudentFilter(classTeacher) {
     YEAR_ALIASES_BY_NUMBER[mappedYear].forEach((y) => yearCandidates.add(y));
   }
 
-  return {
+  const filter = {
     year: { $in: [...yearCandidates] },
-    division: new RegExp(`^${escapeRegex(division)}$`, "i"),
   };
+
+  if (strictDivision && division) {
+    filter.division = new RegExp(`^${division}$`, "i");
+  }
+
+  return filter;
 }
 
 // ── Multer (memory storage for profile images)
@@ -575,6 +577,7 @@ router.post("/debug/assign-by-name", async (req, res) => {
 router.get("/:teacherId/students-for-class", async (req, res) => {
   try {
     const { teacherId } = req.params;
+    const strictDivision = String(req.query.strictDivision || "false").toLowerCase() === "true";
 
     // Get teacher and check if they are a class teacher
     const teacher = await Teacher.findById(teacherId);
@@ -590,7 +593,7 @@ router.get("/:teacherId/students-for-class", async (req, res) => {
     }
 
     const Student = require("../Models/Student");
-    const classFilter = buildClassStudentFilter(teacher.classTeacher);
+    const classFilter = buildClassStudentFilter(teacher.classTeacher, { strictDivision });
     const students = await Student.find(classFilter, {
       // Return only the fields the frontend needs — excludes password, etc.
       _id: 1, id: 1, name: 1, email: 1,
@@ -643,7 +646,7 @@ router.put("/:teacherId/assign-batch", async (req, res) => {
 
     // ── 1. Sync Student documents ───────────────────────────────
     // Clear all students currently in this batch (for this teacher's class)
-    const classFilter = buildClassStudentFilter(teacher.classTeacher);
+    const classFilter = buildClassStudentFilter(teacher.classTeacher, { strictDivision: true });
 
     // Unassign everyone in this batch within the class
     await Student.updateMany(
@@ -786,6 +789,25 @@ router.delete("/:teacherId/batch/:batchId", async (req, res) => {
       return res.status(404).json({ success: false, message: "Teacher not found" });
     }
 
+    const batchToDelete = teacher.batches.find((b) => b._id.toString() === batchId);
+    if (!batchToDelete) {
+      return res.status(404).json({ success: false, message: "Batch not found" });
+    }
+
+    const Student = require("../Models/Student");
+    const classFilter = buildClassStudentFilter(teacher.classTeacher, { strictDivision: true });
+    await Student.updateMany(
+      {
+        ...classFilter,
+        batch: batchToDelete.batchName,
+      },
+      {
+        $set: {
+          batch: null,
+        },
+      }
+    );
+
     teacher.batches = teacher.batches.filter((b) => b._id.toString() !== batchId);
     await teacher.save();
 
@@ -807,12 +829,12 @@ router.delete("/:teacherId/batch/:batchId", async (req, res) => {
 // 19. UPDATE BATCH
 //     PUT /api/teachers/:teacherId/batch/:batchId
 //
-//     Body: { batchName, studentIds }
+//     Body: { batchName, studentIds, rollNumbers }
 // ─────────────────────────────────────────────────────────────
 router.put("/:teacherId/batch/:batchId", async (req, res) => {
   try {
     const { teacherId, batchId } = req.params;
-    const { batchName, studentIds } = req.body;
+    const { batchName, studentIds, rollNumbers } = req.body;
 
     const teacher = await Teacher.findById(teacherId);
     if (!teacher) {
@@ -824,6 +846,8 @@ router.put("/:teacherId/batch/:batchId", async (req, res) => {
       return res.status(404).json({ success: false, message: "Batch not found" });
     }
 
+    const previousBatchName = batch.batchName;
+
     // Update batch name if provided
     if (batchName) {
       batch.batchName = batchName;
@@ -832,14 +856,71 @@ router.put("/:teacherId/batch/:batchId", async (req, res) => {
     // Update students if provided
     if (studentIds && Array.isArray(studentIds)) {
       const Student = require("../Models/Student");
+      const classFilter = buildClassStudentFilter(teacher.classTeacher, { strictDivision: true });
+
+      // Remove this sub-division from previously assigned students in the same class/division.
+      await Student.updateMany(
+        {
+          ...classFilter,
+          batch: { $in: [...new Set([previousBatchName, batch.batchName].filter(Boolean))] },
+        },
+        {
+          $set: {
+            batch: null,
+          },
+        }
+      );
+
+      if (studentIds.length > 0) {
+        await Student.updateMany(
+          {
+            ...classFilter,
+            id: { $in: studentIds },
+          },
+          {
+            $set: {
+              division: teacher.classTeacher?.division || null,
+              batch: batch.batchName,
+            },
+          }
+        );
+      }
+
       // studentIds sent from frontend are custom `id` strings, not MongoDB _ids
-      const students = await Student.find({ id: { $in: studentIds } }).lean();
+      const students = await Student.find({ ...classFilter, id: { $in: studentIds } }).lean();
 
       batch.students = students.map((s) => ({
         studentId: s.id,
         studentName: s.name,
         studentEmail: s.email,
       }));
+
+      if (rollNumbers && typeof rollNumbers === "object") {
+        const rollOps = Object.entries(rollNumbers)
+          .map(([studentId, rollValue]) => {
+            const parsed = Number.parseInt(String(rollValue).trim(), 10);
+            if (!studentId || Number.isNaN(parsed) || parsed <= 0) return null;
+
+            return {
+              updateOne: {
+                filter: {
+                  ...classFilter,
+                  id: studentId,
+                },
+                update: {
+                  $set: {
+                    roll_no: parsed,
+                  },
+                },
+              },
+            };
+          })
+          .filter(Boolean);
+
+        if (rollOps.length > 0) {
+          await Student.bulkWrite(rollOps);
+        }
+      }
     }
 
     await teacher.save();
