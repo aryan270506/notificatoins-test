@@ -15,6 +15,7 @@ import {
   Alert,
 } from 'react-native';
 import axiosInstance from '../../../Src/Axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width } = Dimensions.get('window');
 
@@ -320,13 +321,96 @@ const FacultyRow = ({ item }) => {
   );
 };
 
+// ─── Divisions Edit Modal ────────────────────────────────────────────────────
+const DivisionsEditModal = ({ visible, onClose, divisions, onSave, isDark }) => {
+  const [editText, setEditText] = useState(divisions.join(', '));
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setEditText(divisions.join(', '));
+  }, [visible, divisions]);
+
+  const handleSave = () => {
+    const cleaned = editText
+      .split(',')
+      .map(d => d.trim().toUpperCase())
+      .filter(d => d.length > 0);
+    
+    if (cleaned.length === 0) {
+      Alert.alert('Invalid', 'Please enter at least one division.');
+      return;
+    }
+    
+    setSaving(true);
+    setTimeout(() => {
+      onSave(cleaned);
+      setSaving(false);
+      onClose();
+    }, 300);
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={demStyles.overlay}>
+        <View style={demStyles.sheet}>
+          <View style={demStyles.handle} />
+          <View style={demStyles.header}>
+            <Text style={demStyles.title}>Edit Divisions</Text>
+            <TouchableOpacity style={demStyles.closeBtn} onPress={onClose}>
+              <Text style={{ color: C.textSecondary, fontSize: 18 }}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={demStyles.content}>
+            <Text style={demStyles.label}>Enter divisions separated by commas</Text>
+            <TextInput
+              style={demStyles.input}
+              placeholder="e.g. A, B, C, D"
+              placeholderTextColor={C.textMuted}
+              value={editText}
+              onChangeText={setEditText}
+              multiline
+            />
+            <Text style={demStyles.hint}>Example: A, B, C or Section 1, Section 2</Text>
+            <TouchableOpacity 
+              style={[demStyles.saveBtn, saving && demStyles.saveBtnDisabled]}
+              onPress={handleSave}
+              disabled={saving}
+            >
+              {saving ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={demStyles.saveBtnText}>Save Divisions</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
+const demStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: '#0d1e38', borderTopLeftRadius: 28, borderTopRightRadius: 28, borderWidth: 1, borderColor: '#1a2d50', maxHeight: '60%' },
+  handle: { width: 40, height: 4, backgroundColor: '#1a2d50', borderRadius: 2, alignSelf: 'center', marginTop: 12, marginBottom: 16 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, marginBottom: 16 },
+  title: { color: '#fff', fontSize: 18, fontWeight: '800' },
+  closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#1a2d50', alignItems: 'center', justifyContent: 'center' },
+  content: { paddingHorizontal: 20, paddingBottom: 32 },
+  label: { color: C.textMuted, fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 8 },
+  input: { backgroundColor: '#0f1f3d', borderRadius: 12, borderWidth: 1, borderColor: '#1a2d50', color: '#fff', paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, marginBottom: 8, minHeight: 80, textAlignVertical: 'top' },
+  hint: { color: C.textMuted, fontSize: 11, marginBottom: 16 },
+  saveBtn: { backgroundColor: C.accent, borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
+  saveBtnDisabled: { opacity: 0.6 },
+  saveBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+});
+
 // ─── Class Teacher Assignment Modal ──────────────────────────────────────────
 const YEARS = ['1st Year', '2nd Year', '3rd Year', '4th Year'];
-const DIVISIONS = ['A', 'B', 'C'];
 
-const ClassTeacherModal = ({ visible, onClose, teachers, assignments, onAssign, initialYear, initialDiv }) => {
+const ClassTeacherModal = ({ visible, onClose, teachers, assignments, onAssign, initialYear, initialDiv, divisions = ['A', 'B', 'C'] }) => {
   const [selectedYear, setSelectedYear] = useState('1st Year');
-  const [selectedDiv, setSelectedDiv] = useState('A');
+  const [selectedDiv, setSelectedDiv] = useState(divisions[0] || 'A');
   const [teacherSearch, setTeacherSearch] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -420,7 +504,7 @@ const ClassTeacherModal = ({ visible, onClose, teachers, assignments, onAssign, 
               <View style={{ flex: 1 }}>
                 <Text style={modalStyles.sectionLabel}>DIVISION</Text>
                 <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 8 }}>
-                  {DIVISIONS.map(d => (
+                  {divisions.map(d => (
                     <TouchableOpacity
                       key={d}
                       style={[
@@ -718,7 +802,7 @@ const modalStyles = StyleSheet.create({
 });
 
 // ─── Class Teacher Grid Card ──────────────────────────────────────────────────
-const ClassTeacherGrid = ({ assignments, onPressCell }) => {
+const ClassTeacherGrid = ({ assignments, onPressCell, divisions = ['A', 'B', 'C'], onEditDivisions }) => {
   return (
     <View style={styles.card}>
       <View style={styles.facultyHeader}>
@@ -728,16 +812,24 @@ const ClassTeacherGrid = ({ assignments, onPressCell }) => {
             Year × Division assignment map
           </Text>
         </View>
-        <View style={ctStyles.crownTag}>
-          <Text style={{ fontSize: 12 }}>👑</Text>
-          <Text style={ctStyles.crownTagText}>CT Board</Text>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <TouchableOpacity 
+            style={ctStyles.editDivBtn}
+            onPress={onEditDivisions}
+          >
+            <Text style={ctStyles.editDivBtnText}>✏ Edit Divisions</Text>
+          </TouchableOpacity>
+          <View style={ctStyles.crownTag}>
+            <Text style={{ fontSize: 12 }}>👑</Text>
+            <Text style={ctStyles.crownTagText}>CT Board</Text>
+          </View>
         </View>
       </View>
 
       {/* Header row */}
       <View style={ctStyles.gridRow}>
         <View style={ctStyles.gridLabelCell} />
-        {DIVISIONS.map(d => (
+        {divisions.map(d => (
           <View key={d} style={ctStyles.gridHeaderCell}>
             <Text style={ctStyles.gridHeaderText}>Div {d}</Text>
           </View>
@@ -750,7 +842,7 @@ const ClassTeacherGrid = ({ assignments, onPressCell }) => {
           <View style={ctStyles.gridLabelCell}>
             <Text style={ctStyles.gridLabelText}>{year.replace(' Year', '')}</Text>
           </View>
-          {DIVISIONS.map(div => {
+          {divisions.map(div => {
             const key = `${year}-${div}`;
             const assigned = assignments[key];
             return (
@@ -785,6 +877,15 @@ const ClassTeacherGrid = ({ assignments, onPressCell }) => {
 };
 
 const ctStyles = StyleSheet.create({
+  editDivBtn: {
+    backgroundColor: 'rgba(59, 91, 219, 0.2)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#4c6ef5',
+  },
+  editDivBtnText: { color: '#4c6ef5', fontSize: 11, fontWeight: '700' },
   crownTag: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -850,6 +951,8 @@ export default function TeacherManagementDashboard() {
   const [ctModalVisible, setCtModalVisible] = useState(false);
   const [ctInitialYear, setCtInitialYear] = useState(null);
   const [ctInitialDiv, setCtInitialDiv] = useState(null);
+  const [divisions, setDivisions] = useState(['A', 'B', 'C']);
+  const [divisionsEditVisible, setDivisionsEditVisible] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -932,6 +1035,27 @@ export default function TeacherManagementDashboard() {
     };
     fetchData();
   }, []);
+
+  useEffect(() => {
+    const loadDivisions = async () => {
+      try {
+        const stored = await AsyncStorage.getItem('faculty_divisions');
+        if (stored) setDivisions(JSON.parse(stored));
+      } catch (e) {
+        console.warn('Failed to load divisions:', e);
+      }
+    };
+    loadDivisions();
+  }, []);
+
+  const saveDivisions = async (newDivs) => {
+    try {
+      await AsyncStorage.setItem('faculty_divisions', JSON.stringify(newDivs));
+      setDivisions(newDivs);
+    } catch (e) {
+      console.warn('Failed to save divisions:', e);
+    }
+  };
 
   const openCTModal = (year = null, div = null) => {
     setCtInitialYear(year);
@@ -1052,6 +1176,8 @@ export default function TeacherManagementDashboard() {
             <ClassTeacherGrid
               assignments={ctAssignments}
               onPressCell={(year, div) => openCTModal(year, div)}
+              divisions={divisions}
+              onEditDivisions={() => setDivisionsEditVisible(true)}
             />
 
             {/* Assign Button */}
@@ -1062,74 +1188,7 @@ export default function TeacherManagementDashboard() {
             </TouchableOpacity>
 
             {/* Middle Row */}
-            <View style={styles.middleRow}>
-              <View style={[styles.card, { flex: 1, marginRight: 8 }]}>
-                <Text style={styles.cardTitle}>Teachers per Year</Text>
-                <Text style={{ color: C.textSecondary, fontSize: 10, marginBottom: 8, marginTop: -4 }}>
-                  Year-wise assignment breakdown
-                </Text>
-                <DoubtsResolvedChart doubtsData={yearData} />
-              </View>
-
-              <View style={[styles.card, { flex: 1 }]}>
-                <Text style={styles.cardTitle}>Teacher Distribution</Text>
-                <View style={{ alignItems: 'center', marginVertical: 12 }}>
-                  <DonutChart
-                    active={totalTeachers > 0 ? Math.round((activeTeachers / totalTeachers) * 100) : 0}
-                    inactive={totalTeachers > 0 ? Math.round((inactiveTeachers / totalTeachers) * 100) : 0}
-                    total={totalTeachers}
-                  />
-                </View>
-                <View style={styles.distRow}>
-                  <View style={[styles.dot, { backgroundColor: C.accentLight }]} />
-                  <View style={{ marginLeft: 8 }}>
-                    <View style={styles.distLabelRow}>
-                      <Text style={styles.distLabel}>Active</Text>
-                      <Text style={styles.distPct}>
-                        {totalTeachers > 0 ? Math.round((activeTeachers / totalTeachers) * 100) : 0}%
-                      </Text>
-                    </View>
-                    <Text style={styles.distSub}>{activeTeachers} Enrolled Faculty</Text>
-                  </View>
-                </View>
-                <View style={[styles.distRow, { marginTop: 10 }]}>
-                  <View style={[styles.dot, { backgroundColor: C.textMuted }]} />
-                  <View style={{ marginLeft: 8 }}>
-                    <View style={styles.distLabelRow}>
-                      <Text style={styles.distLabel}>Inactive</Text>
-                      <Text style={styles.distPct}>
-                        {totalTeachers > 0 ? Math.round((inactiveTeachers / totalTeachers) * 100) : 0}%
-                      </Text>
-                    </View>
-                    <Text style={styles.distSub}>{inactiveTeachers} On Leave/Resigned</Text>
-                  </View>
-                </View>
-              </View>
-            </View>
-
-            {/* Recent Faculty Updates */}
-            <View style={[styles.card, { marginTop: 0 }]}>
-              <View style={styles.facultyHeader}>
-                <Text style={styles.cardTitle}>Faculty List</Text>
-                <TouchableOpacity>
-                  <Text style={{ color: C.accentLight, fontSize: 12, fontWeight: '600' }}>
-                    {totalTeachers} TOTAL
-                  </Text>
-                </TouchableOpacity>
-              </View>
-              {recentUpdates.length > 0 ? (
-                recentUpdates.map((item, i) => (
-                  <React.Fragment key={item.id}>
-                    <FacultyRow item={item} />
-                    {i < recentUpdates.length - 1 && <View style={styles.divider} />}
-                  </React.Fragment>
-                ))
-              ) : (
-                <Text style={{ color: C.textMuted, textAlign: 'center', padding: 20, fontSize: 13 }}>
-                  No teachers found
-                </Text>
-              )}
-            </View>
+            
           </>
         )}
 
@@ -1145,6 +1204,13 @@ export default function TeacherManagementDashboard() {
         onAssign={handleAssignCT}
         initialYear={ctInitialYear}
         initialDiv={ctInitialDiv}
+        divisions={divisions}
+      />
+      <DivisionsEditModal
+        visible={divisionsEditVisible}
+        onClose={() => setDivisionsEditVisible(false)}
+        divisions={divisions}
+        onSave={saveDivisions}
       />
     </View>
   );

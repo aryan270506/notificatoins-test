@@ -7,6 +7,48 @@ const Teacher = require("../Models/Teacher");
 const multer  = require("multer");
 const { checkUploadPermission } = require("../Middleware/permissionCheck");
 
+const YEAR_ALIASES_BY_NUMBER = {
+  "1": ["1", "1st Year", "First Year", "FY"],
+  "2": ["2", "2nd Year", "Second Year", "SY"],
+  "3": ["3", "3rd Year", "Third Year", "TY"],
+  "4": ["4", "4th Year", "Fourth Year", "LY"],
+};
+
+function normalizeYearToNumber(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+
+  const upper = raw.toUpperCase();
+  if (["FY", "FIRST YEAR"].includes(upper) || upper.startsWith("1ST YEAR")) return "1";
+  if (["SY", "SECOND YEAR"].includes(upper) || upper.startsWith("2ND YEAR")) return "2";
+  if (["TY", "THIRD YEAR"].includes(upper) || upper.startsWith("3RD YEAR")) return "3";
+  if (["LY", "FOURTH YEAR"].includes(upper) || upper.startsWith("4TH YEAR")) return "4";
+
+  const firstDigit = raw.match(/[1-4]/);
+  return firstDigit ? firstDigit[0] : null;
+}
+
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildClassStudentFilter(classTeacher) {
+  const mappedYear = normalizeYearToNumber(classTeacher?.year);
+  const rawYear = String(classTeacher?.year || "").trim();
+  const division = String(classTeacher?.division || "").trim();
+
+  const yearCandidates = new Set();
+  if (rawYear) yearCandidates.add(rawYear);
+  if (mappedYear) {
+    YEAR_ALIASES_BY_NUMBER[mappedYear].forEach((y) => yearCandidates.add(y));
+  }
+
+  return {
+    year: { $in: [...yearCandidates] },
+    division: new RegExp(`^${escapeRegex(division)}$`, "i"),
+  };
+}
+
 // ── Multer (memory storage for profile images)
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -329,7 +371,6 @@ router.post("/assign-class-teacher", async (req, res) => {
 
     // ── Validation ──────────────────────────────────────────
     const VALID_YEARS = ["1st Year", "2nd Year", "3rd Year", "4th Year"];
-    const VALID_DIVS  = ["A", "B", "C"];
 
     if (!teacherId || !year || !division) {
       return res.status(400).json({
@@ -343,10 +384,12 @@ router.post("/assign-class-teacher", async (req, res) => {
         message: `year must be one of: ${VALID_YEARS.join(", ")}`,
       });
     }
-    if (!VALID_DIVS.includes(division)) {
+    // 🔄 Division validation removed - now admin-configurable
+    // Just ensure it's a non-empty string
+    if (typeof division !== "string" || division.trim().length === 0) {
       return res.status(400).json({
         success: false,
-        message: `division must be one of: ${VALID_DIVS.join(", ")}`,
+        message: "division must be a non-empty string",
       });
     }
 
@@ -546,17 +589,9 @@ router.get("/:teacherId/students-for-class", async (req, res) => {
       });
     }
 
-    // ── Year format bridge ──────────────────────────────────────────
-    // Teacher schema stores year as "1st Year" / "2nd Year" / "3rd Year" / "4th Year"
-    // Student schema stores year as "1" / "2" / "3" / "4"
-    const yearMap = { "1st Year": "1", "2nd Year": "2", "3rd Year": "3", "4th Year": "4" };
-    const studentYear = yearMap[teacher.classTeacher.year] || teacher.classTeacher.year;
-
     const Student = require("../Models/Student");
-    const students = await Student.find({
-      year:     studentYear,
-      division: teacher.classTeacher.division,
-    }, {
+    const classFilter = buildClassStudentFilter(teacher.classTeacher);
+    const students = await Student.find(classFilter, {
       // Return only the fields the frontend needs — excludes password, etc.
       _id: 1, id: 1, name: 1, email: 1,
       roll_no: 1, prn: 1, division: 1, year: 1, batch: 1,
@@ -608,20 +643,18 @@ router.put("/:teacherId/assign-batch", async (req, res) => {
 
     // ── 1. Sync Student documents ───────────────────────────────
     // Clear all students currently in this batch (for this teacher's class)
-    const yearMap = { "1st Year": "1", "2nd Year": "2", "3rd Year": "3", "4th Year": "4" };
-    const studentYear = yearMap[teacher.classTeacher?.year] || teacher.classTeacher?.year;
-    const division    = teacher.classTeacher?.division;
+    const classFilter = buildClassStudentFilter(teacher.classTeacher);
 
     // Unassign everyone in this batch within the class
     await Student.updateMany(
-      { year: studentYear, division, batch },
+      { ...classFilter, batch },
       { $set: { batch: null } }
     );
 
     // Assign selected students to this batch
     if (studentIds.length > 0) {
       await Student.updateMany(
-        { id: { $in: studentIds } },
+        { ...classFilter, id: { $in: studentIds } },
         { $set: { batch } }
       );
     }
@@ -629,7 +662,7 @@ router.put("/:teacherId/assign-batch", async (req, res) => {
     // ── 2. Sync Teacher.batches array ───────────────────────────
     // Fetch full details for the selected students
     const students = await Student.find(
-      { id: { $in: studentIds } },
+      { ...classFilter, id: { $in: studentIds } },
       { id: 1, name: 1, email: 1 }
     ).lean();
 
@@ -664,12 +697,13 @@ router.put("/:teacherId/assign-batch", async (req, res) => {
 router.post("/:teacherId/create-batch", async (req, res) => {
   try {
     const { teacherId } = req.params;
-    const { batchName, studentIds } = req.body;
+    const { batchName } = req.body;
+    const studentIds = Array.isArray(req.body?.studentIds) ? req.body.studentIds : [];
 
-    if (!batchName || !studentIds || !Array.isArray(studentIds)) {
+    if (!batchName) {
       return res.status(400).json({
         success: false,
-        message: "batchName and studentIds (array) are required",
+        message: "batchName is required",
       });
     }
 

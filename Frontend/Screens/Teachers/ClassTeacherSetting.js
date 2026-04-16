@@ -963,22 +963,31 @@ export function BatchManagementScreen() {
   const [teacherMongoId, setTeacherMongoId] = useState(null);
   const [classInfo,      setClassInfo]      = useState(null); // { year, division }
   const [students,       setStudents]       = useState([]);   // all students in this class
-  const [batchMap,       setBatchMap]       = useState({ A: [], B: [], C: [] }); // batchLabel → [studentId]
+  const [batchesData,    setBatchesData]    = useState([]); // actual batches from teacher.batches
   const [loading,        setLoading]        = useState(true);
   const [loadError,      setLoadError]      = useState(null);
 
-  /* ── Batch picker modal ── */
-  const [pickerModal,    setPickerModal]    = useState(false); // "choose A/B/C" sheet
+  /* ── Sub Batch picker modal ── */
+  const [pickerModal,    setPickerModal]    = useState(false); // "choose or create sub batch" sheet
+  const [createBatchName, setCreateBatchName] = useState('');  // for creating new batch
+  const [creatingBatch,  setCreatingBatch]  = useState(false);
 
   /* ── Student selector modal ── */
   const [selectorModal,  setSelectorModal]  = useState(false);
-  const [activeBatch,    setActiveBatch]    = useState(null);  // 'A' | 'B' | 'C'
+  const [activeBatchId,  setActiveBatchId]  = useState(null);  // _id of active batch
+  const [activeBatchName, setActiveBatchName] = useState(null); // name of active batch
   const [selected,       setSelected]       = useState(new Set());
   const [saving,         setSaving]         = useState(false);
   const [selectorSearch, setSelectorSearch] = useState('');    // search filter inside modal
 
   /* ── Tab ── */
   const [activeTab, setActiveTab] = useState('students');
+
+  const getRollNumber = (student) => {
+    const raw = String(student?.roll_no ?? '').trim();
+    const trailingNumber = raw.match(/(\d+)$/);
+    return trailingNumber ? parseInt(trailingNumber[1], 10) : 0;
+  };
 
   /* ── Load data on mount ── */
   useEffect(() => {
@@ -1003,22 +1012,14 @@ export function BatchManagementScreen() {
         // Fetch students for this class
         const stuRes = await axiosInstance.get(`/teachers/${teacher._id}/students-for-class`);
         if (stuRes.data?.success) {
-          const rollNum = (s) => {
-            const raw = s.roll_no || '';
-            const parts = raw.split('-');
-            return parseInt(parts[parts.length - 1]) || 0;
-          };
-          const sorted = (stuRes.data.data || []).sort((a, b) => rollNum(a) - rollNum(b));
+          const sorted = (stuRes.data.data || []).sort((a, b) => getRollNumber(a) - getRollNumber(b));
           setStudents(sorted);
+        }
 
-          // Build batchMap from student.batch field
-          const map = { A: [], B: [], C: [] };
-          sorted.forEach(s => {
-            if (s.batch === 'A' || s.batch === 'B' || s.batch === 'C') {
-              map[s.batch].push(s.id);
-            }
-          });
-          setBatchMap(map);
+        // ✅ Fetch batches from teacher's batches array
+        const batchesRes = await axiosInstance.get(`/teachers/${teacher._id}/batches`);
+        if (batchesRes.data?.success && Array.isArray(batchesRes.data.data)) {
+          setBatchesData(batchesRes.data.data);
         }
       } catch (err) {
         console.warn('BatchManagement: fetch error', err);
@@ -1029,13 +1030,45 @@ export function BatchManagementScreen() {
     })();
   }, []);
 
-  /* ── Open batch picker (the A/B/C chooser) ── */
+  /* ── Open sub batch picker/creator ── */
   const openBatchPicker = () => setPickerModal(true);
 
-  /* ── Open student selector for a specific batch ── */
-  const openBatchEditor = (label) => {
-    setActiveBatch(label);
-    setSelected(new Set(batchMap[label] || []));
+  /* ── Create new sub batch ── */
+  const handleCreateBatch = async () => {
+    if (!createBatchName.trim() || !teacherMongoId) return;
+    try {
+      setCreatingBatch(true);
+      const res = await axiosInstance.post(`/teachers/${teacherMongoId}/create-batch`, {
+        batchName: createBatchName.trim(),
+        studentIds: [],
+      });
+
+      if (res.data?.success) {
+        // Reload batches
+        const batchesRes = await axiosInstance.get(`/teachers/${teacherMongoId}/batches`);
+        if (batchesRes.data?.success) {
+          setBatchesData(batchesRes.data.data);
+        }
+        setCreateBatchName('');
+        Alert.alert('✅ Created', `Sub Batch "${createBatchName}" created successfully.`);
+      } else {
+        Alert.alert('Error', res.data?.message || 'Failed to create batch.');
+      }
+    } catch (err) {
+      console.warn('Create batch error:', err);
+      Alert.alert('Error', 'Failed to create sub batch.');
+    } finally {
+      setCreatingBatch(false);
+    }
+  };
+
+  /* ── Open student selector for a specific sub batch ── */
+  const openBatchEditor = (batchId, batchName) => {
+    const batch = batchesData?.find(b => b._id === batchId);
+    const studentIds = batch?.students?.map(s => s.studentId) || [];
+    setActiveBatchId(batchId);
+    setActiveBatchName(batchName);
+    setSelected(new Set(studentIds));
     setSelectorSearch('');
     setPickerModal(false);
     setSelectorModal(true);
@@ -1052,35 +1085,33 @@ export function BatchManagementScreen() {
 
   /* ── Save batch assignment ── */
   const handleSave = async () => {
-    if (!activeBatch || !teacherMongoId) return;
+    if (!activeBatchId || !teacherMongoId) return;
     try {
       setSaving(true);
       const studentIds = Array.from(selected);
 
-      // PUT /api/teachers/:teacherId/assign-batch
-      const res = await axiosInstance.put(`/teachers/${teacherMongoId}/assign-batch`, {
-        batch: activeBatch,
+      // PUT /api/teachers/:teacherId/batch/:batchId
+      const res = await axiosInstance.put(`/teachers/${teacherMongoId}/batch/${activeBatchId}`, {
+        batchName: activeBatchName,
         studentIds,
       });
 
       if (res.data?.success) {
-        // Update local batchMap
-        setBatchMap(prev => ({ ...prev, [activeBatch]: studentIds }));
+        // Reload batches
+        const batchesRes = await axiosInstance.get(`/teachers/${teacherMongoId}/batches`);
+        if (batchesRes.data?.success) {
+          setBatchesData(batchesRes.data.data);
+        }
 
-        // Refresh students list to reflect updated batch field
+        // Refresh students list
         const stuRes = await axiosInstance.get(`/teachers/${teacherMongoId}/students-for-class`);
         if (stuRes.data?.success) {
-          const rollNum = (s) => {
-            const raw = s.roll_no || '';
-            const parts = raw.split('-');
-            return parseInt(parts[parts.length - 1]) || 0;
-          };
-          const sorted = (stuRes.data.data || []).sort((a, b) => rollNum(a) - rollNum(b));
+          const sorted = (stuRes.data.data || []).sort((a, b) => getRollNumber(a) - getRollNumber(b));
           setStudents(sorted);
         }
 
         setSelectorModal(false);
-        Alert.alert('✅ Saved', `Batch ${activeBatch} updated with ${studentIds.length} student(s).`);
+        Alert.alert('✅ Saved', `Sub Batch "${activeBatchName}" updated with ${studentIds.length} student(s).`);
       } else {
         Alert.alert('Error', res.data?.message || 'Failed to save batch.');
       }
@@ -1091,9 +1122,6 @@ export function BatchManagementScreen() {
       setSaving(false);
     }
   };
-
-  const batchColors = { A: '#6366f1', B: '#10B981', C: '#F59E0B' };
-  const totalAssigned = Object.values(batchMap).reduce((sum, arr) => sum + arr.length, 0);
 
   /* ── Error state ── */
   if (!loading && loadError) {
@@ -1133,9 +1161,23 @@ export function BatchManagementScreen() {
   const StudentSelectRow = ({ item }) => {
     const sid = item.id;
     const isSelected = selected.has(sid);
-    // Which batch is this student currently in (from live batchMap, not activeBatch)
-    const currentBatch = item.batch;
-    const inOtherBatch = currentBatch && currentBatch !== activeBatch;
+    // Check if this student is currently in any other batch
+    let currentBatchName = null;
+    let currentBatchColor = null;
+    if (batchesData && batchesData.length > 0) {
+      for (let i = 0; i < batchesData.length; i++) {
+        const batch = batchesData[i];
+        if (batch._id !== activeBatchId) { // Don't show if it's the active one
+          const studentIds = batch.students?.map(s => s.studentId) || [];
+          if (studentIds.includes(sid)) {
+            currentBatchName = batch.batchName;
+            const colors = ['#6366f1', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#F97316', '#EC4899'];
+            currentBatchColor = colors[i % colors.length];
+            break;
+          }
+        }
+      }
+    }
 
     return (
       <TouchableOpacity
@@ -1162,13 +1204,13 @@ export function BatchManagementScreen() {
             {item.roll_no ? `Roll: ${item.roll_no}` : ''}{item.prn ? `  PRN: ${item.prn}` : ''}
           </Text>
         </View>
-        {inOtherBatch && (
+        {currentBatchName && (
           <View style={[bs.batchPillSmall, {
-            backgroundColor: (batchColors[currentBatch] || T.accent) + '22',
-            borderColor: (batchColors[currentBatch] || T.accent) + '66',
+            backgroundColor: (currentBatchColor || T.accent) + '22',
+            borderColor: (currentBatchColor || T.accent) + '66',
           }]}>
-            <Text style={[bs.batchPillSmallText, { color: batchColors[currentBatch] || T.accent }]}>
-              Batch {currentBatch}
+            <Text style={[bs.batchPillSmallText, { color: currentBatchColor || T.accent }]}>
+              {currentBatchName}
             </Text>
           </View>
         )}
@@ -1189,19 +1231,19 @@ export function BatchManagementScreen() {
           <Text style={[bs.headerTitle, { color: T.textPrimary }]}>Batch Management</Text>
           <Text style={[bs.headerSub, { color: T.textSec }]}>
             {classInfo ? `${classInfo.year} · Div ${classInfo.division} · ` : ''}
-            {students.length} students · {totalAssigned} assigned
+            {students.length} students · {batchesData?.length || 0} sub batches
           </Text>
         </View>
       </View>
 
-      {/* ── Action Bar — only "Create / Manage Batch" ── */}
+      {/* ── Action Bar — Create / Manage Sub Batch ── */}
       <View style={[bs.actionBar, { backgroundColor: T.surface, borderBottomColor: T.border }]}>
         <TouchableOpacity
           onPress={openBatchPicker}
           activeOpacity={0.82}
           style={[bs.actionBarBtn, { backgroundColor: T.accent, flex: 1 }]}>
-          <Text style={bs.actionBarBtnIcon}>👥</Text>
-          <Text style={bs.actionBarBtnText}>Create / Manage Batch</Text>
+          <Text style={bs.actionBarBtnIcon}>➕</Text>
+          <Text style={bs.actionBarBtnText}>Create / Manage Sub Batch</Text>
         </TouchableOpacity>
       </View>
 
@@ -1226,23 +1268,28 @@ export function BatchManagementScreen() {
               </View>
             </View>
 
-            {/* Batch summary pills */}
+            {/* Sub Batches summary pills */}
             <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-              {['A', 'B', 'C'].map(label => {
-                const color = batchColors[label];
-                const count = batchMap[label]?.length || 0;
-                return (
-                  <TouchableOpacity
-                    key={label}
-                    onPress={() => openBatchEditor(label)}
-                    activeOpacity={0.8}
-                    style={[bs.batchSummaryPill, { backgroundColor: color + '18', borderColor: color + '55' }]}>
-                    <View style={[bs.batchSummaryDot, { backgroundColor: color }]} />
-                    <Text style={[bs.batchSummaryLabel, { color }]}>Batch {label}</Text>
-                    <Text style={[bs.batchSummaryCount, { color }]}>{count} students</Text>
-                  </TouchableOpacity>
-                );
-              })}
+              {batchesData?.length > 0 ? (
+                batchesData.map((batch, idx) => {
+                  const colors = ['#6366f1', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#F97316', '#EC4899'];
+                  const color = colors[idx % colors.length];
+                  const count = batch.students?.length || 0;
+                  return (
+                    <TouchableOpacity
+                      key={batch._id}
+                      onPress={() => openBatchEditor(batch._id, batch.batchName)}
+                      activeOpacity={0.8}
+                      style={[bs.batchSummaryPill, { backgroundColor: color + '18', borderColor: color + '55' }]}>
+                      <View style={[bs.batchSummaryDot, { backgroundColor: color }]} />
+                      <Text style={[bs.batchSummaryLabel, { color }]}>{batch.batchName}</Text>
+                      <Text style={[bs.batchSummaryCount, { color }]}>{count} students</Text>
+                    </TouchableOpacity>
+                  );
+                })
+              ) : (
+                <Text style={[bs.emptySub, { color: T.textMuted }]}>No sub batches yet — tap the button above to create one</Text>
+              )}
             </View>
           </View>
         </View>
@@ -1252,7 +1299,7 @@ export function BatchManagementScreen() {
       <View style={[bs.tabRow, { backgroundColor: T.surface, borderBottomColor: T.border }]}>
         {[
           { key: 'students', label: `Students (${students.length})` },
-          { key: 'batches',  label: 'Batches (A / B / C)' },
+          { key: 'batches',  label: `Sub Batches (${batchesData?.length || 0})` },
         ].map(tab => (
           <TouchableOpacity key={tab.key} onPress={() => setActiveTab(tab.key)} activeOpacity={0.75}
             style={[bs.tabItem, activeTab === tab.key && [bs.tabItemActive, { borderBottomColor: T.accent }]]}>
@@ -1279,8 +1326,21 @@ export function BatchManagementScreen() {
             </View>
           }
           renderItem={({ item, index }) => {
-            const batchLabel = item.batch;
-            const batchColor = batchLabel ? batchColors[batchLabel] : null;
+            // Check which sub batch this student is in
+            let studentBatch = null;
+            let batchColor = null;
+            if (batchesData && batchesData.length > 0) {
+              for (let i = 0; i < batchesData.length; i++) {
+                const batch = batchesData[i];
+                const studentIds = batch.students?.map(s => s.studentId) || [];
+                if (studentIds.includes(item.id)) {
+                  studentBatch = batch.batchName;
+                  const colors = ['#6366f1', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#F97316', '#EC4899'];
+                  batchColor = colors[i % colors.length];
+                  break;
+                }
+              }
+            }
 
             return (
               <View style={[bs.stuListRow, { backgroundColor: T.surface, borderColor: T.border }]}>
@@ -1298,9 +1358,9 @@ export function BatchManagementScreen() {
                   <Text style={[bs.stuName, { color: T.textPrimary }]}>{item.name}</Text>
                   <Text style={[bs.stuMeta, { color: T.textMuted }]}>{item.prn || ''}</Text>
                 </View>
-                {batchLabel ? (
+                {studentBatch ? (
                   <View style={[bs.batchPillSmall, { backgroundColor: batchColor + '22', borderColor: batchColor + '55' }]}>
-                    <Text style={[bs.batchPillSmallText, { color: batchColor }]}>Batch {batchLabel}</Text>
+                    <Text style={[bs.batchPillSmallText, { color: batchColor }]}>{studentBatch}</Text>
                   </View>
                 ) : (
                   <View style={[bs.unassignedPill, { backgroundColor: T.surface, borderColor: T.border }]}>
@@ -1313,71 +1373,83 @@ export function BatchManagementScreen() {
         />
       )}
 
-      {/* ── Batches Tab ── */}
+      {/* ── Sub Batches Tab ── */}
       {activeTab === 'batches' && (
         <ScrollView contentContainerStyle={bs.listContent} showsVerticalScrollIndicator={false}>
-          {['A', 'B', 'C'].map((label) => {
-            const color   = batchColors[label];
-            const ids     = batchMap[label] || [];
-            const members = students.filter(s => ids.includes(s.id));
+          {batchesData && batchesData.length > 0 ? (
+            batchesData.map((batch, idx) => {
+              const colors = ['#6366f1', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#F97316', '#EC4899'];
+              const color = colors[idx % colors.length];
+              const members = batch.students
+                ? students.filter(s => batch.students.map(sb => sb.studentId).includes(s.id))
+                : [];
 
-            return (
-              <View key={label} style={[bs.batchCard, { backgroundColor: T.card, borderColor: color + '44', shadowColor: T.shadowColor }]}>
-                <View style={[bs.batchStrip, { backgroundColor: color }]} />
-                <View style={bs.batchBody}>
-                  {/* Title row */}
-                  <View style={bs.batchTitleRow}>
-                    <View style={[bs.batchIconWrap, { backgroundColor: color + '22' }]}>
-                      <Text style={[bs.batchIconText, { color }]}>B{label}</Text>
+              return (
+                <View key={batch._id} style={[bs.batchCard, { backgroundColor: T.card, borderColor: color + '44', shadowColor: T.shadowColor }]}>
+                  <View style={[bs.batchStrip, { backgroundColor: color }]} />
+                  <View style={bs.batchBody}>
+                    {/* Title row */}
+                    <View style={bs.batchTitleRow}>
+                      <View style={[bs.batchIconWrap, { backgroundColor: color + '22' }]}>
+                        <Text style={[bs.batchIconText, { color }]}>{batch.batchName.slice(0, 2)}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[bs.batchName, { color: T.textPrimary }]}>{batch.batchName}</Text>
+                        <Text style={[bs.batchCount, { color: T.textSec }]}>
+                          {members.length} student{members.length !== 1 ? 's' : ''}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        onPress={() => openBatchEditor(batch._id, batch.batchName)}
+                        style={[bs.actionBtn, { backgroundColor: color + '18', borderColor: color + '44' }]}
+                        activeOpacity={0.75}>
+                        <Text style={[bs.actionBtnText, { color }]}>✏️</Text>
+                      </TouchableOpacity>
                     </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[bs.batchName, { color: T.textPrimary }]}>Batch {label}</Text>
-                      <Text style={[bs.batchCount, { color: T.textSec }]}>
-                        {members.length} student{members.length !== 1 ? 's' : ''}
-                      </Text>
-                    </View>
+
+                    {/* Members */}
+                    {members.length > 0 ? (
+                      <View style={bs.memberList}>
+                        {members.slice(0, 5).map((s) => (
+                          <View key={s.id} style={[bs.memberPill, { backgroundColor: color + '18', borderColor: color + '44' }]}>
+                            <Text style={[bs.memberPillText, { color }]}>{s.name}</Text>
+                          </View>
+                        ))}
+                        {members.length > 5 && (
+                          <View style={[bs.memberPill, { backgroundColor: T.accentSoft, borderColor: T.border }]}>
+                            <Text style={[bs.memberPillText, { color: T.textSec }]}>+{members.length - 5} more</Text>
+                          </View>
+                        )}
+                      </View>
+                    ) : (
+                      <Text style={[bs.noStudentsText, { color: T.textMuted }]}>No students assigned yet</Text>
+                    )}
+
+                    {/* Manage button */}
                     <TouchableOpacity
-                      onPress={() => openBatchEditor(label)}
-                      style={[bs.actionBtn, { backgroundColor: color + '18', borderColor: color + '44' }]}
-                      activeOpacity={0.75}>
-                      <Text style={[bs.actionBtnText, { color }]}>✏️</Text>
+                      onPress={() => openBatchEditor(batch._id, batch.batchName)}
+                      style={[bs.assignBtn, { backgroundColor: color + '18', borderColor: color + '44' }]}
+                      activeOpacity={0.78}>
+                      <Text style={[bs.assignBtnText, { color }]}>👤 Manage Students</Text>
                     </TouchableOpacity>
                   </View>
-
-                  {/* Members */}
-                  {members.length > 0 ? (
-                    <View style={bs.memberList}>
-                      {members.slice(0, 5).map((s) => (
-                        <View key={s.id} style={[bs.memberPill, { backgroundColor: color + '18', borderColor: color + '44' }]}>
-                          <Text style={[bs.memberPillText, { color }]}>{s.name}</Text>
-                        </View>
-                      ))}
-                      {members.length > 5 && (
-                        <View style={[bs.memberPill, { backgroundColor: T.accentSoft, borderColor: T.border }]}>
-                          <Text style={[bs.memberPillText, { color: T.textSec }]}>+{members.length - 5} more</Text>
-                        </View>
-                      )}
-                    </View>
-                  ) : (
-                    <Text style={[bs.noStudentsText, { color: T.textMuted }]}>No students assigned yet</Text>
-                  )}
-
-                  {/* Manage button */}
-                  <TouchableOpacity
-                    onPress={() => openBatchEditor(label)}
-                    style={[bs.assignBtn, { backgroundColor: color + '18', borderColor: color + '44' }]}
-                    activeOpacity={0.78}>
-                    <Text style={[bs.assignBtnText, { color }]}>👤 Manage Students</Text>
-                  </TouchableOpacity>
                 </View>
-              </View>
-            );
-          })}
+              );
+            })
+          ) : (
+            <View style={[bs.emptyCard, { backgroundColor: T.card, borderColor: T.border }]}>
+              <Text style={bs.emptyIcon}>📦</Text>
+              <Text style={[bs.emptyTitle, { color: T.textPrimary }]}>No sub batches yet</Text>
+              <Text style={[bs.emptySub, { color: T.textSec }]}>
+                Tap the button above to create your first sub batch
+              </Text>
+            </View>
+          )}
         </ScrollView>
       )}
 
       {/* ══════════════════════════════════════════════════════
-          MODAL 1 — Batch Picker (A / B / C)
+          MODAL 1 — Sub Batch Picker & Creator
       ══════════════════════════════════════════════════════ */}
       <Modal visible={pickerModal} transparent animationType="slide" onRequestClose={() => setPickerModal(false)}>
         <Pressable
@@ -1389,47 +1461,88 @@ export function BatchManagementScreen() {
             {/* Handle */}
             <View style={[bs.sheetHandle, { backgroundColor: T.border }]} />
             <Text style={[bs.fullModalTitle, { color: T.textPrimary, marginBottom: 4, paddingHorizontal: 20 }]}>
-              Select Batch
+              Manage Sub Batches
             </Text>
             <Text style={[bs.fullModalSub, { color: T.textSec, marginBottom: 16, paddingHorizontal: 20 }]}>
-              Choose which batch to create or manage
+              Create new or edit existing sub batches
             </Text>
 
-            {['A', 'B', 'C'].map(label => {
-              const color = batchColors[label];
-              const count = batchMap[label]?.length || 0;
-              return (
-                <TouchableOpacity
-                  key={label}
-                  onPress={() => openBatchEditor(label)}
-                  activeOpacity={0.82}
-                  style={[bs.batchPickerRow, { borderColor: T.border }]}>
-                  <View style={[bs.batchPickerIcon, { backgroundColor: color + '22' }]}>
-                    <Text style={[bs.batchPickerIconText, { color }]}>B{label}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[bs.batchPickerLabel, { color: T.textPrimary }]}>Batch {label}</Text>
-                    <Text style={[bs.batchPickerSub, { color: T.textSec }]}>
-                      {count > 0 ? `${count} students assigned` : 'No students yet — tap to assign'}
-                    </Text>
-                  </View>
-                  <Text style={[bs.batchPickerArrow, { color: T.textMuted }]}>→</Text>
-                </TouchableOpacity>
-              );
-            })}
+            {/* Create new batch input */}
+            <View style={{ paddingHorizontal: 20, marginBottom: 16, gap: 8 }}>
+              <TextInput
+                value={createBatchName}
+                onChangeText={setCreateBatchName}
+                placeholder="Enter sub batch name (e.g., B1, B2)…"
+                placeholderTextColor={T.textMuted}
+                style={[bs.fieldInput, { backgroundColor: T.inputBg, borderColor: T.inputBorder, color: T.inputText }]}
+              />
+              <TouchableOpacity
+                onPress={handleCreateBatch}
+                disabled={creatingBatch || !createBatchName.trim()}
+                style={[bs.assignBtn, { backgroundColor: creatingBatch ? T.textMuted : T.accent, borderColor: T.border }]}
+                activeOpacity={0.8}>
+                {creatingBatch ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={[bs.assignBtnText, { color: '#fff' }]}>➕ Create New Sub Batch</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ height: 1, backgroundColor: T.border, marginVertical: 12 }} />
+
+            {/* Existing batches */}
+            <Text style={[bs.fullModalSub, { color: T.textSec, paddingHorizontal: 20, marginBottom: 8 }]}>
+              Existing Sub Batches ({batchesData?.length || 0})
+            </Text>
+
+            <ScrollView
+              style={{ maxHeight: 200 }}
+              contentContainerStyle={{ paddingHorizontal: 20, gap: 8, paddingBottom: 12 }}
+              showsVerticalScrollIndicator={false}>
+              {batchesData && batchesData.length > 0 ? (
+                batchesData.map((batch, idx) => {
+                  const colors = ['#6366f1', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#F97316', '#EC4899'];
+                  const color = colors[idx % colors.length];
+                  const count = batch.students?.length || 0;
+                  return (
+                    <TouchableOpacity
+                      key={batch._id}
+                      onPress={() => openBatchEditor(batch._id, batch.batchName)}
+                      activeOpacity={0.82}
+                      style={[bs.batchPickerRow, { borderColor: T.border }]}>
+                      <View style={[bs.batchPickerIcon, { backgroundColor: color + '22' }]}>
+                        <Text style={[bs.batchPickerIconText, { color }]}>{batch.batchName.slice(0, 2)}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[bs.batchPickerLabel, { color: T.textPrimary }]}>{batch.batchName}</Text>
+                        <Text style={[bs.batchPickerSub, { color: T.textSec }]}>
+                          {count > 0 ? `${count} students assigned` : 'No students yet — tap to assign'}
+                        </Text>
+                      </View>
+                      <Text style={[bs.batchPickerArrow, { color: T.textMuted }]}>→</Text>
+                    </TouchableOpacity>
+                  );
+                })
+              ) : (
+                <Text style={[bs.fullModalSub, { color: T.textMuted, textAlign: 'center', marginVertical: 16 }]}>
+                  No sub batches created yet
+                </Text>
+              )}
+            </ScrollView>
 
             <TouchableOpacity
               onPress={() => setPickerModal(false)}
               style={[bs.pickerCancelBtn, { backgroundColor: T.accentSoft, borderColor: T.border, margin: 16, marginTop: 8 }]}
               activeOpacity={0.75}>
-              <Text style={[bs.modalCancelText, { color: T.textSec }]}>Cancel</Text>
+              <Text style={[bs.modalCancelText, { color: T.textSec }]}>Close</Text>
             </TouchableOpacity>
           </Pressable>
         </Pressable>
       </Modal>
 
       {/* ══════════════════════════════════════════════════════
-          MODAL 2 — Student Selector for a specific batch
+          MODAL 2 — Student Selector for a specific sub batch
       ══════════════════════════════════════════════════════ */}
       <Modal visible={selectorModal} transparent animationType="slide" onRequestClose={() => setSelectorModal(false)}>
         {/* Backdrop fills the full screen behind the sheet */}
@@ -1448,7 +1561,7 @@ export function BatchManagementScreen() {
             <View style={[bs.fullModalHeader, { borderBottomColor: T.border }]}>
               <View style={{ flex: 1 }}>
                 <Text style={[bs.fullModalTitle, { color: T.textPrimary }]}>
-                  Batch {activeBatch} — Assign Students
+                  {activeBatchName} — Assign Students
                 </Text>
                 <Text style={[bs.fullModalSub, { color: T.textSec }]}>
                   {selected.size} selected · tap to toggle
@@ -1577,7 +1690,7 @@ export function BatchManagementScreen() {
                 activeOpacity={0.8}>
                 {saving
                   ? <ActivityIndicator size="small" color="#fff" />
-                  : <Text style={bs.modalSaveText}>Save Batch {activeBatch} ({selected.size})</Text>}
+                  : <Text style={bs.modalSaveText}>Save {activeBatchName} ({selected.size})</Text>}
               </TouchableOpacity>
             </View>
           </Pressable>
@@ -1880,4 +1993,5 @@ const bs = StyleSheet.create({
   pickerCancelBtn: {
     paddingVertical: 13, borderRadius: 10, borderWidth: 1, alignItems: 'center',
   },
+  studentIds: [], // ✅ Empty array initially — teacher adds students later
 });
