@@ -8,12 +8,13 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
-  Modal,
   SafeAreaView,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
-import axiosInstance from '../Src/Axios';
+import axiosInstance from '../../../Src/Axios';
 
-const AddInstitute = ({ visible, onClose, onInstituteAdded }) => {
+const AddInstitute = ({ onInstituteAdded }) => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     instituteName: '',
@@ -24,7 +25,7 @@ const AddInstitute = ({ visible, onClose, onInstituteAdded }) => {
     adminEmail: '',
     adminPassword: '',
     confirmPassword: '',
-    branch: ''
+    pricePerMonth: '',
   });
 
   const handleChange = (field, value) => {
@@ -61,8 +62,12 @@ const AddInstitute = ({ visible, onClose, onInstituteAdded }) => {
       Alert.alert('Validation Error', 'Passwords do not match');
       return false;
     }
-    if (!formData.branch.trim()) {
-      Alert.alert('Validation Error', 'Branch is required');
+    if (!formData.pricePerMonth.trim()) {
+      Alert.alert('Validation Error', 'Price per month is required');
+      return false;
+    }
+    if (isNaN(formData.pricePerMonth) || Number(formData.pricePerMonth) <= 0) {
+      Alert.alert('Validation Error', 'Please enter a valid price per month');
       return false;
     }
     return true;
@@ -81,7 +86,7 @@ const AddInstitute = ({ visible, onClose, onInstituteAdded }) => {
         adminId: formData.adminId,
         adminEmail: formData.adminEmail,
         adminPassword: formData.adminPassword,
-        branch: formData.branch
+        pricePerMonth: Number(formData.pricePerMonth),
       };
 
       const response = await axiosInstance.post('/admins/add-institute', payload);
@@ -98,11 +103,8 @@ const AddInstitute = ({ visible, onClose, onInstituteAdded }) => {
                 if (onInstituteAdded && typeof onInstituteAdded === 'function') {
                   onInstituteAdded(response.data.data);
                 }
-                if (onClose && typeof onClose === 'function') {
-                  onClose();
-                }
-              }
-            }
+              },
+            },
           ]
         );
       } else {
@@ -111,18 +113,13 @@ const AddInstitute = ({ visible, onClose, onInstituteAdded }) => {
     } catch (error) {
       console.error('Error creating institute:', error);
       let errorMessage = 'Failed to create institute. Please try again.';
-      
       if (error.response) {
-        // Server responded with error
         errorMessage = error.response.data?.message || error.response.data?.error || errorMessage;
       } else if (error.request) {
-        // Request was made but no response
         errorMessage = 'Network error. Please check your connection.';
       } else {
-        // Something else happened
         errorMessage = error.message || errorMessage;
       }
-      
       Alert.alert('Error', errorMessage);
     } finally {
       setLoading(false);
@@ -139,42 +136,36 @@ const AddInstitute = ({ visible, onClose, onInstituteAdded }) => {
       adminEmail: '',
       adminPassword: '',
       confirmPassword: '',
-      branch: ''
+      pricePerMonth: '',
     });
   };
 
-  if (!visible) return null;
-
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      transparent={true}
-      onRequestClose={() => {
-        if (onClose) onClose();
-      }}
-    >
-      <SafeAreaView style={styles.modalContainer}>
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Add New Institute</Text>
-            <TouchableOpacity 
-              onPress={() => {
-                if (onClose) onClose();
-              }} 
-              style={styles.closeButton}
-            >
-              <Text style={styles.closeButtonText}>✕</Text>
-            </TouchableOpacity>
+    <SafeAreaView style={styles.container}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        {/* ── Page Header ── */}
+        <View style={styles.pageHeader}>
+          <View style={styles.pageHeaderLeft}>
+            <Text style={styles.pageHeaderIcon}>🏫</Text>
+            <View>
+              <Text style={styles.pageTitle}>Add New Institute</Text>
+              <Text style={styles.pageSubtitle}>Fill in the details to register a new institute</Text>
+            </View>
           </View>
+        </View>
 
-          <ScrollView 
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            {/* Institute Information Section */}
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* ── Institute Information ── */}
+          <View style={styles.card}>
             <Text style={styles.sectionTitle}>Institute Information</Text>
-            
+
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Institute Name *</Text>
               <TextInput
@@ -182,7 +173,7 @@ const AddInstitute = ({ visible, onClose, onInstituteAdded }) => {
                 value={formData.instituteName}
                 onChangeText={(text) => handleChange('instituteName', text)}
                 placeholder="Enter institute name"
-                placeholderTextColor="#666"
+                placeholderTextColor="#4a5070"
                 autoCapitalize="words"
               />
             </View>
@@ -194,51 +185,59 @@ const AddInstitute = ({ visible, onClose, onInstituteAdded }) => {
                 value={formData.instituteAddress}
                 onChangeText={(text) => handleChange('instituteAddress', text)}
                 placeholder="Enter institute address"
-                placeholderTextColor="#666"
+                placeholderTextColor="#4a5070"
                 multiline
                 numberOfLines={3}
                 textAlignVertical="top"
               />
             </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Institute Phone</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.institutePhone}
-                onChangeText={(text) => handleChange('institutePhone', text)}
-                placeholder="Enter institute phone number"
-                placeholderTextColor="#666"
-                keyboardType="phone-pad"
-              />
+            <View style={styles.row}>
+              <View style={[styles.inputGroup, { flex: 1, marginRight: 10 }]}>
+                <Text style={styles.label}>Institute Phone</Text>
+                <TextInput
+                  style={styles.input}
+                  value={formData.institutePhone}
+                  onChangeText={(text) => handleChange('institutePhone', text)}
+                  placeholder="Phone number"
+                  placeholderTextColor="#4a5070"
+                  keyboardType="phone-pad"
+                />
+              </View>
+
+              <View style={[styles.inputGroup, { flex: 1 }]}>
+                <Text style={styles.label}>Institute Email</Text>
+                <TextInput
+                  style={styles.input}
+                  value={formData.instituteEmail}
+                  onChangeText={(text) => handleChange('instituteEmail', text)}
+                  placeholder="Institute email"
+                  placeholderTextColor="#4a5070"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+              </View>
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Institute Email</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.instituteEmail}
-                onChangeText={(text) => handleChange('instituteEmail', text)}
-                placeholder="Enter institute email"
-                placeholderTextColor="#666"
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
+              <Text style={styles.label}>Price Per Month (₹) *</Text>
+              <View style={styles.priceInputWrapper}>
+                <Text style={styles.currencySymbol}>₹</Text>
+                <TextInput
+                  style={styles.priceInput}
+                  value={formData.pricePerMonth}
+                  onChangeText={(text) => handleChange('pricePerMonth', text)}
+                  placeholder="0.00"
+                  placeholderTextColor="#4a5070"
+                  keyboardType="numeric"
+                />
+              </View>
             </View>
+          </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Branch *</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.branch}
-                onChangeText={(text) => handleChange('branch', text)}
-                placeholder="Enter branch (e.g., Computer Science, Engineering)"
-                placeholderTextColor="#666"
-              />
-            </View>
-
-            {/* Admin Account Information */}
-            <Text style={[styles.sectionTitle, { marginTop: 20 }]}>Admin Account Information</Text>
+          {/* ── Admin Account Information ── */}
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Admin Account Information</Text>
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Admin ID *</Text>
@@ -247,7 +246,7 @@ const AddInstitute = ({ visible, onClose, onInstituteAdded }) => {
                 value={formData.adminId}
                 onChangeText={(text) => handleChange('adminId', text)}
                 placeholder="Enter admin ID"
-                placeholderTextColor="#666"
+                placeholderTextColor="#4a5070"
                 autoCapitalize="none"
               />
             </View>
@@ -259,122 +258,138 @@ const AddInstitute = ({ visible, onClose, onInstituteAdded }) => {
                 value={formData.adminEmail}
                 onChangeText={(text) => handleChange('adminEmail', text)}
                 placeholder="Enter admin email"
-                placeholderTextColor="#666"
+                placeholderTextColor="#4a5070"
                 keyboardType="email-address"
                 autoCapitalize="none"
               />
             </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Password *</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.adminPassword}
-                onChangeText={(text) => handleChange('adminPassword', text)}
-                placeholder="Enter password (min. 6 characters)"
-                placeholderTextColor="#666"
-                secureTextEntry
-              />
-            </View>
+            <View style={styles.row}>
+              <View style={[styles.inputGroup, { flex: 1, marginRight: 10 }]}>
+                <Text style={styles.label}>Password *</Text>
+                <TextInput
+                  style={styles.input}
+                  value={formData.adminPassword}
+                  onChangeText={(text) => handleChange('adminPassword', text)}
+                  placeholder="Min. 6 characters"
+                  placeholderTextColor="#4a5070"
+                  secureTextEntry
+                />
+              </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Confirm Password *</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.confirmPassword}
-                onChangeText={(text) => handleChange('confirmPassword', text)}
-                placeholder="Confirm password"
-                placeholderTextColor="#666"
-                secureTextEntry
-              />
+              <View style={[styles.inputGroup, { flex: 1 }]}>
+                <Text style={styles.label}>Confirm Password *</Text>
+                <TextInput
+                  style={styles.input}
+                  value={formData.confirmPassword}
+                  onChangeText={(text) => handleChange('confirmPassword', text)}
+                  placeholder="Confirm password"
+                  placeholderTextColor="#4a5070"
+                  secureTextEntry
+                />
+              </View>
             </View>
+          </View>
 
-            <View style={styles.buttonContainer}>
-              <TouchableOpacity
-                style={[styles.button, styles.cancelButton]}
-                onPress={() => {
-                  if (onClose) onClose();
-                }}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
+          {/* ── Action Buttons ── */}
+          <View style={styles.buttonContainer}>
+            <TouchableOpacity
+              style={styles.resetButton}
+              onPress={resetForm}
+              disabled={loading}
+            >
+              <Text style={styles.resetButtonText}>Reset Form</Text>
+            </TouchableOpacity>
 
-              <TouchableOpacity
-                style={[styles.button, styles.submitButton]}
-                onPress={handleSubmit}
-                disabled={loading}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <Text style={styles.submitButtonText}>Create Institute</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </View>
-      </SafeAreaView>
-    </Modal>
+            <TouchableOpacity
+              style={[styles.submitButton, loading && styles.submitButtonDisabled]}
+              onPress={handleSubmit}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.submitButtonText}>Create Institute</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  modalContainer: {
+  container: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: '#0b0d1a',
   },
-  modalContent: {
-    backgroundColor: '#13172a',
-    borderRadius: 16,
-    width: '90%',
-    maxHeight: '85%',
-    padding: 20,
-    borderWidth: 1,
-    borderColor: '#1c2140',
-  },
-  modalHeader: {
+
+  // ── Page Header ──
+  pageHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
-    paddingBottom: 15,
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 18,
     borderBottomWidth: 1,
     borderBottomColor: '#1c2140',
+    backgroundColor: '#13172a',
   },
-  modalTitle: {
+  pageHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  pageHeaderIcon: {
+    fontSize: 28,
+  },
+  pageTitle: {
     color: '#ffffff',
     fontSize: 20,
     fontWeight: 'bold',
   },
-  closeButton: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: '#1c2140',
-    justifyContent: 'center',
-    alignItems: 'center',
+  pageSubtitle: {
+    color: '#8b92b4',
+    fontSize: 12,
+    marginTop: 2,
   },
-  closeButtonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: 'bold',
+
+  // ── Scroll Content ──
+  scrollContent: {
+    padding: 20,
+    paddingBottom: 40,
+    gap: 16,
+  },
+
+  // ── Cards ──
+  card: {
+    backgroundColor: '#13172a',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#1c2140',
+    padding: 20,
   },
   sectionTitle: {
     color: '#4b6cf7',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: 'bold',
-    marginBottom: 15,
+    marginBottom: 18,
+  },
+
+  // ── Inputs ──
+  row: {
+    flexDirection: 'row',
   },
   inputGroup: {
-    marginBottom: 15,
+    marginBottom: 16,
   },
   label: {
     color: '#8b92b4',
     fontSize: 12,
     fontWeight: '600',
-    marginBottom: 5,
+    marginBottom: 6,
+    letterSpacing: 0.3,
   },
   input: {
     backgroundColor: '#0b0d1a',
@@ -389,31 +404,62 @@ const styles = StyleSheet.create({
     height: 80,
     textAlignVertical: 'top',
   },
+  priceInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0b0d1a',
+    borderWidth: 1,
+    borderColor: '#1c2140',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+  },
+  currencySymbol: {
+    color: '#4b6cf7',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginRight: 6,
+  },
+  priceInput: {
+    flex: 1,
+    paddingVertical: 12,
+    color: '#ffffff',
+    fontSize: 14,
+  },
+
+  // ── Buttons ──
   buttonContainer: {
     flexDirection: 'row',
-    gap: 10,
-    marginTop: 20,
-    marginBottom: 20,
+    gap: 12,
+    marginTop: 4,
   },
-  button: {
+  resetButton: {
     flex: 1,
     padding: 14,
-    borderRadius: 8,
+    borderRadius: 10,
     alignItems: 'center',
-  },
-  cancelButton: {
     backgroundColor: '#1c2140',
+    borderWidth: 1,
+    borderColor: '#2a3060',
   },
-  cancelButtonText: {
+  resetButtonText: {
     color: '#8b92b4',
     fontWeight: '600',
+    fontSize: 14,
   },
   submitButton: {
+    flex: 2,
+    padding: 14,
+    borderRadius: 10,
+    alignItems: 'center',
     backgroundColor: '#4b6cf7',
+  },
+  submitButtonDisabled: {
+    opacity: 0.6,
   },
   submitButtonText: {
     color: '#ffffff',
     fontWeight: 'bold',
+    fontSize: 14,
   },
 });
 
