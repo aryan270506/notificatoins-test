@@ -155,7 +155,7 @@ router.post("/upload", checkUploadPermission("Admin"), async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// ADD NEW INSTITUTE (with admin credentials)
+// ADD NEW INSTITUTE (without admin credentials)
 // POST /api/admins/add-institute
 // ─────────────────────────────────────────────────────────────
 router.post("/add-institute", async (req, res) => {
@@ -165,57 +165,41 @@ router.post("/add-institute", async (req, res) => {
       instituteAddress,
       institutePhone,
       instituteEmail,
-      adminId,
-      adminEmail,
-      adminPassword,
-      branch
+      pricePerMonth
     } = req.body;
 
-    if (!instituteName || !adminId || !adminEmail || !adminPassword || !branch) {
+    if (!instituteName || !pricePerMonth) {
       return res.status(400).json({
         success: false,
-        message: "Missing required fields: instituteName, adminId, adminEmail, adminPassword, branch"
+        message: "Missing required fields: instituteName, pricePerMonth"
       });
     }
 
-    const existingAdminById = await Admin.findOne({ id: adminId });
-    if (existingAdminById) {
-      return res.status(409).json({
-        success: false,
-        message: "Admin ID already exists. Please use a different ID."
-      });
-    }
-
-    const existingAdminByEmail = await Admin.findOne({ email: adminEmail });
-    if (existingAdminByEmail) {
-      return res.status(409).json({
-        success: false,
-        message: "Admin email already exists. Please use a different email."
-      });
-    }
-
+    // Create a temporary institute admin entry (without password for now)
+    // This will be updated when first department is added
     const bcrypt = require("bcryptjs");
-    const hashedPassword = await bcrypt.hash(adminPassword, 10);
+    const tempPassword = await bcrypt.hash(Math.random().toString(36).substring(2, 15), 10);
 
-    const newAdmin = new Admin({
-      id: adminId,
-      email: adminEmail,
-      password: hashedPassword,
-      branch: branch,
+    const newInstitute = new Admin({
+      id: `inst_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+      email: instituteEmail || `institute_${Date.now()}@temp.local`,
+      password: tempPassword,
+      role: 'institute_admin',
       instituteName: instituteName,
       instituteAddress: instituteAddress || '',
       institutePhone: institutePhone || '',
-      instituteEmail: instituteEmail || adminEmail,
-      role: 'institute_admin'
+      instituteEmail: instituteEmail || '',
+      pricePerMonth: Number(pricePerMonth),
+      isActive: true
     });
 
-    await newAdmin.save();
+    await newInstitute.save();
 
     const SecurityLog = require("../Models/SecurityLog");
     await SecurityLog.create({
       actor: req.user?.id || 'System',
       action: `New institute created: ${instituteName}`,
-      type: "Admin Action",
+      type: "System",
       status: "Success",
       ip: req.ip,
       route: "/api/admins/add-institute",
@@ -226,11 +210,15 @@ router.post("/add-institute", async (req, res) => {
       success: true,
       message: "Institute created successfully",
       data: {
-        adminId: newAdmin.id,
-        email: newAdmin.email,
-        instituteName: newAdmin.instituteName,
-        branch: newAdmin.branch,
-        createdAt: newAdmin.createdAt
+        _id: newInstitute._id,
+        id: newInstitute.id,
+        instituteName: newInstitute.instituteName,
+        instituteAddress: newInstitute.instituteAddress,
+        institutePhone: newInstitute.institutePhone,
+        instituteEmail: newInstitute.instituteEmail,
+        pricePerMonth: newInstitute.pricePerMonth,
+        createdAt: newInstitute.createdAt,
+        departments: []
       }
     });
   } catch (error) {
@@ -243,21 +231,327 @@ router.post("/add-institute", async (req, res) => {
   }
 });
 
-// GET ALL INSTITUTES
-router.get("/institutes", async (req, res) => {
+// ─────────────────────────────────────────────────────────────
+// ADD DEPARTMENT TO INSTITUTE
+// POST /api/admins/add-department
+// ─────────────────────────────────────────────────────────────
+router.post("/add-department", async (req, res) => {
   try {
+    const {
+      instituteId,
+      departmentName,
+      adminId,
+      adminEmail,
+      adminPassword
+    } = req.body;
+
+    console.log('📥 POST /add-department received:', {
+      instituteId,
+      departmentName,
+      adminId,
+      adminEmail,
+      adminPassword: '***'
+    });
+
+    if (!instituteId || !departmentName || !adminId || !adminEmail || !adminPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields: instituteId, departmentName, adminId, adminEmail, adminPassword"
+      });
+    }
+
+    // Validate password length
+    if (adminPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 6 characters long"
+      });
+    }
+
+    // Check if institute exists (try both _id and id field)
+    console.log('🔍 Looking up institute with ID:', instituteId);
+    let institute = await Admin.findById(instituteId);
+    console.log('📊 FindById result:', institute ? `Found institute: ${institute.id}` : 'Not found by _id');
+    
+    if (!institute) {
+      institute = await Admin.findOne({ id: instituteId });
+      console.log('📊 FindOne result:', institute ? `Found institute: ${institute._id}` : 'Not found by id');
+    }
+    
+    if (!institute || institute.role !== 'institute_admin') {
+      console.log('❌ Institute not found or not institute_admin role');
+      return res.status(404).json({
+        success: false,
+        message: "Institute not found or invalid institute ID"
+      });
+    }
+
+    console.log('✅ Institute found:', {
+      _id: institute._id,
+      id: institute.id,
+      instituteName: institute.instituteName
+    });
+
+    // Check if department with same admin ID already exists in this institute
+    const existingDept = institute.departments?.find(d => d.adminId === adminId);
+    if (existingDept) {
+      console.log('⚠️  Admin ID already exists in this institute:', adminId);
+      return res.status(409).json({
+        success: false,
+        message: "Admin ID already exists in this institute. Please use a different ID."
+      });
+    }
+
+    // Check if department with same admin email already exists in this institute
+    const existingDeptEmail = institute.departments?.find(d => d.adminEmail === adminEmail);
+    if (existingDeptEmail) {
+      console.log('⚠️  Admin email already exists in this institute:', adminEmail);
+      return res.status(409).json({
+        success: false,
+        message: "Admin email already exists in this institute. Please use a different email."
+      });
+    }
+
+    // Hash password
+    const bcrypt = require("bcryptjs");
+    const hashedPassword = await bcrypt.hash(adminPassword, 10);
+
+    // Create department object and push to institute's departments array
+    const newDept = {
+      departmentName,
+      departmentCode: `dept_${adminId}`,
+      adminId,
+      adminEmail,
+      adminPassword: hashedPassword,
+      isActive: true,
+      createdAt: new Date()
+    };
+
+    console.log('💾 Pushing department to institute:', institute.id);
+    institute.departments.push(newDept);
+    await institute.save();
+    
+    console.log('✅ Department saved successfully to institute:', {
+      instituteName: institute.instituteName,
+      departmentName: newDept.departmentName,
+      adminId: newDept.adminId,
+      totalDepartments: institute.departments.length
+    });
+
+    // Log the action
+    const SecurityLog = require("../Models/SecurityLog");
+    await SecurityLog.create({
+      actor: req.user?.id || 'System',
+      action: `New department created: ${departmentName} under ${institute.instituteName}`,
+      type: "System",
+      status: "Success",
+      ip: req.ip,
+      route: "/api/admins/add-department",
+      method: "POST"
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Department created successfully",
+      data: {
+        instituteName: institute.instituteName,
+        departmentName: newDept.departmentName,
+        adminId: newDept.adminId,
+        adminEmail: newDept.adminEmail,
+        departmentCode: newDept.departmentCode,
+        createdAt: newDept.createdAt,
+        totalDepartments: institute.departments.length
+      }
+    });
+  } catch (error) {
+    console.error("❌ POST /admins/add-department error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to create department",
+      error: error.message
+    });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// PUT UPDATE DEPARTMENT
+// PUT /api/admins/institutes/:instituteId/departments/:deptId
+// ─────────────────────────────────────────────────────────────
+router.put("/institutes/:instituteId/departments/:deptId", async (req, res) => {
+  try {
+    const { instituteId, deptId } = req.params;
+    const {
+      departmentName,
+      adminId,
+      adminEmail,
+      adminPassword
+    } = req.body;
+
+    console.log('📥 PUT /update-department received:', {
+      instituteId,
+      deptId,
+      departmentName,
+      adminId,
+      adminEmail,
+      adminPassword: adminPassword ? '***' : 'not provided'
+    });
+
+    // Check if institute exists
+    console.log('🔍 Looking up institute with ID:', instituteId);
+    let institute = await Admin.findById(instituteId);
+    
+    if (!institute) {
+      institute = await Admin.findOne({ id: instituteId });
+    }
+    
+    if (!institute || institute.role !== 'institute_admin') {
+      console.log('❌ Institute not found or not institute_admin role');
+      return res.status(404).json({
+        success: false,
+        message: "Institute not found"
+      });
+    }
+
+    console.log('✅ Institute found:', institute.instituteName);
+
+    // Find the department to update
+    const deptIndex = institute.departments?.findIndex(d => 
+      d._id?.toString() === deptId || d.departmentCode === deptId
+    );
+
+    if (deptIndex === -1 || deptIndex === undefined) {
+      console.log('❌ Department not found:', deptId);
+      return res.status(404).json({
+        success: false,
+        message: "Department not found in this institute"
+      });
+    }
+
+    console.log('✅ Department found at index:', deptIndex);
+
+    const department = institute.departments[deptIndex];
+
+    // Validate provided fields
+    if (departmentName) {
+      department.departmentName = departmentName;
+    }
+
+    if (adminId) {
+      // Check if new adminId already exists in other departments
+      const duplicateAdminId = institute.departments?.findIndex((d, idx) => 
+        idx !== deptIndex && d.adminId === adminId
+      );
+      if (duplicateAdminId !== -1) {
+        console.log('⚠️  Admin ID already exists in another department:', adminId);
+        return res.status(409).json({
+          success: false,
+          message: "Admin ID already exists in another department"
+        });
+      }
+      department.adminId = adminId;
+      department.departmentCode = `dept_${adminId}`;
+    }
+
+    if (adminEmail) {
+      // Check if new email already exists in other departments
+      const duplicateEmail = institute.departments?.findIndex((d, idx) => 
+        idx !== deptIndex && d.adminEmail === adminEmail
+      );
+      if (duplicateEmail !== -1) {
+        console.log('⚠️  Email already exists in another department:', adminEmail);
+        return res.status(409).json({
+          success: false,
+          message: "Email already exists in another department"
+        });
+      }
+      department.adminEmail = adminEmail;
+    }
+
+    // Only hash password if provided
+    if (adminPassword) {
+      if (adminPassword.length < 6) {
+        return res.status(400).json({
+          success: false,
+          message: "Password must be at least 6 characters"
+        });
+      }
+      const bcrypt = require("bcryptjs");
+      department.adminPassword = await bcrypt.hash(adminPassword, 10);
+    }
+
+    console.log('💾 Saving updated department');
+    await institute.save();
+    
+    console.log('✅ Department updated successfully');
+
+    // Log the action
+    const SecurityLog = require("../Models/SecurityLog");
+    await SecurityLog.create({
+      actor: req.user?.id || 'System',
+      action: `Department updated: ${department.departmentName} in ${institute.instituteName}`,
+      type: "System",
+      status: "Success",
+      ip: req.ip,
+      route: "/api/admins/institutes/:instituteId/departments/:deptId",
+      method: "PUT"
+    });
+
+    res.json({
+      success: true,
+      message: "Department updated successfully",
+      data: {
+        instituteName: institute.instituteName,
+        departmentName: department.departmentName,
+        adminId: department.adminId,
+        adminEmail: department.adminEmail,
+        departmentCode: department.departmentCode
+      }
+    });
+  } catch (error) {
+    console.error("❌ PUT /update-department error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update department",
+      error: error.message
+    });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// GET ALL INSTITUTES WITH DEPARTMENTS
+// GET /api/admins/get-institutes
+// ─────────────────────────────────────────────────────────────
+router.get("/get-institutes", async (req, res) => {
+  try {
+    console.log('📥 GET /get-institutes called');
     const institutes = await Admin.find({ role: 'institute_admin' })
       .select('-password')
       .sort({ createdAt: -1 })
       .lean();
 
+    console.log(`📊 Found ${institutes.length} institutes`);
+
+    // Log departments for each institute
+    institutes.forEach((institute) => {
+      console.log(`🏫 ${institute.instituteName}`);
+      if (institute.departments && institute.departments.length > 0) {
+        console.log(`  └─ Departments: ${institute.departments.length}`);
+        institute.departments.forEach(d => {
+          console.log(`    ├─ ${d.departmentName} (admin: ${d.adminId})`);
+        });
+      } else {
+        console.log(`  └─ No departments yet`);
+      }
+    });
+
+    console.log('✅ GET /get-institutes completed successfully');
     res.json({
       success: true,
       data: institutes,
       count: institutes.length
     });
   } catch (error) {
-    console.error("GET /admins/institutes error:", error);
+    console.error("❌ GET /admins/get-institutes error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch institutes",
@@ -269,7 +563,7 @@ router.get("/institutes", async (req, res) => {
 router.get("/institutes/:id", async (req, res) => {
   try {
     const institute = await Admin.findOne({ 
-      id: req.params.id,
+      _id: req.params.id,
       role: 'institute_admin' 
     }).select('-password').lean();
 
@@ -282,7 +576,10 @@ router.get("/institutes/:id", async (req, res) => {
 
     res.json({
       success: true,
-      data: institute
+      data: {
+        ...institute,
+        departmentCount: institute.departments?.length || 0
+      }
     });
   } catch (error) {
     console.error("GET /admins/institutes/:id error:", error);
@@ -302,11 +599,11 @@ router.put("/institutes/:id", async (req, res) => {
       instituteAddress,
       institutePhone,
       instituteEmail,
-      branch,
+      pricePerMonth,
       email
     } = req.body;
 
-    const institute = await Admin.findOne({ id, role: 'institute_admin' });
+    const institute = await Admin.findOne({ _id: id, role: 'institute_admin' });
     if (!institute) {
       return res.status(404).json({
         success: false,
@@ -325,13 +622,13 @@ router.put("/institutes/:id", async (req, res) => {
     }
 
     const updatedInstitute = await Admin.findOneAndUpdate(
-      { id, role: 'institute_admin' },
+      { _id: id, role: 'institute_admin' },
       {
         instituteName: instituteName || institute.instituteName,
         instituteAddress: instituteAddress || institute.instituteAddress,
         institutePhone: institutePhone || institute.institutePhone,
         instituteEmail: instituteEmail || institute.instituteEmail,
-        branch: branch || institute.branch,
+        pricePerMonth: pricePerMonth !== undefined ? pricePerMonth : institute.pricePerMonth,
         email: email || institute.email
       },
       { new: true }
@@ -356,21 +653,27 @@ router.delete("/institutes/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
-    const deletedInstitute = await Admin.findOneAndDelete({ 
-      id, 
+    // Find and delete the institute (departments are nested, so they'll be deleted with it)
+    const institute = await Admin.findOne({ 
+      _id: id, 
       role: 'institute_admin' 
     });
 
-    if (!deletedInstitute) {
+    if (!institute) {
       return res.status(404).json({
         success: false,
         message: "Institute not found"
       });
     }
 
+    await Admin.findOneAndDelete({ 
+      _id: id, 
+      role: 'institute_admin' 
+    });
+
     res.json({
       success: true,
-      message: "Institute deleted successfully"
+      message: "Institute and all its departments deleted successfully"
     });
   } catch (error) {
     console.error("DELETE /admins/institutes/:id error:", error);
@@ -394,7 +697,7 @@ router.post("/institutes/:id/reset-password", async (req, res) => {
       });
     }
 
-    const institute = await Admin.findOne({ id, role: 'institute_admin' });
+    const institute = await Admin.findOne({ _id: id, role: 'institute_admin' });
     if (!institute) {
       return res.status(404).json({
         success: false,
@@ -414,6 +717,191 @@ router.post("/institutes/:id/reset-password", async (req, res) => {
     });
   } catch (error) {
     console.error("POST /admins/institutes/:id/reset-password error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to reset password",
+      error: error.message
+    });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// DEPARTMENT MANAGEMENT ENDPOINTS
+// ─────────────────────────────────────────────────────────────
+
+// GET ALL DEPARTMENTS FOR AN INSTITUTE
+router.get("/departments/:instituteId", async (req, res) => {
+  try {
+    const { instituteId } = req.params;
+
+    const institute = await Admin.findById(instituteId);
+    if (!institute || institute.role !== 'institute_admin') {
+      return res.status(404).json({
+        success: false,
+        message: "Institute not found"
+      });
+    }
+
+    const departments = await Admin.find({
+      parentInstituteAdminId: institute.id,
+      role: 'department_admin'
+    }).select('-password').lean();
+
+    res.json({
+      success: true,
+      data: departments,
+      count: departments.length
+    });
+  } catch (error) {
+    console.error("GET /admins/departments/:instituteId error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch departments",
+      error: error.message
+    });
+  }
+});
+
+// GET SINGLE DEPARTMENT
+router.get("/department/:deptId", async (req, res) => {
+  try {
+    const { deptId } = req.params;
+
+    const department = await Admin.findById(deptId)
+      .select('-password')
+      .lean();
+
+    if (!department || department.role !== 'department_admin') {
+      return res.status(404).json({
+        success: false,
+        message: "Department not found"
+      });
+    }
+
+    res.json({
+      success: true,
+      data: department
+    });
+  } catch (error) {
+    console.error("GET /admins/department/:deptId error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch department",
+      error: error.message
+    });
+  }
+});
+
+// UPDATE DEPARTMENT
+router.put("/department/:deptId", async (req, res) => {
+  try {
+    const { deptId } = req.params;
+    const { departmentName, email } = req.body;
+
+    const department = await Admin.findById(deptId);
+    if (!department || department.role !== 'department_admin') {
+      return res.status(404).json({
+        success: false,
+        message: "Department not found"
+      });
+    }
+
+    if (email && email !== department.email) {
+      const existingEmail = await Admin.findOne({ email, _id: { $ne: department._id } });
+      if (existingEmail) {
+        return res.status(409).json({
+          success: false,
+          message: "Email already in use"
+        });
+      }
+    }
+
+    const updatedDepartment = await Admin.findByIdAndUpdate(
+      deptId,
+      {
+        departmentName: departmentName || department.departmentName,
+        email: email || department.email
+      },
+      { new: true }
+    ).select('-password');
+
+    res.json({
+      success: true,
+      message: "Department updated successfully",
+      data: updatedDepartment
+    });
+  } catch (error) {
+    console.error("PUT /admins/department/:deptId error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update department",
+      error: error.message
+    });
+  }
+});
+
+// DELETE DEPARTMENT
+router.delete("/department/:deptId", async (req, res) => {
+  try {
+    const { deptId } = req.params;
+
+    const department = await Admin.findById(deptId);
+    if (!department || department.role !== 'department_admin') {
+      return res.status(404).json({
+        success: false,
+        message: "Department not found"
+      });
+    }
+
+    await Admin.findByIdAndDelete(deptId);
+
+    res.json({
+      success: true,
+      message: "Department deleted successfully"
+    });
+  } catch (error) {
+    console.error("DELETE /admins/department/:deptId error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete department",
+      error: error.message
+    });
+  }
+});
+
+// RESET DEPARTMENT ADMIN PASSWORD
+router.post("/department/:deptId/reset-password", async (req, res) => {
+  try {
+    const { deptId } = req.params;
+    const { newPassword } = req.body;
+
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 6 characters long"
+      });
+    }
+
+    const department = await Admin.findById(deptId);
+    if (!department || department.role !== 'department_admin') {
+      return res.status(404).json({
+        success: false,
+        message: "Department not found"
+      });
+    }
+
+    const bcrypt = require("bcryptjs");
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    department.password = hashedPassword;
+    await department.save();
+
+    res.json({
+      success: true,
+      message: "Department password reset successfully"
+    });
+  } catch (error) {
+    console.error("POST /admins/department/:deptId/reset-password error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to reset password",
