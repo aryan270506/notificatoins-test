@@ -32,6 +32,7 @@ const TABLET_BP  = 480;   // ≥ this → two-column cards on mobile
 
 // ─── Color Palettes ───────────────────────────────────────────────────────────
 export const DARK_COLORS = {
+
   bg:               '#0d1b3e',
   surface:          '#111827',
   surfaceAlt:       '#0b1437',

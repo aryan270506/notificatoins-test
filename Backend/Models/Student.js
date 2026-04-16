@@ -1,14 +1,9 @@
 const mongoose = require('mongoose');
 
 const studentSchema = new mongoose.Schema({
-  // Push notification token
-  expoPushToken: {
-    type: String,
-    default: null
-  },
-  lastTokenUpdate: {
-    type: Date
-  },
+  expoPushToken: { type: String, default: null },
+  lastTokenUpdate: { type: Date },
+
   notificationSettings: {
     enabled: { type: Boolean, default: true },
     assignment: { type: Boolean, default: true },
@@ -20,25 +15,64 @@ const studentSchema = new mongoose.Schema({
     examResults: { type: Boolean, default: true },
     finance: { type: Boolean, default: true }
   },
+
+  // BASIC INPUT (admin)
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
-
   id: { type: String, required: true, unique: true },
-  prn: { type: String, required: true },
-  roll_no: { type: String, required: true },
-
-  branch: { type: String, required: true },
-  division: { type: String, required: true },
   year: { type: String, required: true },
-  batch: { type: String, default: null },  // e.g., "A1", "B2" — can be derived from roll_no
 
-  subjects: [{ type: String }],
-  lab: [{ type: String }],
+  // AUTO / FETCHED
+  prn: { type: String }, 
+  roll_no: { type: Number }, 
 
-  profilePhoto: { type: String },
+  branch: { type: String, default: null },   // 🔥 now fetched later
+  division: { type: String }, 
+  subBranch: { type: String, default: null },
 
-},
-{ timestamps: true }
-);
+  batch: { type: String, enum: ['A', 'B', 'C', null], default: null },
+
+  profilePhoto: {
+    type: String,
+    default: "https://default-profile.png"
+  },
+
+}, { timestamps: true });
+
+/**
+ * 🔥 AUTO GENERATION LOGIC
+ */
+studentSchema.pre("save", async function (next) {
+  const student = this;
+
+  // ✅ PRN
+  if (!student.prn) {
+    student.prn = `PRN${Date.now().toString().slice(-6)}`;
+  }
+
+  // ✅ Division (temporary until fetched properly)
+  if (!student.division) {
+    const divisions = ["A", "B", "C"];
+    student.division = divisions[Math.floor(Math.random() * divisions.length)];
+  }
+
+  // ✅ Roll number (per year + division)
+  if (!student.roll_no) {
+    const count = await mongoose.model("Student").countDocuments({
+      year: student.year,
+      division: student.division,
+    });
+
+    student.roll_no = count + 1;
+  }
+
+  // ✅ Optional fallback for branch (if not fetched yet)
+  if (!student.branch) {
+    student.branch = "TEMP"; // you can later update it
+  }
+
+  next();
+});
+
 module.exports = mongoose.model("Student", studentSchema);

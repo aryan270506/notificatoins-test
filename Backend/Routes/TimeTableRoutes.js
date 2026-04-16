@@ -32,6 +32,64 @@ function yearCodeToNumber(code) {
   return { FY: "1", SY: "2", TY: "3", LY: "4" }[code?.toUpperCase()] || null;
 }
 
+// Maps the Teacher.classTeacher.year label → timetable year number
+// e.g. "1st Year" → "1", "2nd Year" → "2"
+const CLASS_TEACHER_YEAR_MAP = {
+  "1st Year": "1",
+  "2nd Year": "2",
+  "3rd Year": "3",
+  "4th Year": "4",
+};
+
+// ─── Middleware: only the class teacher of the target year+division may mutate ─
+// Reads year & division from req.body (PUT/POST/DELETE routes).
+// Must be used AFTER auth middleware so req.teacher is populated.
+async function classTeacherGuard(req, res, next) {
+  try {
+    const teacher = req.teacher; // set by auth middleware
+    if (!teacher) {
+      return res.status(401).json({ success: false, message: "Unauthorised – please log in" });
+    }
+
+    const { year, division } = req.body;
+
+    // If no year/division in body we can't check – let the route handler reject it
+    if (!year || !division) return next();
+
+    // Fetch fresh teacher doc (req.teacher may be a partial token payload)
+    const teacherDoc = await Teacher.findById(teacher._id || teacher.id, "classTeacher").lean();
+    if (!teacherDoc) {
+      return res.status(401).json({ success: false, message: "Teacher account not found" });
+    }
+
+    const ct = teacherDoc.classTeacher;
+    const isAssigned = ct && ct.year && ct.division;
+
+    if (!isAssigned) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied – you are not assigned as a class teacher",
+      });
+    }
+
+    // Normalise the stored year label to a number string for comparison
+    const ctYearNum = CLASS_TEACHER_YEAR_MAP[ct.year];
+    const ctDiv     = ct.division.toUpperCase();
+
+    if (ctYearNum !== String(year) || ctDiv !== division.toUpperCase()) {
+      return res.status(403).json({
+        success: false,
+        message: `Access denied – you are the class teacher of Year ${ct.year} Division ${ct.division}, not Year ${year} Division ${division.toUpperCase()}`,
+      });
+    }
+
+    next();
+  } catch (err) {
+    console.error("classTeacherGuard error:", err);
+    res.status(500).json({ success: false, message: "Server error during authorisation" });
+  }
+}
+
 // "FY-A2-36" → { year: "1", division: "A", batch: "A2" }
 function parseRollNo(roll_no) {
   if (!roll_no) return null;
@@ -354,7 +412,7 @@ router.get("/", async (req, res) => {
 //    POST /api/timetable
 // ══════════════════════════════════════════════════════════════════════════════
 
-router.post("/", async (req, res) => {
+router.post("/", auth, classTeacherGuard, async (req, res) => {
   try {
     const { year, division, batch, academicYear } = req.body;
 
@@ -399,7 +457,7 @@ router.post("/", async (req, res) => {
 //    PUT /api/timetable/slot
 // ══════════════════════════════════════════════════════════════════════════════
 
-router.put("/slot", async (req, res) => {
+router.put("/slot", auth, classTeacherGuard, async (req, res) => {
   try {
     const { year, division, batch, day, slotId, teacherId, subject, room, color } = req.body;
 
@@ -447,7 +505,7 @@ router.put("/slot", async (req, res) => {
 //    DELETE /api/timetable/slot
 // ══════════════════════════════════════════════════════════════════════════════
 
-router.delete("/slot", async (req, res) => {
+router.delete("/slot", auth, classTeacherGuard, async (req, res) => {
   try {
     const { year, division, batch, day, slotId } = req.body;
 
@@ -484,7 +542,7 @@ router.delete("/slot", async (req, res) => {
 //    DELETE /api/timetable
 // ══════════════════════════════════════════════════════════════════════════════
 
-router.delete("/", async (req, res) => {
+router.delete("/", auth, classTeacherGuard, async (req, res) => {
   try {
     const { year, division, batch } = req.body;
 
@@ -967,7 +1025,8 @@ router.get("/generate-pdf-get", async (req, res) => {
 
 
 // When timetable is updated
-router.put('/update-timetable', auth, async (req, res) => {
+// ─── Only the class teacher of that year+division can update ────────────────
+router.put('/update-timetable', auth, classTeacherGuard, async (req, res) => {
   try {
     const { year, division, changes } = req.body;
     

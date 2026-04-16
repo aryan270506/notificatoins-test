@@ -26,13 +26,73 @@ const upload = multer({
 router.post("/upload", checkUploadPermission("Teacher"), async (req, res) => {
   try {
     const teachers = req.body;
+
     if (!Array.isArray(teachers)) {
-      return res.status(400).json({ success: false, message: "Expected an array of teacher objects" });
+      return res.status(400).json({
+        success: false,
+        message: "Expected an array of teacher objects",
+      });
     }
-    const inserted = await Teacher.insertMany(teachers, { ordered: false });
-    res.status(201).json({ success: true, message: "Teachers uploaded successfully", count: inserted.length });
+
+    let successCount = 0;
+    const errors = [];
+
+    for (const t of teachers) {
+      try {
+        // ✅ Normalize + Add Defaults (VERY IMPORTANT)
+        const teacherData = {
+          id: t.id,
+          name: t.name,
+          password: t.password,
+
+          branch: t.branch ,
+          years: t.years,
+          divisions: t.divisions,
+          subDivisions: t.subDivisions ,
+
+          subjects: t.subjects || {
+            theory: { year1: [] },
+            lab: { year1: [] },
+          },
+        };
+
+        // ❌ Skip if required fields missing
+        if (!teacherData.id || !teacherData.name || !teacherData.password) {
+          throw new Error("Missing required fields (id, name, password)");
+        }
+
+        // ✅ Prevent duplicate (IMPORTANT)
+        const exists = await Teacher.findOne({ id: teacherData.id });
+        if (exists) {
+          throw new Error("Duplicate teacher id");
+        }
+
+        const newTeacher = new Teacher(teacherData);
+        await newTeacher.save();
+
+        successCount++;
+      } catch (err) {
+        errors.push({
+          id: t.id || "unknown",
+          error: err.message,
+        });
+      }
+    }
+
+    res.status(201).json({
+      success: true,
+      message: "Upload processed",
+      count: successCount,
+      failed: errors.length,
+      errors,
+    });
+
   } catch (error) {
-    res.status(500).json({ success: false, message: "Upload failed", error: error.message });
+    res.status(500).json({
+      success: false,
+      message: "Upload failed",
+      error: error.message,
+    });
   }
 });
 
@@ -45,14 +105,17 @@ router.get("/all", async (req, res) => {
     // Exclude binary profileImage data from list view for performance
     const teachers = await Teacher.find({}, { "profileImage.data": 0 });
 
-    const formatted = teachers.map(t => ({
-      _id: t._id,
-      id: t.id,
-      name: t.name,
-      years: t.years,
-      divisions: t.divisions,
-      subjects: t.subjects || {},
-    }));
+ const formatted = teachers.map(t => ({
+  _id: t._id,
+  id: t.id,
+  name: t.name,
+  branch: t.branch,
+  years: t.years,
+  divisions: t.divisions,
+  subDivisions: t.subDivisions,
+  subjects: t.subjects,
+  classTeacher: t.classTeacher,
+}));
 
     res.status(200).json({ success: true, data: formatted });
   } catch (error) {
@@ -66,7 +129,6 @@ router.get("/all", async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 router.get("/stats", async (req, res) => {
   try {
-    // Delegate to Assignment model
     const Assignment = require("../Models/Assignment");
     const { teacherId } = req.query;
     const filter = teacherId ? { teacherId } : {};
@@ -144,23 +206,22 @@ router.get("/by-subject", async (req, res) => {
       });
     }
 
-    // Convert year to string for mapping (e.g., "1" → "year1", "2" → "year2")
     const yearKey = `year${year}`;
+    const subjectRegex = new RegExp(`^${subject}$`, "i");
 
-    // Find a teacher that teaches this subject in this year and division
-    // Use case-insensitive regex matching for the subject
-    const subjectRegex = new RegExp(`^${subject}$`, 'i');
-    
-    const teacher = await Teacher.findOne({
-      [`subjects.${yearKey}`]: { $regex: subjectRegex },
-      years: { $in: [parseInt(year)] },
-      divisions: { $in: [division] }
-    }, { "profileImage.data": 0 }); // Exclude binary image data
+    const teacher = await Teacher.findOne(
+      {
+        [`subjects.${yearKey}`]: { $regex: subjectRegex },
+        years: { $in: [parseInt(year)] },
+        divisions: { $in: [division] },
+      },
+      { "profileImage.data": 0 }
+    );
 
     if (!teacher) {
       return res.status(404).json({
         success: false,
-        message: `No teacher found for subject "${subject}" in Year ${year}, Division ${division}`
+        message: `No teacher found for subject "${subject}" in Year ${year}, Division ${division}`,
       });
     }
 
@@ -172,8 +233,8 @@ router.get("/by-subject", async (req, res) => {
         name: teacher.name,
         years: teacher.years,
         divisions: teacher.divisions,
-        subjects: teacher.subjects
-      }
+        subjects: teacher.subjects,
+      },
     });
   } catch (error) {
     console.error("GET /teachers/by-subject error:", error);
@@ -212,16 +273,554 @@ router.get("/marksheet/:studentId", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// 9. GET SINGLE TEACHER  ← LAST (wildcard)
-//    GET /api/teachers/:id
+// 9. GET ALL CLASS TEACHER ASSIGNMENTS  ← must be before /:id
+//    GET /api/teachers/class-teachers
+//
+//    Returns a flat map:
+//    { assignments: { "1st Year-A": { name, teacherId }, ... } }
+//    Used by the committee dashboard to render the CT grid.
+// ─────────────────────────────────────────────────────────────
+router.get("/class-teachers", async (req, res) => {
+  try {
+    // Only fetch teachers who actually have a classTeacher assignment
+    const assigned = await Teacher.find(
+      {
+        "classTeacher.year":     { $ne: null },
+        "classTeacher.division": { $ne: null },
+      },
+      { name: 1, id: 1, "classTeacher": 1 }
+    );
+
+    // Build the { "1st Year-A": { name, teacherId, assignedAt } } map
+    const assignments = {};
+    assigned.forEach(t => {
+      const key = `${t.classTeacher.year}-${t.classTeacher.division}`;
+      assignments[key] = {
+        name:       t.name,
+        teacherId:  t._id,
+        assignedAt: t.classTeacher.assignedAt,
+      };
+    });
+
+    res.status(200).json({ success: true, assignments });
+  } catch (error) {
+    console.error("GET /teachers/class-teachers error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// 10. ASSIGN CLASS TEACHER  ← must be before /:id
+//     POST /api/teachers/assign-class-teacher
+//
+//     Body: { teacherId, year, division }
+//
+//     Logic:
+//       1. Validate year + division values.
+//       2. Clear the classTeacher field from whoever currently
+//          holds that year+division slot (if anyone).
+//       3. Set classTeacher on the newly chosen teacher.
+//
+//     This guarantees exactly one CT per year+division at all times.
+// ─────────────────────────────────────────────────────────────
+router.post("/assign-class-teacher", async (req, res) => {
+  try {
+    const { teacherId, year, division } = req.body;
+
+    // ── Validation ──────────────────────────────────────────
+    const VALID_YEARS = ["1st Year", "2nd Year", "3rd Year", "4th Year"];
+    const VALID_DIVS  = ["A", "B", "C"];
+
+    if (!teacherId || !year || !division) {
+      return res.status(400).json({
+        success: false,
+        message: "teacherId, year, and division are required.",
+      });
+    }
+    if (!VALID_YEARS.includes(year)) {
+      return res.status(400).json({
+        success: false,
+        message: `year must be one of: ${VALID_YEARS.join(", ")}`,
+      });
+    }
+    if (!VALID_DIVS.includes(division)) {
+      return res.status(400).json({
+        success: false,
+        message: `division must be one of: ${VALID_DIVS.join(", ")}`,
+      });
+    }
+
+    // ── Confirm the target teacher exists ───────────────────
+    const newCT = await Teacher.findById(teacherId);
+    if (!newCT) {
+      return res.status(404).json({ success: false, message: "Teacher not found." });
+    }
+
+    // ── Step 1: Clear the slot from its current holder ──────
+    // (skip if the same teacher is being re-assigned — still update assignedAt)
+    await Teacher.updateMany(
+      {
+        _id: { $ne: newCT._id },           // not the incoming teacher
+        "classTeacher.year":     year,
+        "classTeacher.division": division,
+      },
+      {
+        $set: {
+          "classTeacher.year":       null,
+          "classTeacher.division":   null,
+          "classTeacher.assignedAt": null,
+        },
+      }
+    );
+
+    // ── Step 2: Assign the slot to the new teacher ──────────
+    newCT.classTeacher = { year, division, assignedAt: new Date() };
+    await newCT.save();
+
+    res.status(200).json({
+      success: true,
+      message: `${newCT.name} assigned as Class Teacher for ${year} Division ${division}.`,
+      data: {
+        teacherId: newCT._id,
+        name:      newCT.name,
+        year,
+        division,
+        assignedAt: newCT.classTeacher.assignedAt,
+      },
+    });
+  } catch (error) {
+    console.error("POST /teachers/assign-class-teacher error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// 11. REMOVE CLASS TEACHER ASSIGNMENT  ← must be before /:id
+//     DELETE /api/teachers/class-teachers/:teacherId
+//
+//     Clears the classTeacher field from a specific teacher.
+//     Useful if a committee wants to unassign without replacing.
+// ─────────────────────────────────────────────────────────────
+router.delete("/class-teachers/:teacherId", async (req, res) => {
+  try {
+    const teacher = await Teacher.findById(req.params.teacherId);
+    if (!teacher) {
+      return res.status(404).json({ success: false, message: "Teacher not found." });
+    }
+
+    const wasYear = teacher.classTeacher?.year;
+    const wasDiv  = teacher.classTeacher?.division;
+
+    teacher.classTeacher = { year: null, division: null, assignedAt: null };
+    await teacher.save();
+
+    res.status(200).json({
+      success: true,
+      message: wasYear
+        ? `Class teacher assignment for ${wasYear} Div ${wasDiv} has been removed.`
+        : "No active assignment found.",
+    });
+  } catch (error) {
+    console.error("DELETE /teachers/class-teachers/:teacherId error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// 12. GET SINGLE TEACHER  ← LAST (wildcard)
+//     GET /api/teachers/:id
+//
+//     Looks up teacher by either MongoDB _id or custom id field.
+//     Also returns classTeacher so the Teacher's own dashboard
+//     can display "You are Class Teacher of X Year Div Y".
 // ─────────────────────────────────────────────────────────────
 router.get("/:id", async (req, res) => {
   try {
-    const teacher = await Teacher.findById(req.params.id, { "profileImage.data": 0 });
-    if (!teacher) return res.json({ success: false, message: "Teacher not found" });
+    const { id } = req.params;
+    
+    console.log(`🔍 Teacher lookup - id: ${id}`);
+    
+    // Try to find by MongoDB _id first, then by custom id field
+    let teacher = await Teacher.findById(id, { "profileImage.data": 0 });
+    
+    if (!teacher) {
+      console.log(`📋 Not found by _id, trying by id field...`);
+      teacher = await Teacher.findOne({ id }, { "profileImage.data": 0 });
+    }
+    
+    if (!teacher) {
+      console.log(`❌ Teacher not found for id: ${id}`);
+      return res.status(404).json({ success: false, message: "Teacher not found" });
+    }
+    
+    // Ensure classTeacher object exists with proper structure
+    if (!teacher.classTeacher) {
+      teacher.classTeacher = { year: null, division: null, assignedAt: null };
+    }
+    
+    console.log(`✅ Teacher found:`, teacher.name, 'ClassTeacher:', teacher.classTeacher);
     res.json({ success: true, data: teacher });
   } catch (err) {
+    console.error(`🔴 GET /teachers/:id error:`, err.message);
     res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// DEBUG: Find teacher by name
+//        GET /api/teachers/debug/by-name?name=Deepika
+// ─────────────────────────────────────────────────────────────
+router.get("/debug/by-name", async (req, res) => {
+  try {
+    const { name } = req.query;
+    if (!name) {
+      return res.status(400).json({ message: "name query param required" });
+    }
+    const teacher = await Teacher.findOne(
+      { name: { $regex: name, $options: "i" } },
+      { "profileImage.data": 0 }
+    );
+    res.json({ success: true, data: teacher });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// DEBUG: Assign class teacher by name
+//        POST /api/teachers/debug/assign-by-name
+//        Body: { name, year, division }
+// ─────────────────────────────────────────────────────────────
+router.post("/debug/assign-by-name", async (req, res) => {
+  try {
+    const { name, year, division } = req.body;
+    if (!name || !year || !division) {
+      return res.status(400).json({ message: "name, year, and division required" });
+    }
+
+    const teacher = await Teacher.findOne({ name: { $regex: name, $options: "i" } });
+    if (!teacher) {
+      return res.status(404).json({ message: `Teacher "${name}" not found` });
+    }
+
+    // Clear old assignment for this year+division
+    await Teacher.updateMany(
+      { _id: { $ne: teacher._id }, "classTeacher.year": year, "classTeacher.division": division },
+      { $set: { "classTeacher.year": null, "classTeacher.division": null, "classTeacher.assignedAt": null } }
+    );
+
+    // Assign to this teacher
+    teacher.classTeacher = { year, division, assignedAt: new Date() };
+    await teacher.save();
+
+    res.json({ 
+      success: true, 
+      message: `✅ ${teacher.name} assigned as class teacher for ${year} ${division}`,
+      data: teacher 
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// 15. GET STUDENTS FOR CLASS TEACHER
+//     GET /api/teachers/:teacherId/students-for-class
+//
+//     Logic: Fetch all students for the class teacher's assigned year+division
+// ─────────────────────────────────────────────────────────────
+router.get("/:teacherId/students-for-class", async (req, res) => {
+  try {
+    const { teacherId } = req.params;
+
+    // Get teacher and check if they are a class teacher
+    const teacher = await Teacher.findById(teacherId);
+    if (!teacher) {
+      return res.status(404).json({ success: false, message: "Teacher not found" });
+    }
+
+    if (!teacher.classTeacher?.year || !teacher.classTeacher?.division) {
+      return res.status(400).json({
+        success: false,
+        message: "This teacher is not assigned as a class teacher",
+      });
+    }
+
+    // ── Year format bridge ──────────────────────────────────────────
+    // Teacher schema stores year as "1st Year" / "2nd Year" / "3rd Year" / "4th Year"
+    // Student schema stores year as "1" / "2" / "3" / "4"
+    const yearMap = { "1st Year": "1", "2nd Year": "2", "3rd Year": "3", "4th Year": "4" };
+    const studentYear = yearMap[teacher.classTeacher.year] || teacher.classTeacher.year;
+
+    const Student = require("../Models/Student");
+    const students = await Student.find({
+      year:     studentYear,
+      division: teacher.classTeacher.division,
+    }, {
+      // Return only the fields the frontend needs — excludes password, etc.
+      _id: 1, id: 1, name: 1, email: 1,
+      roll_no: 1, prn: 1, division: 1, year: 1, batch: 1,
+    }).lean();
+
+    res.status(200).json({
+      success: true,
+      data: students,
+      classInfo: { year: teacher.classTeacher.year, division: teacher.classTeacher.division },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch students",
+      error: error.message,
+    });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// 15b. ASSIGN BATCH — replaces students in a fixed batch (A/B/C)
+//      PUT /api/teachers/:teacherId/assign-batch
+//
+//      Body: { batch: "A"|"B"|"C", studentIds: ["252141001", ...] }
+//
+//      This is the primary batch-management endpoint used by the new UI.
+//      It does two things atomically:
+//        1. Updates the Student documents — sets student.batch field
+//        2. Syncs the Teacher.batches array (upsert by batchName)
+// ─────────────────────────────────────────────────────────────
+router.put("/:teacherId/assign-batch", async (req, res) => {
+  try {
+    const { teacherId } = req.params;
+    const { batch, studentIds } = req.body;
+
+    if (!['A', 'B', 'C'].includes(batch)) {
+      return res.status(400).json({ success: false, message: "batch must be 'A', 'B', or 'C'" });
+    }
+    if (!Array.isArray(studentIds)) {
+      return res.status(400).json({ success: false, message: "studentIds must be an array" });
+    }
+
+    const teacher = await Teacher.findById(teacherId);
+    if (!teacher) {
+      return res.status(404).json({ success: false, message: "Teacher not found" });
+    }
+
+    const Student = require("../Models/Student");
+
+    // ── 1. Sync Student documents ───────────────────────────────
+    // Clear all students currently in this batch (for this teacher's class)
+    const yearMap = { "1st Year": "1", "2nd Year": "2", "3rd Year": "3", "4th Year": "4" };
+    const studentYear = yearMap[teacher.classTeacher?.year] || teacher.classTeacher?.year;
+    const division    = teacher.classTeacher?.division;
+
+    // Unassign everyone in this batch within the class
+    await Student.updateMany(
+      { year: studentYear, division, batch },
+      { $set: { batch: null } }
+    );
+
+    // Assign selected students to this batch
+    if (studentIds.length > 0) {
+      await Student.updateMany(
+        { id: { $in: studentIds } },
+        { $set: { batch } }
+      );
+    }
+
+    // ── 2. Sync Teacher.batches array ───────────────────────────
+    // Fetch full details for the selected students
+    const students = await Student.find(
+      { id: { $in: studentIds } },
+      { id: 1, name: 1, email: 1 }
+    ).lean();
+
+    const studentDetails = students.map(s => ({
+      studentId:    s.id,
+      studentName:  s.name,
+      studentEmail: s.email,
+    }));
+
+    // Upsert: update existing batch entry or add new one
+    const existingBatchIdx = teacher.batches.findIndex(b => b.batchName === batch);
+    if (existingBatchIdx >= 0) {
+      teacher.batches[existingBatchIdx].students = studentDetails;
+    } else {
+      teacher.batches.push({ batchName: batch, students: studentDetails, createdAt: new Date() });
+    }
+
+    await teacher.save();
+
+    res.status(200).json({
+      success: true,
+      message: `Batch ${batch} updated with ${studentIds.length} student(s).`,
+      data: teacher.batches,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to assign batch", error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// 16. CREATE BATCH (legacy — kept for compatibility)
+router.post("/:teacherId/create-batch", async (req, res) => {
+  try {
+    const { teacherId } = req.params;
+    const { batchName, studentIds } = req.body;
+
+    if (!batchName || !studentIds || !Array.isArray(studentIds)) {
+      return res.status(400).json({
+        success: false,
+        message: "batchName and studentIds (array) are required",
+      });
+    }
+
+    const teacher = await Teacher.findById(teacherId);
+    if (!teacher) {
+      return res.status(404).json({ success: false, message: "Teacher not found" });
+    }
+
+    // Fetch student details.
+    // The frontend sends the student's custom `id` field (e.g. "252141001"),
+    // NOT MongoDB _ids. Query by the `id` field accordingly.
+    const Student = require("../Models/Student");
+    const students = await Student.find({ id: { $in: studentIds } }).lean();
+
+    const studentDetails = students.map((s) => ({
+      studentId: s.id,
+      studentName: s.name,
+      studentEmail: s.email,
+    }));
+
+    // Add batch to teacher
+    teacher.batches.push({
+      batchName,
+      students: studentDetails,
+      createdAt: new Date(),
+    });
+
+    await teacher.save();
+
+    res.status(201).json({
+      success: true,
+      message: "Batch created successfully",
+      data: teacher.batches,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to create batch",
+      error: error.message,
+    });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// 17. GET TEACHER BATCHES
+//     GET /api/teachers/:teacherId/batches
+// ─────────────────────────────────────────────────────────────
+router.get("/:teacherId/batches", async (req, res) => {
+  try {
+    const { teacherId } = req.params;
+
+    const teacher = await Teacher.findById(teacherId);
+    if (!teacher) {
+      return res.status(404).json({ success: false, message: "Teacher not found" });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: teacher.batches,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch batches",
+      error: error.message,
+    });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// 18. DELETE BATCH
+//     DELETE /api/teachers/:teacherId/batch/:batchId
+// ─────────────────────────────────────────────────────────────
+router.delete("/:teacherId/batch/:batchId", async (req, res) => {
+  try {
+    const { teacherId, batchId } = req.params;
+
+    const teacher = await Teacher.findById(teacherId);
+    if (!teacher) {
+      return res.status(404).json({ success: false, message: "Teacher not found" });
+    }
+
+    teacher.batches = teacher.batches.filter((b) => b._id.toString() !== batchId);
+    await teacher.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Batch deleted successfully",
+      data: teacher.batches,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete batch",
+      error: error.message,
+    });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// 19. UPDATE BATCH
+//     PUT /api/teachers/:teacherId/batch/:batchId
+//
+//     Body: { batchName, studentIds }
+// ─────────────────────────────────────────────────────────────
+router.put("/:teacherId/batch/:batchId", async (req, res) => {
+  try {
+    const { teacherId, batchId } = req.params;
+    const { batchName, studentIds } = req.body;
+
+    const teacher = await Teacher.findById(teacherId);
+    if (!teacher) {
+      return res.status(404).json({ success: false, message: "Teacher not found" });
+    }
+
+    const batch = teacher.batches.find((b) => b._id.toString() === batchId);
+    if (!batch) {
+      return res.status(404).json({ success: false, message: "Batch not found" });
+    }
+
+    // Update batch name if provided
+    if (batchName) {
+      batch.batchName = batchName;
+    }
+
+    // Update students if provided
+    if (studentIds && Array.isArray(studentIds)) {
+      const Student = require("../Models/Student");
+      // studentIds sent from frontend are custom `id` strings, not MongoDB _ids
+      const students = await Student.find({ id: { $in: studentIds } }).lean();
+
+      batch.students = students.map((s) => ({
+        studentId: s.id,
+        studentName: s.name,
+        studentEmail: s.email,
+      }));
+    }
+
+    await teacher.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Batch updated successfully",
+      data: teacher.batches,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to update batch",
+      error: error.message,
+    });
   }
 });
 

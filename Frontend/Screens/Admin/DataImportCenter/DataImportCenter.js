@@ -12,6 +12,7 @@
 import React, { useState, useCallback, useContext, useEffect } from 'react';
 import { ThemeContext } from '../dashboard/AdminDashboard';
 import axiosInstance from '../../../Src/Axios';
+import TeacherAssignmentModal from './TeacherAssignmentModal';
 
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
@@ -66,15 +67,6 @@ const IMPORT_SOURCES = [
     iconAccent: '#f97316',
     status: 'Ready for upload',
     hint: 'Required fields: id, name, email, password. Link to student via prn or roll_no.',
-  },
-  {
-    id: 'admin',
-    title: 'Admin Data',
-    icon: '🛡️',
-    iconBg: '#0e2a1a',
-    iconAccent: '#10b981',
-    status: 'Ready for upload',
-    hint: 'Required fields: id, email, password, branch.',
   },
 ];
 
@@ -142,14 +134,6 @@ const JSON_TEMPLATES = {
         'Web Development Lab',
         'Python Programing Lab',
       ],
-    },
-  ],
-  admin: [
-    {
-      id: 'ADMIN001',
-      email: 'admin.comps1@college.edu',
-      password: 'admin123',
-      branch: 'Computer Science',
     },
   ],
 };
@@ -269,11 +253,10 @@ function parseJSON(text, sourceId) {
     : Array.isArray(parsed.students) ? parsed.students
     : Array.isArray(parsed.teachers) ? parsed.teachers
     : Array.isArray(parsed.parents)  ? parsed.parents
-    : Array.isArray(parsed.admins)   ? parsed.admins
     : Array.isArray(parsed.data)     ? parsed.data
     : null;
 
-  if (!arr) throw new Error('JSON must be an array or { students/teachers/parents/admins: [...] }');
+  if (!arr) throw new Error('JSON must be an array or { students/teachers/parents: [...] }');
   if (arr.length === 0) throw new Error('JSON array is empty.');
 
   return sourceId === 'student' ? arr.map(normaliseStudent) : arr.map(normaliseRaw);
@@ -1317,6 +1300,7 @@ export default function DataImportCenter() {
   const [studentListVisible, setStudentListVisible] = useState(false);
   const [configModalVisible, setConfigModalVisible] = useState(false);
   const [configTab,         setConfigTab]         = useState('subjects'); // 'subjects', 'labs', 'fees'
+  const [teacherAssignmentModalVisible, setTeacherAssignmentModalVisible] = useState(false);
 
   // ── Real stats from API ──────────────────────────────────────────────────
   const [statsLoading,   setStatsLoading]   = useState(true);
@@ -1532,6 +1516,36 @@ export default function DataImportCenter() {
           </View>
         </View>
 
+        {/* Teacher Assignment Section */}
+        <View style={[s.configSection, { backgroundColor: colors.surface, borderColor: colors.border, marginTop: 20 }]}>
+          <View style={[s.configHeader, { borderBottomColor: colors.border }]}>
+            <Text style={[s.sectionTitle, { color: colors.textPrim }]}>Class Teacher Assignment</Text>
+            <TouchableOpacity
+              style={[s.configBtn, { backgroundColor: '#818cf8' }]}
+              onPress={() => setTeacherAssignmentModalVisible(true)}
+              activeOpacity={0.75}>
+              <Text style={s.configBtnTxt}>👨‍🏫 Manage</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={[s.configGrid, !isTablet && s.configGridMobile]}>
+            <View style={[s.configCard, { borderColor: '#818cf8' }]}>
+              <Text style={s.configIcon}>👨‍🏫</Text>
+              <Text style={[s.configLabel, { color: colors.textPrim }]}>Year 1-4</Text>
+              <Text style={[s.configDesc, { color: colors.textMuted }]}>Assign teachers to classes</Text>
+            </View>
+            <View style={[s.configCard, { borderColor: '#818cf8' }]}>
+              <Text style={s.configIcon}>📋</Text>
+              <Text style={[s.configLabel, { color: colors.textPrim }]}>Divisions A-C</Text>
+              <Text style={[s.configDesc, { color: colors.textMuted }]}>Manage all class divisions</Text>
+            </View>
+            <View style={[s.configCard, { borderColor: '#818cf8' }]}>
+              <Text style={s.configIcon}>✓</Text>
+              <Text style={[s.configLabel, { color: colors.textPrim }]}>Verify</Text>
+              <Text style={[s.configDesc, { color: colors.textMuted }]}>View current assignments</Text>
+            </View>
+          </View>
+        </View>
+
         {/* Upload History */}
         <View style={[s.historySection, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <View style={[s.historyHeader, { borderBottomColor: colors.border }]}>
@@ -1596,6 +1610,13 @@ export default function DataImportCenter() {
         visible={configModalVisible}
         onClose={() => setConfigModalVisible(false)}
         colors={colors}
+      />
+      <TeacherAssignmentModal
+        visible={teacherAssignmentModalVisible}
+        onClose={() => setTeacherAssignmentModalVisible(false)}
+        onSuccess={() => {
+          // Refresh assignments if needed
+        }}
       />
     </SafeAreaView>
   );

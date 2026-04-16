@@ -23,6 +23,7 @@ import DoubtSolveScreen   from './Doubtsolvescreen';
 import SelectionScreen    from './Selectionscreen';
 import MessagingScreen    from './Messagingscreen';
 import Quizresultscreen   from './Quizresultscreen';
+import ClassTeacherSettingsScreen, { TimetableManagementScreen, BatchManagementScreen } from './ClassTeacherSetting';
 
 const Stack = createNativeStackNavigator();
 
@@ -167,7 +168,32 @@ export default function TeacherStack({ route }) {
           )}
         </Stack.Screen>
 
-        {/* ── Full-screen screens — no Sidebar, no lock needed ─────────── */}
+        {/* Settings — Class Teacher Controls */}
+        <Stack.Screen name="ClassTeacherSettingsScreen">
+          {() => (
+            <Sidebar activeScreen="settings" user={user} tabAccess={tabAccess}>
+              {guard('settings', <ClassTeacherSettingsScreen />)}
+            </Sidebar>
+          )}
+        </Stack.Screen>
+
+        {/* ── Timetable Management Screen — with Sidebar ─────────────────── */}
+        <Stack.Screen name="TimetableManagementScreen">
+          {() => (
+            <Sidebar activeScreen="settings" user={user} tabAccess={tabAccess}>
+              {guard('settings', <TimetableManagementScreen />)}
+            </Sidebar>
+          )}
+        </Stack.Screen>
+
+        {/* ── Batch Management Screen — with Sidebar ────────────────────── */}
+        <Stack.Screen name="BatchManagementScreen">
+          {() => (
+            <Sidebar activeScreen="settings" user={user} tabAccess={tabAccess}>
+              {guard('settings', <BatchManagementScreen />)}
+            </Sidebar>
+          )}
+        </Stack.Screen>
         <Stack.Screen
           name="DoubtSolveScreen"
           options={{ animation: 'slide_from_right' }}

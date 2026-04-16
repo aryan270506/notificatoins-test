@@ -13,6 +13,7 @@ import Assignment from '../Assignment/Assignment';
 import Admissionfees from '../Fees/Admissionfees';
 import DataImportCenter from '../DataImportCenter/DataImportCenter';
 import SelectionScreen from '../Message/Selectionscreen';
+import TeacherManagementDashboard from '../FacultyAssignment/FacultyAssign';
 
 
 // ─── Nav Items — id keys MUST match PermissionDashboard ALL_TABS for Admin ───
@@ -21,8 +22,8 @@ const NAV_ITEMS = [
   { id: 'timetable',        label: 'Timetable',       icon: '📅' },
   { id: 'reports',          label: 'Reports',         icon: '📊' },
   { id: 'assignment',       label: 'Assignment',      icon: '📝' },
+  { id: 'faculty-assign',   label: 'Faculty Assign',  icon: '👑' },
   { id: 'admission-fee',    label: 'Admission Fee',   icon: '💰' },
-  { id: 'configuration',    label: 'Configuration',   icon: '⚙️' },
   { id: 'security-logs',    label: 'Security Logs',   icon: '🔒' },
   { id: 'dataimportcenter', label: 'DataImportCenter',icon: '📥' },
   { id: 'messages',         label: 'Messages',        icon: '✉️' },
@@ -78,6 +79,7 @@ function renderScreen(routeId, isDark, onToggleTheme, messageNavContext, onMessa
     case 'reports':          return <AdminAttendancen />;
     case 'security-logs':    return <SecurityLogsScreen />;
     case 'assignment':       return <Assignment />;
+    case 'faculty-assign':   return <TeacherManagementDashboard />;
     case 'dataimportcenter': return <DataImportCenter />;
     default:
       return (

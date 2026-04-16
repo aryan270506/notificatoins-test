@@ -6,13 +6,14 @@ import React, { useRef, useEffect, useState, useCallback, useContext } from 'rea
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   Animated, Platform, StatusBar, useWindowDimensions,
-  Modal, TouchableWithoutFeedback, ActivityIndicator, RefreshControl,
+  Modal, TouchableWithoutFeedback, ActivityIndicator, RefreshControl, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeContext } from './TeacherStack';
 import axiosInstance from '../../Src/Axios';
+import ClassTeacherBatchSettings from '../Admin/DataImportCenter/ClassTeacherBatchSettings';
 
 /* ─── Themes ─────────────────────────────────────────────────────────────── */
 const DARK = {
@@ -139,6 +140,7 @@ export default function MainDash() {
   const [statsLoading,    setStatsLoading]    = useState(true);
   const [scheduleLoading, setScheduleLoading] = useState(true);
   const [refreshing,      setRefreshing]      = useState(false);
+  const [batchSettingsModalVisible, setBatchSettingsModalVisible] = useState(false);
 
   /* ── Notification helpers ── */
   const openPanel = () => {
@@ -227,13 +229,20 @@ export default function MainDash() {
     setStatsLoading(true);
     try {
       const teacherId = await AsyncStorage.getItem('teacherId');
+      console.log('🔍 DEBUG: teacherId from storage:', teacherId);
 
       // 1. Teacher profile
       if (teacherId) {
         try {
           const tRes = await axiosInstance.get(`/teachers/${teacherId}`);
-          if (tRes.data.success) setTeacherData(tRes.data.data);
-        } catch (_) { /* ignore */ }
+          console.log('🔍 DEBUG: Teacher response:', tRes.data);
+          if (tRes.data.success) {
+            setTeacherData(tRes.data.data);
+            console.log('🔍 DEBUG: classTeacher data:', tRes.data.data?.classTeacher);
+          }
+        } catch (_) { 
+          console.error('🔍 DEBUG: Teacher fetch error:', _);
+        }
       }
 
       // 2. Assignment stats — uses TeacherRoutes GET /api/teachers/stats
@@ -270,6 +279,20 @@ export default function MainDash() {
 
   /* ── On mount ── */
   useEffect(() => {
+    console.log('🔍 MainDash - teacherData updated:', teacherData);
+    if (teacherData?.classTeacher) {
+      console.log('✅ ClassTeacher found:', {
+        year: teacherData.classTeacher.year,
+        division: teacherData.classTeacher.division,
+        assignedAt: teacherData.classTeacher.assignedAt
+      });
+      console.log('📊 Will display batch settings:', !!(teacherData.classTeacher.year && teacherData.classTeacher.division));
+    } else {
+      console.log('❌ No classTeacher object found on teacherData');
+    }
+  }, [teacherData]);
+
+  useEffect(() => {
     Animated.parallel([
       Animated.timing(fadeAnim,  { toValue: 1, duration: 480, useNativeDriver: true }),
       Animated.spring(slideAnim, { toValue: 0, tension: 80, friction: 14, useNativeDriver: true }),
@@ -294,6 +317,14 @@ export default function MainDash() {
     { label: 'Pending',  value: assignmentStats.pending,  icon: 'hourglass-outline',        color: T.yellow,       bg: T.yellowSoft },
     { label: 'Approved', value: assignmentStats.approved, icon: 'checkmark-circle-outline', color: T.green,        bg: T.greenSoft  },
     { label: 'Closed',   value: assignmentStats.closed,   icon: 'archive-outline',          color: T.textMuted,    bg: T.surfaceEl  },
+  ];
+
+  // Add Batches to Quick Actions if teacher is class teacher
+  const quickActionsWithBatches = [
+    ...QUICK,
+    ...(teacherData?.classTeacher?.year && teacherData?.classTeacher?.division 
+      ? [{ icon: 'layers-outline', label: 'Batches', route: null, color: '#F97316', action: () => setBatchSettingsModalVisible(true) }]
+      : [])
   ];
 
   /* ─── Schedule item renderer ─────────────────────────────────────────── */
@@ -493,11 +524,11 @@ export default function MainDash() {
                   </View>
                 </View>
                 <View style={s.quickGrid}>
-                  {QUICK.map((q, i) => (
+                  {quickActionsWithBatches.map((q, i) => (
                     <TouchableOpacity
                       key={i}
                       style={[s.quickItem, { backgroundColor: T.surfaceEl, borderColor: T.border }]}
-                      onPress={() => navigation.navigate(q.route)}
+                      onPress={() => q.action ? q.action() : navigation.navigate(q.route)}
                       activeOpacity={0.7}>
                       <View style={[s.quickIconWrap, { backgroundColor: q.color + '22' }]}>
                         <Ionicons name={q.icon} size={21} color={q.color} />
@@ -627,11 +658,82 @@ export default function MainDash() {
                   <Ionicons name="chevron-forward" size={16} color={T.textMuted} />
                 </TouchableOpacity>
               )}
+
+              {/* Class Teacher Assignment Card */}
+              {teacherData?.classTeacher?.year && teacherData?.classTeacher?.division ? (
+                <View style={[s.card, { backgroundColor: T.card, borderColor: T.border }, cardShadow]}>
+                  <View style={s.cardHeaderRow}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <View style={[s.cardIconBubble, { backgroundColor: 'rgba(34,197,94,0.15)' }]}>
+                        <Ionicons name="people-outline" size={14} color={T.green} />
+                      </View>
+                      <View>
+                        <Text style={[s.cardTitle, { color: T.textPrimary }]}>Class Teacher</Text>
+                        <Text style={[s.cardSub, { color: T.textSec }]}>Assignment</Text>
+                      </View>
+                    </View>
+                    <TouchableOpacity
+                      onPress={() => setBatchSettingsModalVisible(true)}
+                      style={[{ backgroundColor: T.accentSoft, padding: 8, borderRadius: 8 }]}>
+                      <Ionicons name="settings-outline" size={18} color={T.accent} />
+                    </TouchableOpacity>
+                  </View>
+                  <View style={{ gap: 12 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', backgroundColor: T.surfaceEl, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10 }}>
+                      <View>
+                        <Text style={[s.ctLabel, { color: T.textMuted }]}>Year</Text>
+                        <Text style={[s.ctValue, { color: T.textPrimary }]}>{teacherData.classTeacher.year}</Text>
+                      </View>
+                      <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+                        <Text style={[{ fontSize: 18, color: T.textMuted }]}>•</Text>
+                      </View>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={[s.ctLabel, { color: T.textMuted }]}>Division</Text>
+                        <Text style={[s.ctValue, { color: T.textPrimary }]}>{teacherData.classTeacher.division}</Text>
+                      </View>
+                    </View>
+                    {teacherData.classTeacher.assignedAt && (
+                      <Text style={[s.ctAssignedDate, { color: T.textMuted }]}>
+                        Assigned on {new Date(teacherData.classTeacher.assignedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </Text>
+                    )}
+                    <TouchableOpacity
+                      onPress={() => setBatchSettingsModalVisible(true)}
+                      style={[s.reviewBtn, { backgroundColor: T.accentSoft, marginTop: 6 }]}>
+                      <Ionicons name="layers-outline" size={16} color={T.accent} />
+                      <Text style={[s.reviewBtnText, { color: T.accent }]}>Manage Batches</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : null}
             </View>
           </View>
 
         </Animated.View>
       </ScrollView>
+
+      {/* ══ BATCH SETTINGS MODAL ════════════════════════════════════════ */}
+      <Modal visible={batchSettingsModalVisible} transparent animationType="slide">
+        <View style={{ flex: 1, paddingTop: Platform.OS === 'ios' ? 50 : 10 }}>
+          <View style={{ flex: 1, backgroundColor: T.bg }}>
+            {/* Modal Header */}
+            <View style={[{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: T.border }]}>
+              <Text style={[{ fontSize: 18, fontWeight: '700', color: T.textPrimary }]}>Batch Settings</Text>
+              <TouchableOpacity onPress={() => setBatchSettingsModalVisible(false)}>
+                <Ionicons name="close" size={24} color={T.textPrimary} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Modal Body */}
+            {teacherData && (
+              <ClassTeacherBatchSettings
+                teacherId={teacherData._id}
+                classInfo={{ year: teacherData.classTeacher.year, division: teacherData.classTeacher.division }}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
 
       {/* ══ NOTIFICATION SIDE PANEL ════════════════════════════════════════ */}
       <Modal visible={notifOpen} transparent animationType="none" onRequestClose={() => closePanel()}>
@@ -809,6 +911,10 @@ const s = StyleSheet.create({
   profileAvatarText: { fontSize: 15, fontWeight: '800' },
   profileName:       { fontSize: 14, fontWeight: '700' },
   profileSub:        { fontSize: 11, marginTop: 1 },
+
+  ctLabel:           { fontSize: 10, fontWeight: '700', letterSpacing: 0.4 },
+  ctValue:           { fontSize: 16, fontWeight: '800', marginTop: 3 },
+  ctAssignedDate:    { fontSize: 10, marginTop: 2, textAlign: 'center' },
 
   notifOverlay:     { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.55)' },
   notifPanel:       { position: 'absolute', top: 0, right: 0, bottom: 0, width: 340, borderLeftWidth: 1, shadowOffset: { width: -4, height: 0 }, shadowRadius: 22, elevation: 22, paddingTop: Platform.OS === 'ios' ? 56 : 20 },

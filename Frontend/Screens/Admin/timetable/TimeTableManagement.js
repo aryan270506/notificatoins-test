@@ -409,13 +409,11 @@ function MobileLectureRow({ slot, data, onPress }) {
 
 // ─── Tablet sub-components ────────────────────────────────────────────────────
 
-function SubjectCard({ data, onPress }) {
+function SubjectCard({ data }) {
   const { isDark, colors } = useContext(ThemeContext);
   const palette = getCardPalette(data.color, isDark);
   return (
-    <TouchableOpacity
-      activeOpacity={0.8}
-      onPress={onPress}
+    <View
       style={[tStyles.card, { backgroundColor: palette.bg, borderColor: palette.border }]}
     >
       <Text style={[tStyles.cardSubject, { color: palette.text }]}>{data.subject}</Text>
@@ -423,10 +421,7 @@ function SubjectCard({ data, onPress }) {
         {data.teacher}
       </Text>
       {data.room && <Text style={[tStyles.cardRoom, { color: palette.text }]}>{data.room}</Text>}
-      <Text style={[tStyles.editHint, { color: isDark ? 'rgba(255,255,255,0.2)' : colors.textMuted }]}>
-        ✏️ tap to edit
-      </Text>
-    </TouchableOpacity>
+    </View>
   );
 }
 

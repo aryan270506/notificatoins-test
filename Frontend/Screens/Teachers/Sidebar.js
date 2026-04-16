@@ -4,6 +4,7 @@
  * - Mobile (<768px): top bar with ☰ hamburger, opens a 240px wide drawer modal
  * - Teacher name/image fetched from DB on mount
  * - Tap avatar to upload a new profile photo
+ * - Settings item opens ClassTeacherSettings screen (timetable + batch management)
  */
 
 import React, { useCallback, useState, useEffect, useContext } from 'react';
@@ -33,6 +34,9 @@ const SB_DARK = {
   userName: '#e2e8f0', userRole: '#475569',
   logoutBg: 'rgba(239,68,68,0.10)', logoutBorder: 'rgba(239,68,68,0.30)',
   drawerBg: '#0f0f23', drawerShadow: '#000',
+  settingsDividerColor: 'rgba(99,102,241,0.10)',
+  settingsBg: 'rgba(99,102,241,0.08)', settingsBorder: 'rgba(99,102,241,0.22)',
+  settingsText: '#a5b4fc', settingsIcon: '#6366f1',
 };
 const SB_LIGHT = {
   wideBg: '#F1F4FD', sidebarBg: '#FFFFFF', screenBg: '#F1F4FD',
@@ -46,33 +50,27 @@ const SB_LIGHT = {
   userName: '#1E293B', userRole: '#64748B',
   logoutBg: 'rgba(239,68,68,0.06)', logoutBorder: 'rgba(239,68,68,0.20)',
   drawerBg: '#FFFFFF', drawerShadow: '#94A3B8',
+  settingsDividerColor: '#E8EDF5',
+  settingsBg: 'rgba(79,70,229,0.06)', settingsBorder: 'rgba(79,70,229,0.18)',
+  settingsText: '#4F46E5', settingsIcon: '#4F46E5',
 };
 
 // ─── Derive BASE_URL from axiosInstance so there's no hardcoded IP ───────────
 const BASE_URL = axiosInstance.defaults.baseURL;
 
 const NAV_ITEMS = [
-  { id: 'dashboard', label: 'Dashboard', route: 'DashboardScreen' },
-
-  { id: 'attendanceMarking', label: 'Attendance Marking', route: 'AttendanceScreen' },
-
-  { id: 'studentAttendance', label: 'Attendance', route: 'StudentAttendanceScreen' },
-
-  { id: 'assignments', label: 'Assignments', route: 'AssignmentScreen' },
-
-  { id: 'planner', label: 'Lesson Planner', route: 'PlannerScreen' },
-
-  { id: 'exams', label: 'Exams', route: 'TeacherExamScreen' },
-
-  { id: 'quiz', label: 'Quiz Session', route: 'QuizzSessionScreen' },
-
-  { id: 'addquizz', label: 'Add Quiz', route: 'QuizBuilderScreen' },
-
-  { id: 'doubt', label: 'Doubt Session', route: 'DoubtScreen' },
-
-  { id: 'messages', label: 'Messages', route: 'MessagesScreen' },
-
-  { id: 'timetable', label: 'Timetable', route: 'TimetableScreen' },
+  { id: 'dashboard',          label: 'Dashboard',        route: 'DashboardScreen' },
+  { id: 'attendanceMarking',  label: 'Attendance Marking', route: 'AttendanceScreen' },
+  { id: 'studentAttendance',  label: 'Attendance',        route: 'StudentAttendanceScreen' },
+  { id: 'assignments',        label: 'Assignments',       route: 'AssignmentScreen' },
+  { id: 'planner',            label: 'Lesson Planner',    route: 'PlannerScreen' },
+  { id: 'exams',              label: 'Exams',             route: 'TeacherExamScreen' },
+  { id: 'quiz',               label: 'Quiz Session',      route: 'QuizzSessionScreen' },
+  { id: 'addquizz',           label: 'Add Quiz',          route: 'QuizBuilderScreen' },
+  { id: 'doubt',              label: 'Doubt Session',     route: 'DoubtScreen' },
+  { id: 'messages',           label: 'Messages',          route: 'MessagesScreen' },
+  { id: 'timetable',          label: 'Timetable',         route: 'TimetableScreen' },
+  { id: 'settings',           label: 'Settings',          route: 'ClassTeacherSettingsScreen' },
 ];
 
 const SIDEBAR_W  = 210;
@@ -88,7 +86,6 @@ const getInitials = (name = '') => {
 
 // ─── Avatar Component ─────────────────────────────────────────────────────────
 const AvatarButton = ({ name, profileImage, teacherId, uploading, onPress }) => {
-
   const imageUri = teacherId
     ? `${BASE_URL}/teachers/profile/image/${teacherId}`
     : null;
@@ -124,16 +121,27 @@ const SidebarContent = ({ activeScreen, onSelect, onLogout, teacher, uploading, 
 
     {/* Nav items */}
     <View style={s.navList}>
-      {NAV_ITEMS.map(item => {
+      {NAV_ITEMS.filter(item => {
+        // ✅ Hide Settings tab if teacher is NOT assigned as class teacher
+        if (item.id === 'settings') {
+          return teacher?.classTeacher?.year && teacher?.classTeacher?.division;
+        }
+        return true;
+      }).map(item => {
         const active = activeScreen === item.id;
         return (
           <TouchableOpacity
             key={item.id}
             onPress={() => onSelect(item)}
             activeOpacity={0.75}
-            style={[s.navItem, active && [s.navItemActive, { backgroundColor: ST.navActiveBg, borderLeftColor: ST.navActiveBorder }]]}>
+            style={[
+              s.navItem,
+              active && [s.navItemActive, { backgroundColor: ST.navActiveBg, borderLeftColor: ST.navActiveBorder }],
+            ]}>
             <Text style={[s.navIcon, { color: ST.navText }, active && { color: ST.navActiveText }]}>{item.icon}</Text>
-            <Text style={[s.navLabel, { color: ST.navText }, active && { color: ST.navActiveText, fontWeight: '600' }]}>{item.label}</Text>
+            <Text style={[s.navLabel, { color: ST.navText }, active && { color: ST.navActiveText, fontWeight: '600' }]}>
+              {item.label}
+            </Text>
           </TouchableOpacity>
         );
       })}
@@ -142,12 +150,12 @@ const SidebarContent = ({ activeScreen, onSelect, onLogout, teacher, uploading, 
     {/* User profile + Logout */}
     <View style={[s.userRow, { borderTopColor: ST.borderColor3 }]}>
       <AvatarButton
-  name={teacher.name}
-  profileImage={teacher.profileImage}
-  teacherId={teacher.id}   // 👈 ADD THIS
-  uploading={uploading}
-  onPress={onAvatarPress}
-/>
+        name={teacher.name}
+        profileImage={teacher.profileImage}
+        teacherId={teacher.id}
+        uploading={uploading}
+        onPress={onAvatarPress}
+      />
       <View style={{ flex: 1 }}>
         <Text style={[s.userName, { color: ST.userName }]} numberOfLines={1}>
           {teacher.name || 'Loading...'}
@@ -156,7 +164,10 @@ const SidebarContent = ({ activeScreen, onSelect, onLogout, teacher, uploading, 
           {teacher.role || 'Teacher'}
         </Text>
       </View>
-      <TouchableOpacity onPress={onLogout} activeOpacity={0.75} style={[s.logoutBtn, { backgroundColor: ST.logoutBg, borderColor: ST.logoutBorder }]}>
+      <TouchableOpacity
+        onPress={onLogout}
+        activeOpacity={0.75}
+        style={[s.logoutBtn, { backgroundColor: ST.logoutBg, borderColor: ST.logoutBorder }]}>
         <Text style={s.logoutIcon}>🚪</Text>
       </TouchableOpacity>
     </View>
@@ -173,7 +184,7 @@ const Sidebar = ({ activeScreen = 'dashboard', children }) => {
   const [drawerOpen, setDrawer] = useState(false);
 
   // Teacher state
-  const [teacher, setTeacher]   = useState({ id: '', name: '', role: '', profileImage: '' });
+  const [teacher, setTeacher]     = useState({ id: '', name: '', role: '', profileImage: '', classTeacher: null });
   const [teacherId, setTeacherId] = useState(null);
   const [uploading, setUploading] = useState(false);
 
@@ -191,18 +202,18 @@ const Sidebar = ({ activeScreen = 'dashboard', children }) => {
 
         setTeacherId(id);
 
-        // ✅ Use axiosInstance — no hardcoded IP needed
-        const res = await axiosInstance.get(`/teachers/${id}`);
+        const res  = await axiosInstance.get(`/teachers/${id}`);
         const json = res.data;
 
-if (json.success && json.data) {
-  setTeacher({
-    id: json.data._id || json.data.id || '',
-    name: json.data.name || '',
-    role: 'Teacher',
-    profileImage: json.data.profileImage || '',
-  });
-}
+        if (json.success && json.data) {
+          setTeacher({
+            id:           json.data._id || json.data.id || '',
+            name:         json.data.name || '',
+            role:         'Teacher',
+            profileImage: json.data.profileImage || '',
+            classTeacher: json.data.classTeacher || null,
+          });
+        }
       } catch (err) {
         console.warn('Sidebar: failed to fetch teacher', err);
       }
@@ -224,39 +235,34 @@ if (json.success && json.data) {
       return;
     }
 
-const result = await ImagePicker.launchImageLibraryAsync({
-  mediaTypes: ImagePicker.MediaTypeOptions.Images,
-  allowsEditing: true,
-  aspect: [1, 1],
-  quality: 0.8,
-});
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
 
     if (result.canceled) return;
 
-    const asset = result.assets[0];
+    const asset    = result.assets[0];
+    const formData = new FormData();
 
-const formData = new FormData();
-
-if (Platform.OS === "web") {
-  // ✅ For Web
-  formData.append("profileImage", asset.file);
-} else {
-  // ✅ For Mobile
-  formData.append("profileImage", {
-    uri: asset.uri,
-    name: `profile_${Date.now()}.jpg`,
-    type: "image/jpeg",
-  });
-}
+    if (Platform.OS === 'web') {
+      formData.append('profileImage', asset.file);
+    } else {
+      formData.append('profileImage', {
+        uri:  asset.uri,
+        name: `profile_${Date.now()}.jpg`,
+        type: 'image/jpeg',
+      });
+    }
 
     try {
       setUploading(true);
-
-      // ✅ Use axiosInstance — multipart/form-data is handled automatically
-      const res = await axiosInstance.put(
+      const res  = await axiosInstance.put(
         `/teachers/profile/upload/${teacherId}`,
         formData,
-        { headers: { 'Content-Type': 'multipart/form-data' } }
+        { headers: { 'Content-Type': 'multipart/form-data' } },
       );
       const json = res.data;
 
@@ -281,29 +287,31 @@ if (Platform.OS === "web") {
     navigation.navigate(item.route);
   }, [navigation, activeScreen]);
 
+  // ── Settings navigation ──────────────────────────────────────────────────
+  // Now handled via NAV_ITEMS — kept for backward-compat if called directly
+  const handleSettingsPress = useCallback(() => {
+    setDrawer(false);
+    navigation.navigate('ClassTeacherSettingsScreen');
+  }, [navigation]);
+
   // ── Logout ───────────────────────────────────────────────────────────────
   const handleLogout = useCallback(() => {
     setDrawer(false);
 
     const performLogout = async () => {
       try {
-        // Call logout endpoint to invalidate token on backend
         const token = await AsyncStorage.getItem('authToken');
         if (token) {
           try {
             await axiosInstance.post('/auth/logout', {}, {
-              headers: {
-                Authorization: `Bearer ${token}`
-              }
+              headers: { Authorization: `Bearer ${token}` },
             });
-            console.log("✅ Token revoked on backend");
+            console.log('✅ Token revoked on backend');
           } catch (error) {
-            console.error("⚠️  Error revoking token on backend:", error.message);
-            // Continue with logout even if backend call fails
+            console.error('⚠️  Error revoking token on backend:', error.message);
           }
         }
 
-        // Clear all auth data from storage
         await AsyncStorage.removeItem('authToken');
         await AsyncStorage.removeItem('teacherId');
         await AsyncStorage.removeItem('userId');
@@ -311,14 +319,13 @@ if (Platform.OS === "web") {
         await AsyncStorage.removeItem('userName');
         await AsyncStorage.removeItem('currentScreen');
 
-        console.log("✅ User logged out successfully");
+        console.log('✅ User logged out successfully');
 
-        // Navigate to login
         let nav = navigation;
         while (nav.getParent()) nav = nav.getParent();
         nav.reset({ index: 0, routes: [{ name: 'Login' }] });
       } catch (error) {
-        console.error("❌ Logout error:", error);
+        console.error('❌ Logout error:', error);
         Alert.alert('Error', 'Error during logout. Please try again.');
       }
     };
@@ -333,18 +340,18 @@ if (Platform.OS === "web") {
           { text: 'Cancel',  style: 'cancel'      },
           { text: 'Logout',  style: 'destructive', onPress: performLogout },
         ],
-        { cancelable: true }
+        { cancelable: true },
       );
     }
   }, [navigation]);
 
   const sidebarContentProps = {
     activeScreen,
-    onSelect:      handleSelect,
-    onLogout:      handleLogout,
+    onSelect:        handleSelect,
+    onLogout:        handleLogout,
     teacher,
     uploading,
-    onAvatarPress: handleAvatarPress,
+    onAvatarPress:   handleAvatarPress,
     ST,
   };
 
@@ -473,6 +480,7 @@ const s = StyleSheet.create({
   navLabel:       { fontSize: 12, color: '#64748b', fontWeight: '400' },
   navLabelActive: { color: '#a5b4fc', fontWeight: '600' },
 
+  /* Logout */
   logoutBtn: {
     width: 32, height: 32, borderRadius: 9,
     backgroundColor: 'rgba(239,68,68,0.10)',

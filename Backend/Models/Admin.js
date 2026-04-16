@@ -18,6 +18,30 @@ const adminSchema = new mongoose.Schema({
   password: {
     type: String,
     required: true
+  },
+  instituteName: {
+    type: String,
+    required: true
+  },
+  instituteAddress: {
+    type: String,
+    default: ''
+  },
+  institutePhone: {
+    type: String,
+    default: ''
+  },
+  instituteEmail: {
+    type: String,
+    default: ''
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  },
+  role: {
+    type: String,
+    default: 'institute_admin'
   }
 });
 

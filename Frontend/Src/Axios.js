@@ -2,16 +2,12 @@ import axios from "axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from 'react-native';
 
-// Auto-detect environment and use appropriate URL
+// 🌐 Base URL setup
 const getBaseURL = () => {
   if (Platform.OS === 'web') {
-    // For web, use localhost
     return "http://localhost:5001/api";
   } else {
-    // For mobile (iOS/Android), use your computer's IP
-    // IMPORTANT: Replace '192.168.1.5' with YOUR computer's actual IP address
-    // Run: ifconfig | grep "inet " to find it
-    return "http://10.145.59.173:5001/api"; // 👈 CHANGE THIS TO YOUR IP!
+    return "http://10.145.59.173:5001/api"; // ✅ change if needed
   }
 };
 
@@ -21,54 +17,75 @@ const axiosInstance = axios.create({
   baseURL: API_BASE,
 });
 
-// ─── Interceptor to add JWT token to all requests ───────────────────
+// ─── REQUEST INTERCEPTOR ─────────────────────────────
 axiosInstance.interceptors.request.use(
   async (config) => {
     try {
       const token = await AsyncStorage.getItem("authToken");
+
+      console.log(`📤 ${config.method?.toUpperCase()} ${config.url}`);
+
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
-        console.log("📤 Sending request with JWT token");
-        console.log("   URL:", config.url);
-        console.log("   Method:", config.method);
+        console.log("🔐 Token attached");
       } else {
-        console.log("⚠️  No auth token found in storage");
+        console.log("⚠️ No token found");
       }
+
     } catch (error) {
-      console.error("❌ Error retrieving token from storage:", error);
+      console.error("❌ Token error:", error);
     }
+
     return config;
   },
   (error) => {
-    console.error("🔴 Request interceptor error:", error);
+    console.error("🔴 Request Error:", error);
     return Promise.reject(error);
   }
 );
 
-// ─── Response interceptor to handle token expiration ────────────────
+// ─── RESPONSE INTERCEPTOR ────────────────────────────
 axiosInstance.interceptors.response.use(
   (response) => {
-    console.log("✅ Response received:", response.status, response.config.url);
+    console.log(`✅ ${response.status} ${response.config.url}`);
     return response;
   },
   async (error) => {
+    // 🔥 FULL ERROR DEBUGGING
+    if (error.response) {
+      console.error("🔴 API Error:");
+      console.error("Status:", error.response.status);
+      console.error("URL:", error.config?.url);
+      console.error("Method:", error.config?.method);
+      console.error("Response Data:", error.response.data);
+
+    } else if (error.request) {
+      console.error("🌐 Network Error:");
+      console.error("No response received from server");
+      console.error(error.request);
+
+    } else {
+      console.error("⚠️ Axios Setup Error:", error.message);
+    }
+
+    // 🔐 Handle 401 (Unauthorized)
     if (error.response?.status === 401) {
-      // Token expired or invalid
-      console.log("⏰ Token expired (401), clearing storage and redirecting to login...");
+      console.log("⏰ Session expired → Logging out...");
 
-      // Clear all auth data
-      await AsyncStorage.removeItem("authToken");
-      await AsyncStorage.removeItem("userId");
-      await AsyncStorage.removeItem("userRole");
-      await AsyncStorage.removeItem("userName");
-      await AsyncStorage.removeItem("teacherId");
-      await AsyncStorage.removeItem("parentId");
-      await AsyncStorage.removeItem("currentScreen");
+      await AsyncStorage.multiRemove([
+        "authToken",
+        "userId",
+        "userRole",
+        "userName",
+        "teacherId",
+        "parentId",
+        "currentScreen",
+      ]);
 
-      // Get navigation reference and navigate to login
       try {
         const { getNavigationRef } = require('../App');
         const nav = getNavigationRef();
+
         if (nav) {
           nav.reset({
             index: 0,
@@ -76,18 +93,15 @@ axiosInstance.interceptors.response.use(
           });
         }
       } catch (e) {
-        console.error("Error navigating to login:", e);
+        console.error("❌ Navigation error:", e);
       }
-    } else {
-      console.error("🔴 API Error:", error.response?.status, error.response?.data?.message);
     }
+
     return Promise.reject(error);
   }
 );
 
-// ─── AI Doubt Resolver helpers ───────────────────────────────────────
-// Go through the same axiosInstance so JWT is automatically attached.
-// Backend routes: POST /api/doubts/solve  |  GET /api/doubts/recent
+// ─── AI API ──────────────────────────────────────────
 export const doubtAPI = {
   solve:  (question, userId) => axiosInstance.post('/ai-doubts/solve', { question, userId }),
   recent: (userId, limit = 6) => axiosInstance.get(`/ai-doubts/recent?userId=${userId}&limit=${limit}`),
