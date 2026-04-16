@@ -18,6 +18,16 @@ import axiosInstance from '../../../Src/Axios';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const isTabletOrDesktop = SCREEN_WIDTH >= 768;
 
+const normalizeYearValue = (y) => {
+  if (y === null || y === undefined) return null;
+  const raw = String(y).trim().toUpperCase();
+  if (!raw) return null;
+  const yearMap = { FY: '1', SY: '2', TY: '3', LY: '4' };
+  if (yearMap[raw]) return yearMap[raw];
+  const match = raw.match(/^(\d)/);
+  return match ? match[1] : raw;
+};
+
 // ─── Subject colour palette ───────────────────────────────────────────────────
 const SUBJECT_COLORS = [
   { icon: '⊞', color: '#5B7FFF', bg: '#1E2A6E' },
@@ -124,7 +134,18 @@ export default function StudentsNotes({ C, onThemeToggle, user }) {
   useEffect(() => {
     const fetchSubjects = async () => {
       try {
-        const res  = await axiosInstance.get(`/students/subjects/${user.id}`);
+        const normalizedYear = normalizeYearValue(user?.year ?? user?.academicYear ?? user?.academic_year);
+
+        if (normalizedYear) {
+          const res = await axiosInstance.get(`/configuration/subjects/${normalizedYear}`);
+          const cfg = res.data?.data || {};
+          const theory = Array.isArray(cfg.subjects) ? cfg.subjects.map((name) => ({ name, type: 'Theory' })) : [];
+          const practical = Array.isArray(cfg.labs) ? cfg.labs.map((name) => ({ name, type: 'Lab' })) : [];
+          setSubjects([...theory, ...practical]);
+          return;
+        }
+
+        const res = await axiosInstance.get(`/students/subjects/${user.id}`);
         const data = res.data;
         setSubjects(data.subjects || []);
       } catch (error) {

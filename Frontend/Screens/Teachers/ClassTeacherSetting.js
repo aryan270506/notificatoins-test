@@ -1,23 +1,4 @@
-/**
- * ClassTeacherSettingsScreen.js
- *
- * Landing screen for class-teacher settings.
- * Shows two cards:
- *   1. Timetable Management  → TimetableManagementScreen
- *   2. Batch Management      → BatchManagementScreen
- *
- * Both sub-screens are embedded in this file as named exports so you can either
- * use them inline (via local state) or register them in your navigator.
- *
- * Backend integration:
- *   Timetable  → POST   /class-timetable            (save)
- *              → GET    /class-timetable/:classId    (fetch existing)
- *   Batches    → GET    /students?classId=<id>       (fetch students)
- *              → POST   /batches                     (create batch)
- *              → GET    /batches?classId=<id>        (fetch batches)
- *              → PUT    /batches/:id                 (update batch)
- *              → DELETE /batches/:id                 (delete batch)
- */
+
 
 import React, {
   useState, useEffect, useCallback, useContext, useRef,
@@ -116,7 +97,7 @@ export default function ClassTeacherSettingsScreen() {
     },
     {
       icon:        '👥',
-      title:       'Batch Management',
+      title:       'Student Management',
       description: 'Divide your class into batches (e.g. B1, B2, B3). Assign students from your class list to each batch.',
       accentColor: T.green,
       accentSoft:  T.greenSoft,

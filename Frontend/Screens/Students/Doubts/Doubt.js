@@ -37,6 +37,16 @@ const SUBJECT_ACCENTS = [
 // ─────────────────────────────────────────────────────────────────────────────
 const normalize = (str) => str.trim().toUpperCase().replace(/\s+/g, ' ');
 
+const normalizeYearValue = (y) => {
+  if (y === null || y === undefined) return null;
+  const raw = String(y).trim().toUpperCase();
+  if (!raw) return null;
+  const yearMap = { FY: '1', SY: '2', TY: '3', LY: '4' };
+  if (yearMap[raw]) return yearMap[raw];
+  const match = raw.match(/^(\d)/);
+  return match ? match[1] : raw;
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Subject Chat Room Card
 // ─────────────────────────────────────────────────────────────────────────────
@@ -138,7 +148,25 @@ export default function StudentDoubt({ C, onThemeToggle, user }) {
           studentData = raw?.student || raw?.data || raw;
         }
 
-        if (!studentData.subjects || !Array.isArray(studentData.subjects) || studentData.subjects.length === 0) {
+        const normalizedYear = normalizeYearValue(
+          studentData?.year ?? studentData?.academicYear ?? studentData?.academic_year ?? user?.year
+        );
+
+        let subjectList = [];
+        if (normalizedYear) {
+          try {
+            const cfgRes = await axiosInstance.get(`/configuration/subjects/${normalizedYear}`);
+            const cfgDoc = cfgRes.data?.data || {};
+            subjectList = Array.isArray(cfgDoc.subjects) ? cfgDoc.subjects : [];
+          } catch (e) {
+            // Fallback only when configuration fetch fails
+            subjectList = Array.isArray(studentData?.subjects) ? studentData.subjects : [];
+          }
+        } else {
+          subjectList = Array.isArray(studentData?.subjects) ? studentData.subjects : [];
+        }
+
+        if (subjectList.length === 0) {
           setCourses([]); setLoading(false); return;
         }
 
@@ -166,7 +194,7 @@ export default function StudentDoubt({ C, onThemeToggle, user }) {
           } catch (e) { /* timetable fetch failed */ }
         }
 
-        const formatted = studentData.subjects.map((sub, index) => {
+        const formatted = subjectList.map((sub, index) => {
           const norm  = normalize(sub);
           let entry   = subjectTeacherMap[norm];
           if (!entry) {
@@ -180,7 +208,7 @@ export default function StudentDoubt({ C, onThemeToggle, user }) {
             title:      sub,
             instructor: entry?.name      || 'No Teacher Assigned',
             teacherId:  entry?.teacherId || null,
-            year:       studentData.year,
+            year:       normalizedYear || studentData.year,
             division:   studentData.division,
             batch:      studentData.batch,
           };
