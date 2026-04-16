@@ -334,7 +334,6 @@ export default function MessagingScreen() {
   const [uploading,  setUploading]  = useState(false);
 
   const listRef    = useRef(null);
-  const pollingRef = useRef(null);
   const sendScale  = useRef(new Animated.Value(1)).current;
   const fadeAnim   = useRef(new Animated.Value(0)).current;
   const headSlide  = useRef(new Animated.Value(-8)).current;
@@ -352,8 +351,6 @@ export default function MessagingScreen() {
       Animated.timing(headSlide, { toValue: 0, duration: 300, useNativeDriver: true }),
     ]).start();
     fetchMessages();
-    pollingRef.current = setInterval(fetchMessages, 5000);
-    return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
   }, []);
 
   useEffect(() => {

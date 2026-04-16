@@ -340,14 +340,6 @@ export default function SecurityLogsScreen() {
   }, [fetchLogs]);
 
   useEffect(() => {
-    const intervalId = setInterval(() => {
-      fetchLogs({ silent: true });
-    }, 3000);
-
-    return () => clearInterval(intervalId);
-  }, [fetchLogs]);
-
-  useEffect(() => {
     Animated.timing(headerAnim, { toValue: 1, duration: 600, useNativeDriver: true }).start();
   }, []);
 

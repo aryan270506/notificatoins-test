@@ -266,8 +266,6 @@ export default function AdminMain({ navigation, route }) {
       } catch (e) { console.error('Failed to fetch notifications:', e); }
     };
     fetchNotif();
-    const interval = setInterval(fetchNotif, 15000);
-    return () => clearInterval(interval);
   }, []);
 
   const unreadCount    = notifications.filter(n => new Date(n.timestamp) > new Date(lastSeenAt)).length;

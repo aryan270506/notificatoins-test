@@ -806,11 +806,6 @@ export default function StudentMain({ onNavigate, navigation, route }) {
   // ── Unread Notifications ───────────────────────────────────────────────────
   useEffect(() => {
     fetchUnreadCount();
-    
-    // Refresh unread count every 30 seconds
-    const interval = setInterval(fetchUnreadCount, 30000);
-    
-    return () => clearInterval(interval);
   }, []);
 
   const fetchUnreadCount = async () => {
