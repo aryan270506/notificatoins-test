@@ -962,7 +962,8 @@ export function BatchManagementScreen() {
   /* ── State ── */
   const [teacherMongoId, setTeacherMongoId] = useState(null);
   const [classInfo,      setClassInfo]      = useState(null); // { year, division }
-  const [students,       setStudents]       = useState([]);   // all students in this class
+  const [students,       setStudents]       = useState([]);   // all students in this year
+  const [subDivStudents, setSubDivStudents] = useState([]);   // only students in assigned division
   const [batchesData,    setBatchesData]    = useState([]); // actual batches from teacher.batches
   const [loading,        setLoading]        = useState(true);
   const [loadError,      setLoadError]      = useState(null);
@@ -977,8 +978,12 @@ export function BatchManagementScreen() {
   const [activeBatchId,  setActiveBatchId]  = useState(null);  // _id of active batch
   const [activeBatchName, setActiveBatchName] = useState(null); // name of active batch
   const [selected,       setSelected]       = useState(new Set());
+  const [rollInputs,     setRollInputs]     = useState({});
   const [saving,         setSaving]         = useState(false);
   const [selectorSearch, setSelectorSearch] = useState('');    // search filter inside modal
+  const [assigningStudentId, setAssigningStudentId] = useState(null);
+  const [deletingBatch, setDeletingBatch] = useState(false);
+  const blockRowPressRef = useRef({});
 
   /* ── Tab ── */
   const [activeTab, setActiveTab] = useState('students');
@@ -987,6 +992,26 @@ export function BatchManagementScreen() {
     const raw = String(student?.roll_no ?? '').trim();
     const trailingNumber = raw.match(/(\d+)$/);
     return trailingNumber ? parseInt(trailingNumber[1], 10) : 0;
+  };
+
+  const fetchAllYearStudents = async (teacherId) => {
+    const stuRes = await axiosInstance.get(`/teachers/${teacherId}/students-for-class`, {
+      params: { strictDivision: false },
+    });
+    if (stuRes.data?.success) {
+      const sorted = (stuRes.data.data || []).sort((a, b) => getRollNumber(a) - getRollNumber(b));
+      setStudents(sorted);
+    }
+  };
+
+  const fetchSubDivStudents = async (teacherId) => {
+    const subDivRes = await axiosInstance.get(`/teachers/${teacherId}/students-for-class`, {
+      params: { strictDivision: true },
+    });
+    if (subDivRes.data?.success) {
+      const sorted = (subDivRes.data.data || []).sort((a, b) => getRollNumber(a) - getRollNumber(b));
+      setSubDivStudents(sorted);
+    }
   };
 
   /* ── Load data on mount ── */
@@ -1009,12 +1034,8 @@ export function BatchManagementScreen() {
         setTeacherMongoId(teacher._id);
         setClassInfo({ year: teacher.classTeacher.year, division: teacher.classTeacher.division });
 
-        // Fetch students for this class
-        const stuRes = await axiosInstance.get(`/teachers/${teacher._id}/students-for-class`);
-        if (stuRes.data?.success) {
-          const sorted = (stuRes.data.data || []).sort((a, b) => getRollNumber(a) - getRollNumber(b));
-          setStudents(sorted);
-        }
+        await fetchAllYearStudents(teacher._id);
+        await fetchSubDivStudents(teacher._id);
 
         // ✅ Fetch batches from teacher's batches array
         const batchesRes = await axiosInstance.get(`/teachers/${teacher._id}/batches`);
@@ -1069,6 +1090,13 @@ export function BatchManagementScreen() {
     setActiveBatchId(batchId);
     setActiveBatchName(batchName);
     setSelected(new Set(studentIds));
+    const nextRollInputs = {};
+    (subDivStudents || []).forEach((s) => {
+      if (s?.id) {
+        nextRollInputs[s.id] = s.roll_no ? String(s.roll_no) : '';
+      }
+    });
+    setRollInputs(nextRollInputs);
     setSelectorSearch('');
     setPickerModal(false);
     setSelectorModal(true);
@@ -1094,6 +1122,7 @@ export function BatchManagementScreen() {
       const res = await axiosInstance.put(`/teachers/${teacherMongoId}/batch/${activeBatchId}`, {
         batchName: activeBatchName,
         studentIds,
+        rollNumbers: rollInputs,
       });
 
       if (res.data?.success) {
@@ -1103,12 +1132,8 @@ export function BatchManagementScreen() {
           setBatchesData(batchesRes.data.data);
         }
 
-        // Refresh students list
-        const stuRes = await axiosInstance.get(`/teachers/${teacherMongoId}/students-for-class`);
-        if (stuRes.data?.success) {
-          const sorted = (stuRes.data.data || []).sort((a, b) => getRollNumber(a) - getRollNumber(b));
-          setStudents(sorted);
-        }
+        await fetchAllYearStudents(teacherMongoId);
+        await fetchSubDivStudents(teacherMongoId);
 
         setSelectorModal(false);
         Alert.alert('✅ Saved', `Sub Batch "${activeBatchName}" updated with ${studentIds.length} student(s).`);
@@ -1120,6 +1145,88 @@ export function BatchManagementScreen() {
       Alert.alert('Error', 'Failed to save batch.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const deleteBatchNow = async () => {
+    try {
+      setDeletingBatch(true);
+      const res = await axiosInstance.delete(`/teachers/${teacherMongoId}/batch/${activeBatchId}`);
+
+      if (res.data?.success) {
+        const batchesRes = await axiosInstance.get(`/teachers/${teacherMongoId}/batches`);
+        if (batchesRes.data?.success) {
+          setBatchesData(batchesRes.data.data || []);
+        }
+
+        setSelectorModal(false);
+        setActiveBatchId(null);
+        setActiveBatchName(null);
+        setSelected(new Set());
+        Alert.alert('✅ Deleted', `Sub Batch "${activeBatchName}" deleted successfully.`);
+      } else {
+        Alert.alert('Error', res.data?.message || 'Failed to delete batch.');
+      }
+    } catch (err) {
+      console.warn('Delete batch error:', err);
+      Alert.alert('Error', 'Failed to delete batch.');
+    } finally {
+      setDeletingBatch(false);
+    }
+  };
+
+  const handleDeleteBatch = () => {
+    if (!activeBatchId || !teacherMongoId || deletingBatch) return;
+
+    const confirmMessage = `Are you sure you want to delete "${activeBatchName}"? This action cannot be undone.`;
+
+    if (Platform.OS === 'web') {
+      const ok = typeof globalThis.confirm === 'function'
+        ? globalThis.confirm(confirmMessage)
+        : false;
+
+      if (ok) {
+        deleteBatchNow();
+      }
+      return;
+    }
+
+    Alert.alert(
+      'Delete Sub Batch',
+      confirmMessage,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: deleteBatchNow,
+        },
+      ]
+    );
+  };
+
+  const handleAssignStudentToDivision = async (student) => {
+    if (!student?.id || !classInfo?.division || assigningStudentId) return;
+
+    try {
+      setAssigningStudentId(student.id);
+      const res = await axiosInstance.put(`/students/assign-division/${student.id}`, {
+        division: classInfo.division,
+      });
+
+      if (res.data?.success) {
+        setStudents((prev) => prev.map((s) => (
+          s.id === student.id ? { ...s, division: classInfo.division } : s
+        )));
+        await fetchSubDivStudents(teacherMongoId);
+      } else {
+        Alert.alert('Error', res.data?.message || 'Failed to assign student to division.');
+      }
+    } catch (err) {
+      console.warn('Assign division error:', err);
+      Alert.alert('Error', 'Failed to assign student to division.');
+    } finally {
+      setAssigningStudentId(null);
     }
   };
 
@@ -1158,9 +1265,17 @@ export function BatchManagementScreen() {
   }
 
   /* ── Reusable student row ── */
-  const StudentSelectRow = ({ item }) => {
+  const renderStudentSelectRow = (item) => {
     const sid = item.id;
     const isSelected = selected.has(sid);
+
+    const handleRowPress = () => {
+      if (blockRowPressRef.current[sid]) {
+        blockRowPressRef.current[sid] = false;
+        return;
+      }
+      toggleStudent(sid);
+    };
     // Check if this student is currently in any other batch
     let currentBatchName = null;
     let currentBatchColor = null;
@@ -1181,7 +1296,8 @@ export function BatchManagementScreen() {
 
     return (
       <TouchableOpacity
-        onPress={() => toggleStudent(sid)}
+        key={item.id || item._id}
+        onPress={handleRowPress}
         activeOpacity={0.78}
         style={[
           bs.studentRow,
@@ -1201,19 +1317,52 @@ export function BatchManagementScreen() {
         <View style={{ flex: 1 }}>
           <Text style={[bs.stuName, { color: T.textPrimary }]}>{item.name}</Text>
           <Text style={[bs.stuMeta, { color: T.textMuted }]}>
-            {item.roll_no ? `Roll: ${item.roll_no}` : ''}{item.prn ? `  PRN: ${item.prn}` : ''}
+            {item.prn ? `PRN: ${item.prn}` : ''}
           </Text>
         </View>
-        {currentBatchName && (
-          <View style={[bs.batchPillSmall, {
-            backgroundColor: (currentBatchColor || T.accent) + '22',
-            borderColor: (currentBatchColor || T.accent) + '66',
-          }]}>
-            <Text style={[bs.batchPillSmallText, { color: currentBatchColor || T.accent }]}>
-              {currentBatchName}
-            </Text>
-          </View>
-        )}
+        <View
+          style={{ alignItems: 'flex-end', gap: 6 }}
+          onStartShouldSetResponder={() => true}
+          onResponderTerminationRequest={() => false}>
+          <TextInput
+            value={rollInputs[sid] ?? ''}
+            onChangeText={(val) => {
+              const digitsOnly = val.replace(/[^0-9]/g, '');
+              setRollInputs((prev) => ({ ...prev, [sid]: digitsOnly }));
+            }}
+            onFocus={() => { blockRowPressRef.current[sid] = true; }}
+            onBlur={() => { blockRowPressRef.current[sid] = false; }}
+            onPressIn={(e) => {
+              blockRowPressRef.current[sid] = true;
+              e?.stopPropagation?.();
+            }}
+            onTouchStart={(e) => {
+              blockRowPressRef.current[sid] = true;
+              e?.stopPropagation?.();
+            }}
+            onClick={(e) => {
+              blockRowPressRef.current[sid] = true;
+              e?.stopPropagation?.();
+            }}
+            keyboardType="number-pad"
+            placeholder="Roll"
+            placeholderTextColor={T.textMuted}
+            style={[
+              bs.rollInput,
+              { backgroundColor: T.inputBg, borderColor: T.inputBorder, color: T.inputText },
+            ]}
+          />
+          {currentBatchName && (
+            <View style={[bs.batchPillSmall, {
+              backgroundColor: (currentBatchColor || T.accent) + '22',
+              borderColor: (currentBatchColor || T.accent) + '66',
+            }]}>
+              <Text style={[bs.batchPillSmallText, { color: currentBatchColor || T.accent }]}>
+                {currentBatchName}
+              </Text>
+            </View>
+          )}
+        </View>
       </TouchableOpacity>
     );
   };
@@ -1342,8 +1491,15 @@ export function BatchManagementScreen() {
               }
             }
 
+            const isAssignedToDivision = String(item.division || '').trim().toUpperCase() === String(classInfo?.division || '').trim().toUpperCase();
+            const isAssigningThis = assigningStudentId === item.id;
+
             return (
-              <View style={[bs.stuListRow, { backgroundColor: T.surface, borderColor: T.border }]}>
+              <TouchableOpacity
+                onPress={() => handleAssignStudentToDivision(item)}
+                activeOpacity={0.8}
+                disabled={isAssigningThis || isAssignedToDivision}
+                style={[bs.stuListRow, { backgroundColor: T.surface, borderColor: T.border }]}>
                 <View style={[bs.rollBadge, { backgroundColor: T.accentSoft }]}>
                   <Text style={[bs.rollBadgeText, { color: T.accentBright }]}>
                     {item.roll_no || String(index + 1).padStart(2, '0')}
@@ -1358,16 +1514,22 @@ export function BatchManagementScreen() {
                   <Text style={[bs.stuName, { color: T.textPrimary }]}>{item.name}</Text>
                   <Text style={[bs.stuMeta, { color: T.textMuted }]}>{item.prn || ''}</Text>
                 </View>
-                {studentBatch ? (
+                {isAssigningThis ? (
+                  <ActivityIndicator size="small" color={T.accent} />
+                ) : studentBatch ? (
                   <View style={[bs.batchPillSmall, { backgroundColor: batchColor + '22', borderColor: batchColor + '55' }]}>
                     <Text style={[bs.batchPillSmallText, { color: batchColor }]}>{studentBatch}</Text>
                   </View>
+                ) : isAssignedToDivision ? (
+                  <View style={[bs.batchPillSmall, { backgroundColor: T.greenSoft, borderColor: T.green }]}>
+                    <Text style={[bs.batchPillSmallText, { color: T.green }]}>Div {classInfo?.division}</Text>
+                  </View>
                 ) : (
                   <View style={[bs.unassignedPill, { backgroundColor: T.surface, borderColor: T.border }]}>
-                    <Text style={[bs.unassignedPillText, { color: T.textMuted }]}>Unassigned</Text>
+                    <Text style={[bs.unassignedPillText, { color: T.textMuted }]}>Tap to assign Div {classInfo?.division}</Text>
                   </View>
                 )}
-              </View>
+              </TouchableOpacity>
             );
           }}
         />
@@ -1381,7 +1543,7 @@ export function BatchManagementScreen() {
               const colors = ['#6366f1', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#F97316', '#EC4899'];
               const color = colors[idx % colors.length];
               const members = batch.students
-                ? students.filter(s => batch.students.map(sb => sb.studentId).includes(s.id))
+                ? subDivStudents.filter(s => batch.students.map(sb => sb.studentId).includes(s.id))
                 : [];
 
               return (
@@ -1566,6 +1728,26 @@ export function BatchManagementScreen() {
                 <Text style={[bs.fullModalSub, { color: T.textSec }]}>
                   {selected.size} selected · tap to toggle
                 </Text>
+                <TouchableOpacity
+                  onPress={handleDeleteBatch}
+                  disabled={deletingBatch || saving}
+                  activeOpacity={0.75}
+                  style={{
+                    marginTop: 10,
+                    alignSelf: 'flex-start',
+                    paddingHorizontal: 12,
+                    paddingVertical: 7,
+                    borderRadius: 8,
+                    borderWidth: 1,
+                    borderColor: T.red,
+                    backgroundColor: T.redSoft,
+                  }}>
+                  {deletingBatch ? (
+                    <ActivityIndicator size="small" color={T.red} />
+                  ) : (
+                    <Text style={{ color: T.red, fontSize: 12, fontWeight: '700' }}>Delete Batch</Text>
+                  )}
+                </TouchableOpacity>
               </View>
               <TouchableOpacity onPress={() => setSelectorModal(false)} activeOpacity={0.75}>
                 <Text style={[bs.modalCloseX, { color: T.textMuted }]}>✕</Text>
@@ -1592,14 +1774,14 @@ export function BatchManagementScreen() {
             </View>
 
             {/* Select-all / deselect-all row */}
-            {students.length > 0 && (
+            {subDivStudents.length > 0 && (
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8 }}>
                 <Text style={{ fontSize: 12, color: T.textMuted }}>
-                  {selected.size} of {students.length} selected
+                  {selected.size} of {subDivStudents.length} selected
                 </Text>
                 <TouchableOpacity
                   onPress={() => {
-                    const filtered = students.filter(s =>
+                    const filtered = subDivStudents.filter(s =>
                       !selectorSearch ||
                       s.name.toLowerCase().includes(selectorSearch.toLowerCase()) ||
                       (s.roll_no || '').toLowerCase().includes(selectorSearch.toLowerCase())
@@ -1621,7 +1803,7 @@ export function BatchManagementScreen() {
                   }}
                   activeOpacity={0.7}>
                   <Text style={{ fontSize: 12, fontWeight: '700', color: T.accent }}>
-                    {students
+                    {subDivStudents
                       .filter(s =>
                         !selectorSearch ||
                         s.name.toLowerCase().includes(selectorSearch.toLowerCase()) ||
@@ -1642,12 +1824,12 @@ export function BatchManagementScreen() {
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}>
               {(() => {
-                const filtered = students.filter(s =>
+                const filtered = subDivStudents.filter(s =>
                   !selectorSearch ||
                   s.name.toLowerCase().includes(selectorSearch.toLowerCase()) ||
                   (s.roll_no || '').toLowerCase().includes(selectorSearch.toLowerCase())
                 );
-                if (students.length === 0) {
+                if (subDivStudents.length === 0) {
                   return (
                     <View style={{ alignItems: 'center', paddingVertical: 32 }}>
                       <Text style={{ fontSize: 32, marginBottom: 8 }}>🎓</Text>
@@ -1669,9 +1851,7 @@ export function BatchManagementScreen() {
                     </View>
                   );
                 }
-                return filtered.map(item => (
-                  <StudentSelectRow key={item.id || item._id} item={item} />
-                ));
+                return filtered.map(item => renderStudentSelectRow(item));
               })()}
             </ScrollView>
 
@@ -1920,6 +2100,16 @@ const bs = StyleSheet.create({
   stuAvatarText: { fontSize: 15, fontWeight: '800' },
   stuName:       { fontSize: 14, fontWeight: '600' },
   stuMeta:       { fontSize: 11, marginTop: 1 },
+  rollInput: {
+    width: 72,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
   selectedBadge: {
     width: 24, height: 24, borderRadius: 12,
     alignItems: 'center', justifyContent: 'center',

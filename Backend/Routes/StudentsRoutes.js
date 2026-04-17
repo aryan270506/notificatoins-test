@@ -204,6 +204,55 @@ router.put("/update-photo/:id", async (req, res) => {
   }
 });
 
+// 🔥 Assign division to a single student (class teacher action)
+router.put("/assign-division/:id", async (req, res) => {
+  try {
+    const incomingId = req.params.id;
+    const { division } = req.body;
+
+    if (typeof division !== "string" || !division.trim()) {
+      return res.status(400).json({ success: false, message: "division is required" });
+    }
+
+    let student = await Student.findOne({ id: incomingId });
+
+    if (!student) {
+      const mongoose = require("mongoose");
+      if (mongoose.Types.ObjectId.isValid(incomingId)) {
+        student = await Student.findById(incomingId);
+      }
+    }
+
+    if (!student) {
+      student = await Student.findOne({ prn: incomingId });
+    }
+
+    if (!student) {
+      return res.status(404).json({ success: false, message: "Student not found" });
+    }
+
+    student.division = division.trim();
+    await student.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `Division updated to ${student.division}`,
+      data: {
+        _id: student._id,
+        id: student.id,
+        prn: student.prn,
+        division: student.division,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update student division",
+      error: error.message,
+    });
+  }
+});
+
 // 🔥 Get student by ID (for refresh)
 // 🔥 Get student by ID (keep this BELOW other routes)
 router.get("/:id", async (req, res) => {
