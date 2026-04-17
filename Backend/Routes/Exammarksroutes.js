@@ -14,11 +14,12 @@ const { sendNotificationToUsers } = require('../utils/pushNotificationService');
 router.post("/save", async (req, res) => {
   try {
     const {
-      teacherId, examType, classType, division, year,
+      teacherId, examName, classType, division, year,
       subjectCode, subjectName, maxMarks, marks, batch,
+      maxMarksTheory, maxMarksLab,
     } = req.body;
 
-    if (!teacherId || !examType || !classType || !division || !year || !subjectCode) {
+    if (!teacherId || !examName || !classType || !division || !year || !subjectCode) {
       return res.status(400).json({ success: false, message: "Missing required fields." });
     }
     if (!Array.isArray(marks) || marks.length === 0) {
@@ -38,8 +39,8 @@ router.post("/save", async (req, res) => {
     }
 
     // Include batch in filter so Lab B1/B2 stay separate
-    const filter = { teacherId, examType, classType, division, year, subjectCode, batch: batch || null };
-    const update = { $set: { subjectName, maxMarks, marks, batch: batch || null } };
+    const filter = { teacherId, examName, classType, division, year, subjectCode, batch: batch || null };
+    const update = { $set: { subjectName, maxMarks, marks, batch: batch || null, maxMarksTheory: maxMarksTheory || 0, maxMarksLab: maxMarksLab || 0 } };
 
     const doc = await ExamMarks.findOneAndUpdate(filter, update, {
       upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true,
@@ -62,11 +63,11 @@ router.post("/save", async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
-    const { teacherId, examType, classType, division, year, subjectCode } = req.query;
+    const { teacherId, examName, classType, division, year, subjectCode } = req.query;
 
     const query = {};
     if (teacherId)   query.teacherId   = teacherId;
-    if (examType)    query.examType    = examType;
+    if (examName)    query.examName    = examName;
     if (classType)   query.classType   = classType;
     if (division)    query.division    = division;
     if (year)        query.year        = year;
@@ -80,7 +81,36 @@ router.get("/", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 3. GET subjects for a teacher
+// 3. GET all exams for a teacher (exam list)
+//    GET /api/exam-marks/my-exams
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/my-exams", async (req, res) => {
+  try {
+    const { teacherId } = req.query;
+    if (!teacherId) return res.status(400).json({ success: false, message: "teacherId required." });
+
+    // Get distinct exam names for this teacher
+    const exams = await ExamMarks.aggregate([
+      { $match: { teacherId } },
+      { $group: {
+          _id: "$examName",
+          examName: { $first: "$examName" },
+          totalSheets: { $sum: 1 },
+          classTypes: { $push: "$classType" },
+          createdAt: { $max: "$createdAt" },
+        }
+      },
+      { $sort: { createdAt: -1 } },
+    ]);
+
+    res.status(200).json({ success: true, data: exams });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4. GET subjects for a teacher
 //    GET /api/exam-marks/subjects
 // ─────────────────────────────────────────────────────────────────────────────
 router.get("/subjects", async (req, res) => {
@@ -106,7 +136,7 @@ router.get("/subjects", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 4. GET students for exam entry
+// 5. GET students for exam entry
 //    GET /api/exam-marks/students
 // ─────────────────────────────────────────────────────────────────────────────
 router.get("/students", async (req, res) => {
@@ -135,7 +165,7 @@ router.get("/students", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 5. SUMMARY stats for a teacher
+// 6. SUMMARY stats for a teacher
 //    GET /api/exam-marks/summary/:teacherId
 // ─────────────────────────────────────────────────────────────────────────────
 router.get("/summary/:teacherId", async (req, res) => {
@@ -148,7 +178,7 @@ router.get("/summary/:teacherId", async (req, res) => {
     let totalAbsent   = 0;
 
     for (const doc of all) {
-      byExam[doc.examType] = (byExam[doc.examType] ?? 0) + 1;
+      byExam[doc.examName] = (byExam[doc.examName] ?? 0) + 1;
       totalStudents += doc.marks.length;
       totalAbsent   += doc.marks.filter(m => m.isAbsent).length;
     }
@@ -163,13 +193,10 @@ router.get("/summary/:teacherId", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 6. GET all exam results for a specific student
+// 7. GET all exam results for a specific student
 //    GET /api/exam-marks/student-results?studentId=&year=&division=
 //
-//    Returns per-subject row with:
-//      cat1, cat1Max, cat2, cat2Max, fet, fetMax
-//      internal, internalMax  (sum of all obtained / sum of all maxMarks)
-//      status: PASS | FAIL | ABSENT | -
+//    Returns per-subject row with all exam results
 // ─────────────────────────────────────────────────────────────────────────────
 router.get("/student-results", async (req, res) => {
   try {
@@ -210,10 +237,7 @@ router.get("/student-results", async (req, res) => {
           subjectName: sheet.subjectName,
           classType:   sheet.classType,
           batch,
-          // marks obtained
-          cat1: 0, cat2: 0, fet: 0,
-          // max marks for each exam type (from what teacher configured)
-          cat1Max: 0, cat2Max: 0, fetMax: 0,
+          exams: {}, // will store exam results
           isAbsent: false,
         };
       }
@@ -221,25 +245,19 @@ router.get("/student-results", async (req, res) => {
       const markVal = studentEntry.isAbsent ? 0 : (Number(studentEntry.mark) || 0);
       const maxVal  = Number(sheet.maxMarks) || 0;
 
-      if (sheet.examType === "CAT 1") {
-        subjectMap[key].cat1    = markVal;
-        subjectMap[key].cat1Max = maxVal;
-      }
-      if (sheet.examType === "CAT 2") {
-        subjectMap[key].cat2    = markVal;
-        subjectMap[key].cat2Max = maxVal;
-      }
-      if (sheet.examType === "FET") {
-        subjectMap[key].fet    = markVal;
-        subjectMap[key].fetMax = maxVal;
-      }
+      // Store exam results dynamically
+      subjectMap[key].exams[sheet.examName] = {
+        obtained: markVal,
+        max: maxVal,
+      };
+
       if (studentEntry.isAbsent) subjectMap[key].isAbsent = true;
     }
 
     const results = Object.values(subjectMap).map(entry => {
-      // internalMax = sum of all configured max marks for this subject
-      const internalMax = entry.cat1Max + entry.cat2Max + entry.fetMax;
-      const internal    = entry.cat1 + entry.cat2 + entry.fet;
+      // Calculate total marks
+      const internalMax = Object.values(entry.exams).reduce((sum, e) => sum + (e.max || 0), 0);
+      const internal = Object.values(entry.exams).reduce((sum, e) => sum + (e.obtained || 0), 0);
 
       // Fallback: if no sheets saved yet, use classType default
       const effectiveMax = internalMax > 0
@@ -253,12 +271,7 @@ router.get("/student-results", async (req, res) => {
         subjectName: entry.subjectName,
         classType:   entry.classType,
         batch:       entry.batch,
-        cat1:        entry.cat1,
-        cat1Max:     entry.cat1Max,
-        cat2:        entry.cat2,
-        cat2Max:     entry.cat2Max,
-        fet:         entry.fet,
-        fetMax:      entry.fetMax,
+        exams:       entry.exams, // all exam results
         internal,
         internalMax: effectiveMax,
         total:       internal,

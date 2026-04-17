@@ -148,7 +148,7 @@ const initSocket = (server) => {
       // Queue axios call instead of running directly
       try {
         await queueAxiosRequest(
-          () => axios.post("http://127.0.0.1:5001/api/users/register-session", {
+          () => axios.post("http://127.0.0.1:5000/api/users/register-session", {
             userId:       userData._id,
             socketId:     socket.id,
             name:         userData.name,
@@ -217,7 +217,7 @@ const initSocket = (server) => {
       // Queue the removal request
       try {
         await queueAxiosRequest(
-          () => axios.post("http://127.0.0.1:5001/api/users/remove-session", {
+          () => axios.post("http://127.0.0.1:5000/api/users/remove-session", {
             socketId: socket.id,
           }, { timeout: 5000 }),
           { _id: 'system' }

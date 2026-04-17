@@ -103,6 +103,21 @@ export default function TeacherExamScreen() {
   const [teacherName, setTeacherName] = useState('');
   const [maxMark, setMaxMark] = useState(0);
 
+  /* ── Screen navigation ── */
+  const [currentScreen, setCurrentScreen] = useState('examList'); // examList, createExam, marksEntry
+
+  /* ── Exams list ── */
+  const [exams, setExams] = useState([]);
+  const [loadingExams, setLoadingExams] = useState(false);
+
+  /* ── Create exam form ── */
+  const [newExamName, setNewExamName] = useState('');
+  const [newExamTheory, setNewExamTheory] = useState('');
+  const [newExamLab, setNewExamLab] = useState('');
+
+  /* ── Selected exam ── */
+  const [selectedExam, setSelectedExam] = useState(null);
+
   /* ── Timetable (single source of truth) ── */
   const [timetableSlots,   setTimetableSlots]   = useState([]);
   const [loadingTimetable, setLoadingTimetable] = useState(false);
@@ -118,7 +133,6 @@ export default function TeacherExamScreen() {
   /* ── Selections ── */
   const [selYear,     setSelYear]     = useState(null);
   const [selDivision, setSelDivision] = useState(null);
-  const [selExamType, setSelExamType] = useState(null);
   const [selSubject,  setSelSubject]  = useState(null); // { code, name, classType, batch }
   // selBatch is derived from selSubject.batch automatically (no user picker)
 
@@ -143,12 +157,52 @@ export default function TeacherExamScreen() {
   const selBatch     = selSubject?.batch     ?? null;
 
 useEffect(() => {
-  if (selExamType && selClassType) {
-    setMaxMark(MAX_MARKS[selExamType][selClassType]);
+  if (selectedExam && selClassType) {
+    const maxMarks = selClassType === 'Lab' ? selectedExam.maxMarksLab : selectedExam.maxMarksTheory;
+    setMaxMark(Number(maxMarks) || 0);
   }
-}, [selExamType, selClassType]);
+}, [selectedExam, selClassType]);
 
-  const allSelected = selYear && selDivision && selExamType && selSubject;
+  const allSelected = selYear && selDivision && selectedExam && selSubject;
+
+  /* ─────────────────────────────────────────────────────────────────────
+     Load timetable
+     ─────────────────────────────────────────────────────────────────── */
+  const loadTimetable = useCallback(async (tid) => {
+    setLoadingTimetable(true);
+    setError(null);
+    try {
+      const res   = await axiosInstance.get(`/timetable/teacher/${tid}`);
+      const slots = res.data?.data ?? [];
+      setTimetableSlots(slots);
+
+      const yearSet = [...new Set(slots.map(s => String(s.year)))].sort();
+      setYears(yearSet);
+
+      console.log('[ExamScreen] timetable —', slots.length, 'slots');
+    } catch (err) {
+      setError(`Failed to load timetable: ${err.message}`);
+    } finally {
+      setLoadingTimetable(false);
+    }
+  }, []);
+
+  /* ─────────────────────────────────────────────────────────────────────
+     Fetch all exams for teacher
+     ─────────────────────────────────────────────────────────────────── */
+  const fetchExams = useCallback(async (tid) => {
+    setLoadingExams(true);
+    setError(null);
+    try {
+      const res = await axiosInstance.get('/exam-marks/my-exams', { params: { teacherId: tid } });
+      setExams(res.data?.data ?? []);
+      console.log('[ExamScreen] exams —', res.data?.data?.length, 'found');
+    } catch (err) {
+      setError(`Failed to load exams: ${err.message}`);
+    } finally {
+      setLoadingExams(false);
+    }
+  }, []);
 
   /* ─────────────────────────────────────────────────────────────────────
      BOOT
@@ -179,33 +233,44 @@ useEffect(() => {
         } catch (_) {}
 
         await loadTimetable(tid);
+        await fetchExams(tid);
       } catch (err) {
         setError(err.message);
       }
     })();
-  }, []);
+  }, [loadTimetable, fetchExams]);
 
   /* ─────────────────────────────────────────────────────────────────────
-     Load timetable
+     Create new exam
      ─────────────────────────────────────────────────────────────────── */
-  const loadTimetable = useCallback(async (tid) => {
-    setLoadingTimetable(true);
-    setError(null);
-    try {
-      const res   = await axiosInstance.get(`/timetable/teacher/${tid}`);
-      const slots = res.data?.data ?? [];
-      setTimetableSlots(slots);
-
-      const yearSet = [...new Set(slots.map(s => String(s.year)))].sort();
-      setYears(yearSet);
-
-      console.log('[ExamScreen] timetable —', slots.length, 'slots');
-    } catch (err) {
-      setError(`Failed to load timetable: ${err.message}`);
-    } finally {
-      setLoadingTimetable(false);
+  const handleCreateExam = async () => {
+    if (!newExamName.trim()) {
+      alert('Please enter exam name');
+      return;
     }
-  }, []);
+    if (!newExamTheory.trim() || !newExamLab.trim()) {
+      alert('Please enter max marks for Theory and Lab');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      // Reset form
+      setNewExamName('');
+      setNewExamTheory('');
+      setNewExamLab('');
+
+      // Refresh exams list
+      await fetchExams(teacherId);
+
+      // Navigate to marks entry with newly created exam
+      setCurrentScreen('marksEntry');
+    } catch (err) {
+      setError(`Failed to create exam: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   /* ─────────────────────────────────────────────────────────────────────
      Year → Divisions
@@ -276,7 +341,7 @@ useEffect(() => {
   useEffect(() => {
     if (!allSelected) { setStudents([]); setMarks({}); setSaved(false); return; }
     loadStudentsAndMarks();
-  }, [selYear, selDivision, selExamType, selSubject, allSelected]);
+  }, [selYear, selDivision, selectedExam, selSubject, allSelected]);
 
   const loadStudentsAndMarks = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -318,7 +383,7 @@ useEffect(() => {
           const marksRes = await axiosInstance.get('/exam-marks', {
             params: {
               teacherId,
-              examType:    selExamType,
+              examName:    selectedExam?.examName,
               classType:   selClassType,
               division:    divUpper,
               year:        selYear,
@@ -347,7 +412,7 @@ useEffect(() => {
       setLoadingStudents(false);
       setRefreshing(false);
     }
-  }, [selYear, selDivision, selExamType, selSubject, selClassType, selBatch, teacherId]);
+  }, [selYear, selDivision, selectedExam, selSubject, selClassType, selBatch, teacherId]);
 
   /* ─────────────────────────────────────────────────────────────────────
      Mark helpers
@@ -400,7 +465,9 @@ useEffect(() => {
 
     await axiosInstance.post('/exam-marks/save', {
       teacherId,
-      examType: selExamType,
+      examName: selectedExam?.examName,
+      maxMarksTheory: selectedExam?.maxMarksTheory,
+      maxMarksLab: selectedExam?.maxMarksLab,
       classType: selClassType,
       division: saveDivision,
       year: selYear,
@@ -429,12 +496,12 @@ useEffect(() => {
 
     if (Platform.OS === 'web') {
       window.alert(
-        `Saved ✓\nYear ${selYear} – Div ${displayDiv}${selBatch ? ` (${selBatch})` : ''}\n${selExamType} · ${selClassType} saved.`
+        `Saved ✓\nYear ${selYear} – Div ${displayDiv}${selBatch ? ` (${selBatch})` : ''}\n${selectedExam?.examName} · ${selClassType} saved.`
       );
     } else {
       Alert.alert(
         'Saved ✓',
-        `Year ${selYear} – Div ${displayDiv}${selBatch ? ` (${selBatch})` : ''}\n${selExamType} · ${selClassType} saved.`
+        `Year ${selYear} – Div ${displayDiv}${selBatch ? ` (${selBatch})` : ''}\n${selectedExam?.examName} · ${selClassType} saved.`
       );
     }
 
@@ -470,6 +537,156 @@ useEffect(() => {
   const resetFromDivision = () => { setSelSubject(null); setStudents([]); setMarks({}); setSaved(false); };
 
   /* ═══════════════════════════════════════════════════════════════════════
+     RENDER — Exam List Screen
+     ═══════════════════════════════════════════════════════════════════ */
+  const renderExamListScreen = () => (
+    <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
+      <View style={[s.headerRow]}>
+        <View style={{ flex: 1 }}>
+          <Text style={[s.pageTitle, { color: T.textPrimary }]}>Exams</Text>
+          <Text style={[s.pageSub, { color: T.textSec }]}>
+            {teacherName ? `${teacherName}  ·  Manage exams and marks` : 'Select an exam to enter marks'}
+          </Text>
+        </View>
+        <TouchableOpacity
+          style={[s.iconBtn, { backgroundColor: T.toggleBg, borderColor: T.toggleBorder }]}
+          onPress={toggleTheme}
+        >
+          <Ionicons name={isDark ? 'sunny' : 'moon'} size={17} color={T.toggleIconColor} />
+        </TouchableOpacity>
+      </View>
+
+      {loadingExams ? (
+        <View style={[s.loadingBox, { backgroundColor: T.card, borderColor: T.border }]}>
+          <ActivityIndicator color={T.accentBright} size="large" />
+          <Text style={[s.loadingText, { color: T.textSec }]}>Loading exams...</Text>
+        </View>
+      ) : exams.length === 0 ? (
+        <View style={[s.emptyState, { backgroundColor: T.card, borderColor: T.border }]}>
+          <View style={[s.emptyIconWrap, { backgroundColor: T.accentSoft }]}>
+            <Ionicons name="document-outline" size={38} color={T.accentBright} />
+          </View>
+          <Text style={[s.emptyTitle, { color: T.textPrimary }]}>No Exams Yet</Text>
+          <Text style={[s.emptySub, { color: T.textSec }]}>Create your first exam to get started</Text>
+        </View>
+      ) : (
+        <View style={{ gap: 12 }}>
+          {exams.map((exam, i) => (
+            <TouchableOpacity
+              key={i}
+              onPress={() => {
+                setSelectedExam(exam);
+                setCurrentScreen('marksEntry');
+                setSelYear(null);
+                setSelDivision(null);
+                setSelSubject(null);
+              }}
+              activeOpacity={0.7}
+            >
+              <View style={[s.examCard, { backgroundColor: T.card, borderColor: T.border }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.examName, { color: T.textPrimary }]}>{exam.examName}</Text>
+                    <Text style={[s.examMeta, { color: T.textSec }]}>
+                      {exam.totalSheets} section(s) • {exam.classTypes?.join(', ') || 'Theory & Lab'}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={24} color={T.textSec} />
+                </View>
+              </View>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
+      <TouchableOpacity
+        style={[s.createBtn, { backgroundColor: T.accent }]}
+        onPress={() => setCurrentScreen('createExam')}
+      >
+        <Ionicons name="add-circle" size={20} color="#fff" />
+        <Text style={s.createBtnText}>Create New Exam</Text>
+      </TouchableOpacity>
+    </ScrollView>
+  );
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     RENDER — Create Exam Screen
+     ═══════════════════════════════════════════════════════════════════ */
+  const renderCreateExamScreen = () => (
+    <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <TouchableOpacity onPress={() => setCurrentScreen('examList')} style={{ marginBottom: 16 }}>
+        <Text style={[s.backLink, { color: T.accentBright }]}>← Back to Exams</Text>
+      </TouchableOpacity>
+
+      <View style={[s.card, { backgroundColor: T.card, borderColor: T.border }]}>
+        <Text style={[s.cardLabel, { color: T.textPrimary, marginBottom: 20 }]}>Create New Exam</Text>
+
+        <View style={s.inputGroup}>
+          <Text style={[s.label, { color: T.textSec }]}>Exam Name *</Text>
+          <TextInput
+            style={[s.input, { backgroundColor: T.surfaceEl, borderColor: T.border, color: T.textPrimary }]}
+            placeholder="e.g., CAT 1, Midterm, Final"
+            placeholderTextColor={T.textMuted}
+            value={newExamName}
+            onChangeText={setNewExamName}
+          />
+        </View>
+
+        <View style={{ flexDirection: 'row', gap: 12 }}>
+          <View style={[s.inputGroup, { flex: 1 }]}>
+            <Text style={[s.label, { color: T.textSec }]}>Max Marks Theory *</Text>
+            <TextInput
+              style={[s.input, { backgroundColor: T.surfaceEl, borderColor: T.border, color: T.textPrimary }]}
+              placeholder="e.g., 20, 30"
+              placeholderTextColor={T.textMuted}
+              value={newExamTheory}
+              onChangeText={setNewExamTheory}
+              keyboardType="numeric"
+            />
+          </View>
+          <View style={[s.inputGroup, { flex: 1 }]}>
+            <Text style={[s.label, { color: T.textSec }]}>Max Marks Lab *</Text>
+            <TextInput
+              style={[s.input, { backgroundColor: T.surfaceEl, borderColor: T.border, color: T.textPrimary }]}
+              placeholder="e.g., 25, 50"
+              placeholderTextColor={T.textMuted}
+              value={newExamLab}
+              onChangeText={setNewExamLab}
+              keyboardType="numeric"
+            />
+          </View>
+        </View>
+
+        <View style={{ flexDirection: 'row', gap: 12, marginTop: 24 }}>
+          <TouchableOpacity
+            style={[s.cancelBtn, { borderColor: T.border, flex: 1 }]}
+            onPress={() => {
+              setNewExamName('');
+              setNewExamTheory('');
+              setNewExamLab('');
+              setCurrentScreen('examList');
+            }}
+            disabled={saving}
+          >
+            <Text style={[s.cancelBtnText, { color: T.textSec }]}>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[s.submitBtn, { backgroundColor: T.accent, flex: 1 }, saving && { opacity: 0.6 }]}
+            onPress={handleCreateExam}
+            disabled={saving}
+          >
+            {saving ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Text style={s.submitBtnText}>Create Exam</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
+    </ScrollView>
+  );
+
+  /* ═══════════════════════════════════════════════════════════════════════
      RENDER — Filter Panel
      ═══════════════════════════════════════════════════════════════════ */
   const renderFilters = () => (
@@ -480,34 +697,15 @@ useEffect(() => {
           <Ionicons name="options-outline" size={14} color={T.accentBright} />
         </View>
         <Text style={[s.cardLabel, { color: T.textPrimary }]}>Exam Entry Filters</Text>
-        {(selYear || selDivision || selExamType || selSubject) && (
+        {(selYear || selDivision || selectedExam || selSubject) && (
           <TouchableOpacity
             style={[s.clearAllBtn, { backgroundColor: T.redSoft, borderColor: T.red + '44' }]}
-            onPress={() => { setSelYear(null); setSelDivision(null); setSelExamType(null); setSelSubject(null); setStudents([]); setMarks({}); setSaved(false); }}
+            onPress={() => { setSelYear(null); setSelDivision(null); setCurrentScreen('examList'); setSelSubject(null); setStudents([]); setMarks({}); setSaved(false); }}
           >
             <Ionicons name="close-circle-outline" size={12} color={T.red} />
             <Text style={[s.clearAllText, { color: T.red }]}>Clear</Text>
           </TouchableOpacity>
         )}
-      </View>
-
-      {/* ── EXAM TYPE ── */}
-      <Text style={[s.filterTitle, { color: T.textMuted }]}>EXAM TYPE</Text>
-      <View style={s.chipRow}>
-        {EXAM_TYPES.map(et => {
-          const active = selExamType === et;
-          const col    = EXAM_COLORS[et];
-          return (
-            <TouchableOpacity
-              key={et}
-              style={[s.chip, active ? { backgroundColor: col, borderColor: col } : { backgroundColor: T.surfaceEl, borderColor: T.border }]}
-              onPress={() => setSelExamType(et)}
-              activeOpacity={0.75}
-            >
-              <Text style={[s.chipText, { color: active ? '#fff' : T.textSec }]}>{et}</Text>
-            </TouchableOpacity>
-          );
-        })}
       </View>
 
       {/* ── YEAR ── */}
@@ -591,7 +789,7 @@ useEffect(() => {
       {/* ── Checklist ── */}
       <View style={[s.checklistBox, { backgroundColor: T.surfaceEl, borderColor: T.border }]}>
         {[
-          { label: 'Exam Type', done: !!selExamType },
+          { label: selectedExam?.examName || 'Exam', done: !!selectedExam },
           { label: 'Year',      done: !!selYear      },
           { label: 'Division',  done: !!selDivision  },
           { label: 'Subject',   done: !!selSubject   },
@@ -814,7 +1012,7 @@ useEffect(() => {
                 : <Ionicons name={saved ? 'checkmark-circle' : 'save-outline'} size={20} color="#fff" style={{ marginRight: 8 }} />
               }
               <Text style={s.saveBtnText}>
-                {saving ? 'Saving…' : saved ? 'Marks Saved ✓' : `Save Marks — ${selExamType}`}
+                {saving ? 'Saving…' : saved ? 'Marks Saved ✓' : `Save Marks — ${selectedExam?.examName}`}
               </Text>
             </TouchableOpacity>
           </>
@@ -831,37 +1029,36 @@ useEffect(() => {
       <View style={[s.root, { backgroundColor: T.bg }]}>
         <StatusBar barStyle={T.statusBar} backgroundColor={T.bg} />
 
-        <ScrollView
-          style={s.scroll}
-          contentContainerStyle={[s.content, isWide && s.contentWide]}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => allSelected ? loadStudentsAndMarks(true) : teacherId && loadTimetable(teacherId)}
-              tintColor={T.accentBright}
-              colors={[T.accentBright]}
-            />
-          }
-        >
-          <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+        {currentScreen === 'examList' && renderExamListScreen()}
+        {currentScreen === 'createExam' && renderCreateExamScreen()}
+        {currentScreen === 'marksEntry' && (
+          <ScrollView
+            style={s.scroll}
+            contentContainerStyle={[s.content, isWide && s.contentWide]}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={() => allSelected ? loadStudentsAndMarks(true) : teacherId && loadTimetable(teacherId)}
+                tintColor={T.accentBright}
+                colors={[T.accentBright]}
+              />
+            }
+          >
+            <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
 
-            {/* HEADER */}
-            <View style={[s.headerRow, isWide && s.headerRowWide]}>
-              <View style={{ flex: 1 }}>
-                <Text style={[s.pageTitle, { color: T.textPrimary }]}>Exam Marks Entry</Text>
-                <Text style={[s.pageSub, { color: T.textSec }]}>
-                  {teacherName ? `${teacherName}  ·  CAT 1 / CAT 2 / FET` : 'CAT 1  •  CAT 2  •  FET'}
-                </Text>
-              </View>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <TouchableOpacity
-                  style={[s.iconBtn, { backgroundColor: T.toggleBg, borderColor: T.toggleBorder }]}
-                  onPress={() => teacherId && loadTimetable(teacherId)}
-                >
-                  <Ionicons name="refresh-outline" size={17} color={T.textSec} />
+              {/* HEADER */}
+              <View style={[s.headerRow, { marginBottom: 16 }]}>
+                <TouchableOpacity onPress={() => setCurrentScreen('examList')} style={{ marginRight: 12 }}>
+                  <Ionicons name="chevron-back" size={24} color={T.accentBright} />
                 </TouchableOpacity>
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.pageTitle, { color: T.textPrimary }]}>Enter Marks</Text>
+                  <Text style={[s.pageSub, { color: T.textSec }]}>
+                    {selectedExam?.examName || 'Select exam'} • {teacherName}
+                  </Text>
+                </View>
                 <TouchableOpacity
                   style={[s.iconBtn, { backgroundColor: T.toggleBg, borderColor: T.toggleBorder }]}
                   onPress={toggleTheme}
@@ -869,7 +1066,6 @@ useEffect(() => {
                   <Ionicons name={isDark ? 'sunny' : 'moon'} size={17} color={T.toggleIconColor} />
                 </TouchableOpacity>
               </View>
-            </View>
 
             {/* ERROR */}
             {error && (
@@ -926,7 +1122,8 @@ useEffect(() => {
 
             <View style={{ height: 60 }} />
           </Animated.View>
-        </ScrollView>
+          </ScrollView>
+        )}
       </View>
     </KeyboardAvoidingView>
   );
@@ -1032,4 +1229,20 @@ const s = StyleSheet.create({
   emptyIconWrap:   { width: 72, height: 72, borderRadius: 20, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
   emptyTitle:      { fontSize: 18, fontWeight: '800', marginBottom: 8 },
   emptySub:        { fontSize: 13, textAlign: 'center', lineHeight: 20 },
+
+  examCard:        { borderRadius: 12, borderWidth: 1, padding: 16, marginBottom: 12 },
+  examName:        { fontSize: 16, fontWeight: '700', marginBottom: 4 },
+  examMeta:        { fontSize: 12 },
+  createBtn:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, borderRadius: 12, marginTop: 20 },
+  createBtnText:   { fontSize: 15, fontWeight: '700', color: '#fff' },
+  backLink:        { fontSize: 14, fontWeight: '600', marginBottom: 12 },
+  inputGroup:      { marginBottom: 16 },
+  label:           { fontSize: 12, fontWeight: '700', marginBottom: 8 },
+  input:           { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14 },
+  cancelBtn:       { borderRadius: 10, borderWidth: 1, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
+  cancelBtnText:   { fontSize: 14, fontWeight: '700' },
+  submitBtn:       { borderRadius: 10, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
+  submitBtnText:   { fontSize: 14, fontWeight: '700', color: '#fff' },
+  loadingBox:      { borderRadius: 16, borderWidth: 1, padding: 36, alignItems: 'center', gap: 12, marginTop: 100 },
+  loadingText:     { fontSize: 14, textAlign: 'center' },
 });

@@ -5,9 +5,9 @@ import { Platform } from 'react-native';
 // 🌐 Base URL setup
 const getBaseURL = () => {
   if (Platform.OS === 'web') {
-    return "http://localhost:5001/api";
+    return "http://localhost:5000/api";
   } else {
-    return "http://10.145.59.173:5001/api"; // ✅ change if needed
+    return "http://10.145.59.173:5000/api"; // ✅ change if needed
   }
 };
 
