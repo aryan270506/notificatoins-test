@@ -149,6 +149,7 @@ app.use("/api/student-finance", studentFinanceRoutes);
 app.use("/api/timetable", timeTableRoutes);
 app.use('/api/ai-doubts', aiDoubtRoutes);
 app.use('/api/subject-rooms', subjectRoomsRoutes); // ← Subject chat rooms
+app.use('/api/doubts', subjectRoomsRoutes); // ← Alias for doubts endpoints
 app.use("/api/permissions", permissionRoutes);
 app.use("/api/finance", StudentFinanceRoutes);
 app.use("/api/ai", aiRoutes);

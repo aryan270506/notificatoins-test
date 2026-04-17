@@ -301,6 +301,29 @@ router.get("/teacher-rooms", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// GET /api/doubts/pending/count
+// Get count of doubts with pending/unanswered student messages
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/pending/count", async (req, res) => {
+  try {
+    // Count doubts that have at least one message from a student
+    // A doubt is "pending" if it has student messages
+    const count = await Doubt.countDocuments({
+      messages: {
+        $elemMatch: {
+          sender: "student",
+          deletedAt: null
+        }
+      }
+    });
+    return res.status(200).json({ success: true, count });
+  } catch (err) {
+    console.error('[Error] GET /pending/count:', err);
+    return res.status(500).json({ success: false, error: "Server error.", count: 0 });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Legacy: GET /api/subject-rooms/:subject/:year/messages
 // ─────────────────────────────────────────────────────────────────────────────
 router.get("/:subject/:year/messages", async (req, res) => {

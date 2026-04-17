@@ -31,6 +31,12 @@ export async function registerForPushNotificationsAsync() {
   console.log('🔔 Starting push notification registration...');
   let token;
 
+  // Skip push notifications on web platform
+  if (Platform.OS === 'web') {
+    console.log('⚠️  Web platform detected - push notifications not available');
+    return null;
+  }
+
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync('default', {
       name: 'default',

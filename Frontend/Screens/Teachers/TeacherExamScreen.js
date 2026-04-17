@@ -104,7 +104,7 @@ export default function TeacherExamScreen() {
   const [maxMark, setMaxMark] = useState(0);
 
   /* ── Screen navigation ── */
-  const [currentScreen, setCurrentScreen] = useState('examList'); // examList, createExam, marksEntry
+  const [currentScreen, setCurrentScreen] = useState('examList'); // examList, createExam, marksEntry, studentMarksEntry
 
   /* ── Exams list ── */
   const [exams, setExams] = useState([]);
@@ -112,8 +112,17 @@ export default function TeacherExamScreen() {
 
   /* ── Create exam form ── */
   const [newExamName, setNewExamName] = useState('');
+  const [newExamYear, setNewExamYear] = useState(null);
+  const [newExamDivision, setNewExamDivision] = useState(null);
+  const [newExamBatch, setNewExamBatch] = useState(null);
   const [newExamTheory, setNewExamTheory] = useState('');
   const [newExamLab, setNewExamLab] = useState('');
+
+  /* ── Student Marks Entry (after creating new exam) ── */
+  const [newExamStudents, setNewExamStudents] = useState([]);
+  const [newExamMarks, setNewExamMarks] = useState({});
+  const [loadingNewExamStudents, setLoadingNewExamStudents] = useState(false);
+  const [savingNewExamMarks, setSavingNewExamMarks] = useState(false);
 
   /* ── Selected exam ── */
   const [selectedExam, setSelectedExam] = useState(null);
@@ -244,6 +253,14 @@ useEffect(() => {
      Create new exam
      ─────────────────────────────────────────────────────────────────── */
   const handleCreateExam = async () => {
+    if (!newExamYear) {
+      alert('Please select year');
+      return;
+    }
+    if (!newExamDivision) {
+      alert('Please select division');
+      return;
+    }
     if (!newExamName.trim()) {
       alert('Please enter exam name');
       return;
@@ -254,21 +271,38 @@ useEffect(() => {
     }
 
     setSaving(true);
+    setLoadingNewExamStudents(true);
     try {
-      // Reset form
+      // Fetch all students to show in marks entry screen
+      const stuRes = await axiosInstance.get('/students');
+      const allStudents = stuRes.data?.data ?? [];
+      setNewExamStudents(allStudents);
+      setNewExamMarks({});
+      
+      // Set the newly created exam as selected
+      setSelectedExam({
+        examName: newExamName.trim(),
+        maxMarksTheory: Number(newExamTheory),
+        maxMarksLab: Number(newExamLab),
+      });
+
+      // Clear form and navigate to student marks entry
       setNewExamName('');
+      setNewExamYear(null);
+      setNewExamDivision(null);
+      setNewExamBatch(null);
       setNewExamTheory('');
       setNewExamLab('');
 
-      // Refresh exams list
-      await fetchExams(teacherId);
+      // Navigate to new student marks entry screen
+      setCurrentScreen('studentMarksEntry');
 
-      // Navigate to marks entry with newly created exam
-      setCurrentScreen('marksEntry');
+      console.log('[ExamScreen] Navigated to student marks entry', allStudents.length, 'students loaded');
     } catch (err) {
-      setError(`Failed to create exam: ${err.message}`);
+      setError(`Failed to load students: ${err.response?.data?.message || err.message}`);
     } finally {
       setSaving(false);
+      setLoadingNewExamStudents(false);
     }
   };
 
@@ -612,7 +646,9 @@ useEffect(() => {
   /* ═══════════════════════════════════════════════════════════════════════
      RENDER — Create Exam Screen
      ═══════════════════════════════════════════════════════════════════ */
-  const renderCreateExamScreen = () => (
+  const renderCreateExamScreen = () => {
+    console.log('[DEBUG] renderCreateExamScreen - years:', years, 'timetableSlots:', timetableSlots.length);
+    return (
     <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
       <TouchableOpacity onPress={() => setCurrentScreen('examList')} style={{ marginBottom: 16 }}>
         <Text style={[s.backLink, { color: T.accentBright }]}>← Back to Exams</Text>
@@ -620,6 +656,152 @@ useEffect(() => {
 
       <View style={[s.card, { backgroundColor: T.card, borderColor: T.border }]}>
         <Text style={[s.cardLabel, { color: T.textPrimary, marginBottom: 20 }]}>Create New Exam</Text>
+
+        {/* Year Selection */}
+        <View style={s.inputGroup}>
+          <Text style={[s.label, { color: T.textSec }]}>Class*</Text>
+          <View style={s.chipRow}>
+            {years.length === 0 ? (
+              <Text style={[s.emptyHint, { color: T.textMuted }]}>No classes available</Text>
+            ) : (
+              years.map(yr => (
+                <TouchableOpacity
+                  key={yr}
+                  onPress={() => setNewExamYear(yr)}
+                  style={[
+                    s.chip,
+                    {
+                      backgroundColor: newExamYear === yr ? T.accentSoft : 'transparent',
+                      borderColor: newExamYear === yr ? T.accentBright : T.border,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      s.chipText,
+                      { color: newExamYear === yr ? T.accentBright : T.textSec },
+                    ]}
+                  >
+                    {yr}
+                  </Text>
+                </TouchableOpacity>
+              ))
+            )}
+          </View>
+        </View>
+
+        {/* Division Selection */}
+        {newExamYear && (
+          <View style={s.inputGroup}>
+            <Text style={[s.label, { color: T.textSec }]}>Division *</Text>
+            <View style={s.chipRow}>
+              {(() => {
+                const divSet = [
+                  ...new Set(
+                    timetableSlots
+                      .filter(slot => String(slot.year) === String(newExamYear))
+                      .map(slot => String(slot.division))
+                  ),
+                ].sort();
+                return divSet.length === 0 ? (
+                  <Text style={[s.emptyHint, { color: T.textMuted }]}>
+                    No divisions in timetable for this year
+                  </Text>
+                ) : (
+                  divSet.map(div => (
+                    <TouchableOpacity
+                      key={div}
+                      onPress={() => setNewExamDivision(div)}
+                      style={[
+                        s.chip,
+                        {
+                          backgroundColor: newExamDivision === div ? T.accentSoft : 'transparent',
+                          borderColor: newExamDivision === div ? T.accentBright : T.border,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          s.chipText,
+                          { color: newExamDivision === div ? T.accentBright : T.textSec },
+                        ]}
+                      >
+                        {div}
+                      </Text>
+                    </TouchableOpacity>
+                  ))
+                );
+              })()}
+            </View>
+          </View>
+        )}
+
+        {/* Batch Selection */}
+        {newExamYear && newExamDivision && (
+          <View style={s.inputGroup}>
+            <Text style={[s.label, { color: T.textSec }]}>Batch (Optional)</Text>
+            <View style={s.chipRow}>
+              {(() => {
+                const batchSet = [
+                  ...new Set(
+                    timetableSlots
+                      .filter(slot => String(slot.year) === String(newExamYear) && String(slot.division) === String(newExamDivision) && slot.batch && String(slot.batch).trim() !== '')
+                      .map(slot => String(slot.batch))
+                  ),
+                ].sort();
+                return batchSet.length === 0 ? (
+                  <Text style={[s.emptyHint, { color: T.textMuted }]}>
+                    No batches in timetable for this class and division
+                  </Text>
+                ) : (
+                  <>
+                    <TouchableOpacity
+                      onPress={() => setNewExamBatch(null)}
+                      style={[
+                        s.chip,
+                        {
+                          backgroundColor: newExamBatch === null ? T.accentSoft : 'transparent',
+                          borderColor: newExamBatch === null ? T.accentBright : T.border,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          s.chipText,
+                          { color: newExamBatch === null ? T.accentBright : T.textSec },
+                        ]}
+                      >
+                        All
+                      </Text>
+                    </TouchableOpacity>
+                    {batchSet.map(batch => (
+                      <TouchableOpacity
+                        key={batch}
+                        onPress={() => setNewExamBatch(batch)}
+                        style={[
+                          s.chip,
+                          {
+                            backgroundColor: newExamBatch === batch ? T.accentSoft : 'transparent',
+                            borderColor: newExamBatch === batch ? T.accentBright : T.border,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            s.chipText,
+                            { color: newExamBatch === batch ? T.accentBright : T.textSec },
+                          ]}
+                        >
+                          {batch}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </>
+                );
+              })()}
+            </View>
+          </View>
+        )}
 
         <View style={s.inputGroup}>
           <Text style={[s.label, { color: T.textSec }]}>Exam Name *</Text>
@@ -662,6 +844,9 @@ useEffect(() => {
             style={[s.cancelBtn, { borderColor: T.border, flex: 1 }]}
             onPress={() => {
               setNewExamName('');
+              setNewExamYear(null);
+              setNewExamDivision(null);
+              setNewExamBatch(null);
               setNewExamTheory('');
               setNewExamLab('');
               setCurrentScreen('examList');
@@ -684,7 +869,8 @@ useEffect(() => {
         </View>
       </View>
     </ScrollView>
-  );
+    );
+  };
 
   /* ═══════════════════════════════════════════════════════════════════════
      RENDER — Filter Panel
@@ -804,8 +990,244 @@ useEffect(() => {
   );
 
   /* ═══════════════════════════════════════════════════════════════════════
-     RENDER — Marks Table
+     RENDER — Student Marks Entry (After Create Exam)
      ═══════════════════════════════════════════════════════════════════ */
+  const renderStudentMarksEntryScreen = () => {
+    const handleSaveNewExamMarks = async () => {
+      const pending = newExamStudents.filter(s => {
+        const theo = (newExamMarks[`${s.id}_theory`] ?? '');
+        const lab = (newExamMarks[`${s.id}_lab`] ?? '');
+        return theo === '' && lab === '';
+      }).length;
+
+      if (pending > 0) {
+        let go = false;
+        if (Platform.OS === 'web') {
+          go = window.confirm(`${pending} student(s) have no marks.\nSave anyway?`);
+        } else {
+          go = await new Promise(resolve =>
+            Alert.alert(
+              'Partial Entry',
+              `${pending} student(s) have no marks.\nSave anyway?`,
+              [
+                { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+                { text: 'Save', onPress: () => resolve(true) },
+              ]
+            )
+          );
+        }
+        if (!go) return;
+      }
+
+      setSavingNewExamMarks(true);
+      try {
+        await axiosInstance.post('/exam-marks/save', {
+          teacherId,
+          examName: selectedExam?.examName,
+          maxMarksTheory: selectedExam?.maxMarksTheory,
+          maxMarksLab: selectedExam?.maxMarksLab,
+          marks: newExamStudents.map(stu => {
+            const theo = newExamMarks[`${stu.id}_theory`] ?? '';
+            const lab = newExamMarks[`${stu.id}_lab`] ?? '';
+            return {
+              studentId: stu.id,
+              rollNo: stu.rollNo,
+              name: stu.name,
+              theoryMark: theo === '' ? null : theo,
+              labMark: lab === '' ? null : lab,
+            };
+          }),
+        });
+
+        if (Platform.OS === 'web') {
+          window.alert(`✓ Marks saved successfully for ${selectedExam?.examName}`);
+        } else {
+          Alert.alert('Success', `✓ Marks saved for ${selectedExam?.examName}`);
+        }
+
+        // Reset and go back to exam list
+        setNewExamMarks({});
+        setNewExamStudents([]);
+        setSelectedExam(null);
+        setCurrentScreen('examList');
+      } catch (err) {
+        if (Platform.OS === 'web') {
+          window.alert(err.response?.data?.message || err.message);
+        } else {
+          Alert.alert('Error', err.response?.data?.message || err.message);
+        }
+      } finally {
+        setSavingNewExamMarks(false);
+      }
+    };
+
+    return (
+      <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+        {/* Header */}
+        <View style={[s.headerRow, { marginBottom: 16 }]}>
+          <TouchableOpacity 
+            onPress={() => {
+              setNewExamMarks({});
+              setNewExamStudents([]);
+              setSelectedExam(null);
+              setCurrentScreen('examList');
+            }} 
+            style={{ marginRight: 12 }}
+          >
+            <Ionicons name="chevron-back" size={24} color={T.accentBright} />
+          </TouchableOpacity>
+          <View style={{ flex: 1 }}>
+            <Text style={[s.pageTitle, { color: T.textPrimary }]}>Enter Marks</Text>
+            <Text style={[s.pageSub, { color: T.textSec }]}>{selectedExam?.examName || 'New Exam'}</Text>
+          </View>
+          <TouchableOpacity
+            style={[s.iconBtn, { backgroundColor: T.toggleBg, borderColor: T.toggleBorder }]}
+            onPress={toggleTheme}
+          >
+            <Ionicons name={isDark ? 'sunny' : 'moon'} size={17} color={T.toggleIconColor} />
+          </TouchableOpacity>
+        </View>
+
+        {/* Exam Info Card */}
+        <View style={[s.card, { backgroundColor: T.card, borderColor: T.border }, shadow]}>
+          <Text style={[s.cardLabel, { color: T.textPrimary, marginBottom: 12 }]}>{selectedExam?.examName}</Text>
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={[s.label, { color: T.textSec }]}>Max Marks - Theory</Text>
+              <Text style={[{ fontSize: 18, fontWeight: '800', color: T.cyan, marginTop: 4 }]}>{selectedExam?.maxMarksTheory}</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[s.label, { color: T.textSec }]}>Max Marks - Lab</Text>
+              <Text style={[{ fontSize: 18, fontWeight: '800', color: T.orange, marginTop: 4 }]}>{selectedExam?.maxMarksLab}</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Students List */}
+        {loadingNewExamStudents ? (
+          <View style={[s.loadingBox, { backgroundColor: T.card, borderColor: T.border }]}>
+            <ActivityIndicator color={T.accentBright} size="large" />
+            <Text style={[s.loadingText, { color: T.textSec }]}>Loading students...</Text>
+          </View>
+        ) : newExamStudents.length === 0 ? (
+          <View style={[s.emptyState, { backgroundColor: T.card, borderColor: T.border }]}>
+            <View style={[s.emptyIconWrap, { backgroundColor: T.accentSoft }]}>
+              <Ionicons name="people-outline" size={38} color={T.accentBright} />
+            </View>
+            <Text style={[s.emptyTitle, { color: T.textPrimary }]}>No Students Found</Text>
+            <Text style={[s.emptySub, { color: T.textSec }]}>No students available in the system</Text>
+          </View>
+        ) : (
+          <>
+            {/* Table Header */}
+            <View style={[s.tableHeader, { backgroundColor: T.surfaceEl, borderColor: T.border, marginBottom: 8 }]}>
+              <Text style={[s.thRoll, { color: T.textMuted }]}>ROLL</Text>
+              <Text style={[s.thName, { color: T.textMuted }]}>NAME</Text>
+              <Text style={[{ flex: 1, fontSize: 10, fontWeight: '800', color: T.textMuted, textAlign: 'center' }]}>THEORY</Text>
+              <Text style={[{ flex: 1, fontSize: 10, fontWeight: '800', color: T.textMuted, textAlign: 'center' }]}>LAB</Text>
+            </View>
+
+            {/* Students Table */}
+            <View style={[s.tableBody, { backgroundColor: T.card, borderColor: T.border }, shadow]}>
+              {newExamStudents.map((stu, idx) => {
+                const theoVal = newExamMarks[`${stu.id}_theory`] ?? '';
+                const labVal = newExamMarks[`${stu.id}_lab`] ?? '';
+                return (
+                  <View
+                    key={stu.id}
+                    style={[
+                      s.tableRow,
+                      { borderTopColor: T.border },
+                      idx % 2 === 0 && { backgroundColor: isDark ? 'rgba(255,255,255,0.015)' : 'rgba(0,0,0,0.018)' },
+                    ]}
+                  >
+                    <View style={s.cellRoll}>
+                      <View style={[s.rollBadge, { backgroundColor: T.accentSoft }]}>
+                        <Text style={[s.rollText, { color: T.accentBright }]}>{stu.rollNo}</Text>
+                      </View>
+                    </View>
+
+                    <View style={s.cellName}>
+                      <Text style={[s.stuName, { color: T.textPrimary }]} numberOfLines={1}>{stu.name}</Text>
+                    </View>
+
+                    {/* Theory Mark Input */}
+                    <View style={{ flex: 1, alignItems: 'center', paddingHorizontal: 4 }}>
+                      <TextInput
+                        style={[
+                          s.markInput,
+                          { 
+                            flex: 1, 
+                            width: '100%',
+                            backgroundColor: T.surfaceEl,
+                            borderColor: theoVal !== '' ? T.cyan + '99' : T.border,
+                            color: T.cyan,
+                          }
+                        ]}
+                        value={theoVal}
+                        onChangeText={(text) => {
+                          if (text === '' || (Number(text) <= selectedExam?.maxMarksTheory && /^\d+$/.test(text))) {
+                            setNewExamMarks(p => ({ ...p, [`${stu.id}_theory`]: text }));
+                          }
+                        }}
+                        keyboardType="numeric"
+                        placeholder="—"
+                        placeholderTextColor={T.textMuted}
+                        maxLength={3}
+                      />
+                    </View>
+
+                    {/* Lab Mark Input */}
+                    <View style={{ flex: 1, alignItems: 'center', paddingHorizontal: 4 }}>
+                      <TextInput
+                        style={[
+                          s.markInput,
+                          { 
+                            flex: 1, 
+                            width: '100%',
+                            backgroundColor: T.surfaceEl,
+                            borderColor: labVal !== '' ? T.orange + '99' : T.border,
+                            color: T.orange,
+                          }
+                        ]}
+                        value={labVal}
+                        onChangeText={(text) => {
+                          if (text === '' || (Number(text) <= selectedExam?.maxMarksLab && /^\d+$/.test(text))) {
+                            setNewExamMarks(p => ({ ...p, [`${stu.id}_lab`]: text }));
+                          }
+                        }}
+                        keyboardType="numeric"
+                        placeholder="—"
+                        placeholderTextColor={T.textMuted}
+                        maxLength={3}
+                      />
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+
+            {/* Save Button */}
+            <TouchableOpacity
+              style={[s.saveBtn, { backgroundColor: T.accent, borderColor: T.accent }]}
+              onPress={handleSaveNewExamMarks}
+              disabled={savingNewExamMarks}
+              activeOpacity={0.85}
+            >
+              {savingNewExamMarks ? (
+                <ActivityIndicator color="#fff" style={{ marginRight: 8 }} />
+              ) : (
+                <Ionicons name="save-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+              )}
+              <Text style={s.saveBtnText}>
+                {savingNewExamMarks ? 'Saving…' : `Save Marks — ${selectedExam?.examName}`}
+              </Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </ScrollView>
+    );
+  };
   const renderMarksTable = () => {
     if (!allSelected) return null;
 
@@ -1031,6 +1453,7 @@ useEffect(() => {
 
         {currentScreen === 'examList' && renderExamListScreen()}
         {currentScreen === 'createExam' && renderCreateExamScreen()}
+        {currentScreen === 'studentMarksEntry' && renderStudentMarksEntryScreen()}
         {currentScreen === 'marksEntry' && (
           <ScrollView
             style={s.scroll}
