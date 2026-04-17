@@ -86,7 +86,9 @@ const getInitials = (name = '') => {
 
 // ─── Avatar Component ─────────────────────────────────────────────────────────
 const AvatarButton = ({ name, profileImage, teacherId, uploading, onPress }) => {
-  const imageUri = teacherId
+  // Only attempt to load image if teacher has a stored profile image
+  const hasProfileImage = profileImage && (profileImage.data || profileImage);
+  const imageUri = hasProfileImage && teacherId
     ? `${BASE_URL}/teachers/profile/image/${teacherId}`
     : null;
 
@@ -95,7 +97,13 @@ const AvatarButton = ({ name, profileImage, teacherId, uploading, onPress }) => 
       {uploading ? (
         <ActivityIndicator size="small" color="#fff" />
       ) : imageUri ? (
-        <Image source={{ uri: imageUri }} style={s.avatarImage} />
+        <Image 
+          source={{ uri: imageUri }} 
+          style={s.avatarImage}
+          onError={() => {
+            console.log('⚠️  Failed to load profile image');
+          }}
+        />
       ) : (
         <Text style={s.avText}>{getInitials(name)}</Text>
       )}
