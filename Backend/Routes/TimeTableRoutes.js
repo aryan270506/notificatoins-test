@@ -3,9 +3,10 @@ const router  = express.Router();
 
 const mongoose  = require("mongoose");
 const Timetable = require("../Models/Timetable");
+const TimetableTemplate = require("../Models/TimetableTemplate");
 const Teacher   = require("../Models/Teacher");
 const Student   = require("../Models/Student");
-const auth = require("../middleware/auth"); 
+const auth = require("../Middleware/auth"); 
 const { sendNotificationToClass } = require('../utils/pushNotificationService');
 
 // ── Lazy-load Parent so we always get the fully-registered Mongoose model,
@@ -22,6 +23,10 @@ function getParentModel() {
 // ─── Constants ─────────────────────────────────────────────────────────────────
 const VALID_DAYS  = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
 const VALID_SLOTS = ["t1","t2","t3","t4","t5","t6"];
+const DEFAULT_TEMPLATE_CONFIG = {
+  workingDays: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+  slots: [],
+};
 
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -30,6 +35,89 @@ function isValidSlot(s) { return VALID_SLOTS.includes(s); }
 
 function yearCodeToNumber(code) {
   return { FY: "1", SY: "2", TY: "3", LY: "4" }[code?.toUpperCase()] || null;
+}
+
+function normalizeTemplateConfig(config) {
+  const source = config && typeof config === "object" ? config : {};
+  const workingDays = Array.isArray(source.workingDays)
+    ? source.workingDays.filter((day) => VALID_DAYS.includes(day))
+    : [];
+
+  const slots = Array.isArray(source.slots)
+    ? source.slots
+        .filter((slot) => slot && typeof slot === "object")
+        .map((slot) => ({
+          id: String(slot.id || "").trim(),
+          type: slot.type === "break" ? "break" : "lecture",
+          label: String(slot.label || "").trim(),
+          startTime: String(slot.startTime || "").trim(),
+          endTime: String(slot.endTime || "").trim(),
+        }))
+        .filter((slot) => slot.id && slot.startTime && slot.endTime)
+    : [];
+
+  return {
+    workingDays: workingDays.length ? workingDays : [...DEFAULT_TEMPLATE_CONFIG.workingDays],
+    slots,
+  };
+}
+
+async function getActiveTemplateDocument() {
+  return TimetableTemplate.findOne({
+    $or: [
+      { key: "default" },
+      { key: { $exists: false } },
+    ],
+    isActive: true,
+  }).lean();
+}
+
+function resolveTemplateScope(req) {
+  const user = req.user || {};
+
+  if (String(user.role || "").toLowerCase() !== "admin") {
+    return null;
+  }
+
+  if (!user.instituteId) {
+    return { error: "Institute scope not found in token. Please login again." };
+  }
+
+  return {
+    instituteId: String(user.instituteId),
+    instituteName: String(user.instituteName || "").trim(),
+    departmentCode: String(user.departmentCode || "__INSTITUTE__").trim(),
+    departmentName: String(user.departmentName || "").trim(),
+  };
+}
+
+async function getScopedActiveTemplateDocument(scope) {
+  return TimetableTemplate.findOne({
+    key: "default",
+    isActive: true,
+    instituteId: scope.instituteId,
+    departmentCode: scope.departmentCode,
+  }).lean();
+}
+
+let templateIndexMigrationDone = false;
+async function ensureTemplateScopeIndexes() {
+  if (templateIndexMigrationDone) return;
+
+  const indexes = await TimetableTemplate.collection.indexes();
+  const legacyKeyIndex = indexes.find((idx) => idx?.name === "key_1" && idx?.unique);
+
+  if (legacyKeyIndex) {
+    console.log("🛠 Dropping legacy TimetableTemplate unique index: key_1");
+    await TimetableTemplate.collection.dropIndex("key_1");
+  }
+
+  await TimetableTemplate.collection.createIndex(
+    { key: 1, instituteId: 1, departmentCode: 1 },
+    { unique: true, name: "key_1_instituteId_1_departmentCode_1" }
+  );
+
+  templateIndexMigrationDone = true;
 }
 
 // Maps the Teacher.classTeacher.year label → timetable year number
@@ -109,8 +197,16 @@ function parseRollNo(roll_no) {
 //    GET /api/timetable/meta
 // ══════════════════════════════════════════════════════════════════════════════
 
-router.get("/meta", async (req, res) => {
+router.get("/meta", auth, async (req, res) => {
   try {
+    const scope = resolveTemplateScope(req);
+    if (scope?.error) {
+      return res.status(401).json({ success: false, message: scope.error });
+    }
+
+    const templateDoc = scope
+      ? await getScopedActiveTemplateDocument(scope)
+      : await getActiveTemplateDocument();
     const teachers = await Teacher.find({}, "_id id name subjects").lean();
 
     const studentAgg = await Student.aggregate([
@@ -147,10 +243,176 @@ router.get("/meta", async (req, res) => {
         yearDivisionData,
         years,
         divisions,
+        template: templateDoc ? normalizeTemplateConfig(templateDoc.customConfig) : DEFAULT_TEMPLATE_CONFIG,
+        templateSaved: Boolean(templateDoc),
       },
     });
   } catch (err) {
     console.error("GET /meta error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 1b. GET / SAVE TIMETABLE TEMPLATE
+//    GET /api/timetable/template
+//    PUT /api/timetable/template
+// ══════════════════════════════════════════════════════════════════════════════
+
+router.get("/template", auth, async (req, res) => {
+  try {
+    const scope = resolveTemplateScope(req);
+    if (scope?.error) {
+      return res.status(401).json({ success: false, message: scope.error });
+    }
+
+    const templateDoc = scope
+      ? await getScopedActiveTemplateDocument(scope)
+      : await getActiveTemplateDocument();
+
+    if (!templateDoc) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          customConfig: DEFAULT_TEMPLATE_CONFIG,
+          templateSaved: false,
+        },
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        customConfig: normalizeTemplateConfig(templateDoc.customConfig),
+        templateSaved: true,
+      },
+    });
+  } catch (err) {
+    console.error("GET /template error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.put("/template", auth, async (req, res) => {
+  try {
+    await ensureTemplateScopeIndexes();
+
+    const scope = resolveTemplateScope(req);
+    if (scope?.error) {
+      return res.status(401).json({ success: false, message: scope.error });
+    }
+
+    const incomingConfig = req.body.customConfig || req.body.template || req.body;
+    const customConfig = normalizeTemplateConfig(incomingConfig);
+
+    if (!customConfig.workingDays.length || !customConfig.slots.length) {
+      return res.status(400).json({
+        success: false,
+        message: "workingDays and slots are required",
+      });
+    }
+
+    const query = scope
+      ? {
+          key: "default",
+          instituteId: scope.instituteId,
+          departmentCode: scope.departmentCode,
+        }
+      : {
+          $or: [
+            { key: "default" },
+            { key: { $exists: false } },
+          ],
+        };
+
+    const update = scope
+      ? {
+          $set: {
+            customConfig,
+            isActive: true,
+            instituteName: scope.instituteName,
+            departmentName: scope.departmentName,
+          },
+          $setOnInsert: {
+            key: "default",
+            instituteId: scope.instituteId,
+            departmentCode: scope.departmentCode,
+          },
+        }
+      : {
+          $set: {
+            customConfig,
+            isActive: true,
+          },
+          $setOnInsert: {
+            key: "default",
+          },
+        };
+
+    const templateDoc = await TimetableTemplate.findOneAndUpdate(
+      query,
+      update,
+      { upsert: true, runValidators: true, returnDocument: "after" }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Timetable template saved",
+      data: {
+        customConfig: normalizeTemplateConfig(templateDoc.customConfig),
+        templateSaved: true,
+      },
+    });
+  } catch (err) {
+    console.error("PUT /template error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.delete("/template", auth, async (req, res) => {
+  try {
+    const scope = resolveTemplateScope(req);
+    if (scope?.error) {
+      return res.status(401).json({ success: false, message: scope.error });
+    }
+
+    const query = scope
+      ? {
+          key: "default",
+          instituteId: scope.instituteId,
+          departmentCode: scope.departmentCode,
+        }
+      : {
+          $or: [
+            { key: "default" },
+            { key: { $exists: false } },
+          ],
+        };
+
+    const result = await TimetableTemplate.findOneAndDelete(query);
+
+    if (!result) {
+      return res.status(200).json({
+        success: true,
+        message: "Timetable template already cleared",
+        data: {
+          customConfig: DEFAULT_TEMPLATE_CONFIG,
+          templateSaved: false,
+        },
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Timetable template deleted",
+      data: {
+        customConfig: DEFAULT_TEMPLATE_CONFIG,
+        templateSaved: false,
+      },
+    });
+  } catch (err) {
+    console.error("DELETE /template error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });

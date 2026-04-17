@@ -18,7 +18,13 @@ const generateToken = (user, role) => {
     userId: user._id || user.id,
     email: user.email || user.id,
     role: role,
-    name: user.name || "User"
+    name: user.name || "User",
+    instituteId: user.instituteId || null,
+    instituteName: user.instituteName || null,
+    departmentId: user.departmentId || null,
+    departmentCode: user.departmentCode || null,
+    departmentName: user.departmentName || null,
+    adminType: user.adminType || null,
   };
 
   console.log("🔑 Generating JWT Token with payload:", payload);
@@ -125,22 +131,92 @@ router.post("/login", async (req, res) => {
     }
 
     // ================= CHECK ADMIN =================
-    const admin = await Admin.findOne({ email });
+    // 1) Institute/legacy admin login (email OR id)
+    const admin = await Admin.findOne({
+      $or: [{ email }, { id: email }]
+    });
+
     if (admin) {
-      console.log("🛡️  Admin found:", email);
-      if (password === admin.password) {
-        // Check if Admin login is allowed by committee
+      console.log("🛡️  Institute/legacy admin found:", email);
+      const isAdminPasswordMatch =
+        (await bcrypt.compare(password, admin.password).catch(() => false)) ||
+        password === admin.password;
+
+      if (isAdminPasswordMatch) {
         const canLogin = await checkLoginPermission("Admin");
         if (!canLogin) {
           console.log("🚫 Admin login denied by committee permission");
           return res.status(403).json({ message: "Login access for Admins has been denied by the committee" });
         }
-        console.log("🔐 Password matched for admin");
-        const token = generateToken(admin, "admin");
+
+        console.log("🔐 Password matched for institute/legacy admin");
+        const normalizedAdminUser = {
+          ...admin.toObject(),
+          name: admin.instituteName || "Admin",
+          adminType: admin.role || "institute_admin",
+          instituteId: admin._id,
+          instituteName: admin.instituteName || "",
+          departmentId: null,
+          departmentCode: "__INSTITUTE__",
+          departmentName: "Institute",
+        };
+        const token = generateToken(normalizedAdminUser, "admin");
         console.log("✅ Admin logged in successfully\n");
-        return res.json({ role: "admin", user: admin, token });
-      } else {
-        console.log("❌ Password incorrect for admin");
+        return res.json({ role: "admin", user: normalizedAdminUser, token });
+      }
+
+      console.log("❌ Password incorrect for institute/legacy admin");
+    }
+
+    // 2) Department admin login (nested inside institute_admin.departments[])
+    const instituteWithDepartment = await Admin.findOne({
+      role: "institute_admin",
+      $or: [
+        { "departments.adminId": email },
+        { "departments.adminEmail": email }
+      ]
+    });
+
+    if (instituteWithDepartment) {
+      const department = (instituteWithDepartment.departments || []).find(
+        (d) => d.adminId === email || d.adminEmail === email
+      );
+
+      if (department) {
+        console.log("🏢 Department admin found:", email);
+        const isDepartmentPasswordMatch =
+          (await bcrypt.compare(password, department.adminPassword).catch(() => false)) ||
+          password === department.adminPassword;
+
+        if (isDepartmentPasswordMatch) {
+          const canLogin = await checkLoginPermission("Admin");
+          if (!canLogin) {
+            console.log("🚫 Admin login denied by committee permission");
+            return res.status(403).json({ message: "Login access for Admins has been denied by the committee" });
+          }
+
+          const departmentAdminUser = {
+            _id: department._id,
+            id: department.adminId,
+            email: department.adminEmail,
+            role: "department_admin",
+            adminType: "department_admin",
+            name: department.departmentName || "Department Admin",
+            departmentId: department._id,
+            departmentName: department.departmentName,
+            departmentCode: department.departmentCode,
+            instituteId: instituteWithDepartment._id,
+            instituteName: instituteWithDepartment.instituteName,
+            isActive: department.isActive
+          };
+
+          console.log("🔐 Password matched for department admin");
+          const token = generateToken(departmentAdminUser, "admin");
+          console.log("✅ Department admin logged in successfully\n");
+          return res.json({ role: "admin", user: departmentAdminUser, token });
+        }
+
+        console.log("❌ Password incorrect for department admin");
       }
     }
 
