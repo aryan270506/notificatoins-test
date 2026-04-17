@@ -65,8 +65,8 @@ subDivisions: {
       },
       division: {
         type: String,
-        enum: ["A", "B", "C"],
         default: null,
+        // 🔄 Removed enum constraint - divisions are now admin-configurable
       },
       assignedAt: {
         type: Date,

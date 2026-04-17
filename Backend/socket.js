@@ -105,7 +105,7 @@ const initSocket = (server) => {
       origin:  "*",
       methods: ["GET", "POST"],
     },
-    transports: ['websocket', 'polling'],
+    transports: ['websocket'],
     maxHttpBufferSize: 1e6, // 1MB max message size
     connectTimeout: 45000,
   });

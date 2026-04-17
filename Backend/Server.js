@@ -3,6 +3,7 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const http = require("http");
+const morgan = require('morgan');
 const SecurityLog = require("./Models/SecurityLog");
 
 // ─── Routes ───────────────────────────────────────────────────────
@@ -48,7 +49,7 @@ app.use(
     credentials: true,
   })
 );
-
+app.use(morgan(':method :url :status :response-time ms'));
 // ✅ Preflight requests
 app.options("*", cors());
 

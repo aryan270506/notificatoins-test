@@ -18,7 +18,6 @@ const { width } = Dimensions.get('window');
 const isLaptop = width >= 768;
 
 const API_BASE_URL = axiosInstance.defaults.baseURL.replace(/\/api$/, "");
-const POLL_INTERVAL = 8000;
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 function formatTime(dateStr) {
@@ -265,7 +264,6 @@ export default function StudentChat({ C, onThemeToggle, user }) {
   const [updatedAt,  setUpdatedAt]  = useState(null);
 
   const scrollRef = useRef(null);
-  const pollRef   = useRef(null);
 
   // ── Normalize student profile once ──────────────────────────────────────────
   const { academicYear, division } = normalizeStudent(user);
@@ -319,13 +317,9 @@ export default function StudentChat({ C, onThemeToggle, user }) {
     }
   }, [academicYear, division, canFetch]);
 
-  // ── Initial load + polling ──────────────────────────────────────────────────
+  // ── Initial load only (no polling) ──────────────────────────────────────────
   useEffect(() => {
     fetchMessages();
-    if (canFetch) {
-      pollRef.current = setInterval(() => fetchMessages(true), POLL_INTERVAL);
-    }
-    return () => clearInterval(pollRef.current);
   }, [fetchMessages, canFetch]);
 
   // ── Auto-scroll to bottom on new messages ───────────────────────────────────

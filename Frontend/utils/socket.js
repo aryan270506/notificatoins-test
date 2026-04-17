@@ -5,6 +5,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import pushNotificationManager from './pushNotificationManager';
 
 let socket = null;
+let hasRegisteredSession = false;
 
 // Keep a live reference to the current user so reconnect events
 // always use the latest user object, not a stale closure.
@@ -126,22 +127,8 @@ export const connectSocket = (user) => {
   };
 
   if (socket) {
-    // Socket already exists.
-    // Re-register if connected so a screen navigating in with a fuller
-    // user object (e.g. after AsyncStorage is loaded) updates the backend.
-    if (socket.connected) {
-      registerSession(currentUser, socket.id);
-      if (currentUser._id) {
-        socket.emit("userConnected", {
-          _id:          currentUser._id,
-          name:         currentUser.name         || 'Unknown',
-          role:         currentUser.role         || 'teacher',
-          email:        currentUser.email        || '',
-          profilePhoto: currentUser.profilePhoto || null,
-        });
-      }
-    }
-    // If not connected yet, the "connect" handler below will register.
+    // Socket already exists; do not re-register repeatedly.
+    // This keeps the API hit to a single call for this app session.
     return socket;
   }
 
@@ -150,7 +137,7 @@ export const connectSocket = (user) => {
   const socketURL = baseURL.replace(/\/api\/?$/, ""); // strip trailing /api
 
   socket = io(socketURL, {
-    transports:           ["websocket", "polling"],
+    transports:           ["websocket"],
     reconnection:         true,
     reconnectionDelay:    1000,
     reconnectionDelayMax: 5000,
@@ -166,17 +153,20 @@ export const connectSocket = (user) => {
       role:     currentUser?.role,
     });
 
-    // registerSession handles its own enrichment + guards internally
-    await registerSession(currentUser, socket.id);
+    if (!hasRegisteredSession) {
+      // registerSession handles its own enrichment + guards internally
+      await registerSession(currentUser, socket.id);
 
-    if (currentUser?._id) {
-      socket.emit("userConnected", {
-        _id:          currentUser._id,
-        name:         currentUser.name         || 'Unknown',
-        role:         currentUser.role         || 'teacher',
-        email:        currentUser.email        || '',
-        profilePhoto: currentUser.profilePhoto || null,
-      });
+      if (currentUser?._id) {
+        socket.emit("userConnected", {
+          _id:          currentUser._id,
+          name:         currentUser.name         || 'Unknown',
+          role:         currentUser.role         || 'teacher',
+          email:        currentUser.email        || '',
+          profilePhoto: currentUser.profilePhoto || null,
+        });
+      }
+      hasRegisteredSession = true;
     }
   });
 
@@ -228,6 +218,7 @@ export const disconnectSocket = () => {
     socket.disconnect();
     socket      = null;
     currentUser = null;
+    hasRegisteredSession = false;
     console.log("🔌 Socket disconnected and reset.");
   }
 };

@@ -277,16 +277,6 @@ export default function Message() {
     })();
   }, []);
 
-  // ── Poll for new messages every 10 s ───────────────────────────────────
-  useEffect(() => {
-    if (!parentYear || !parentDivision || !parentId) return;
-    const iv = setInterval(
-      () => fetchMessages(parentYear, parentDivision, parentId),
-      10000,
-    );
-    return () => clearInterval(iv);
-  }, [parentYear, parentDivision, parentId, fetchMessages]);
-
   // ── Long-press / delete ────────────────────────────────────────────────
   const handleLongPress = (id) => {
     const msg = messages.find(m => m.id === id);
