@@ -494,6 +494,56 @@ const AddInstitute = ({ onInstituteAdded }) => {
     }
   };
 
+  /** Delete an institute */
+  const handleDeleteInstitute = (institute) => {
+    const instituteName = institute?.instituteName || 'this institute';
+
+    const performDelete = async () => {
+      setLoading(true);
+      try {
+        const instituteId = institute?._id || institute?.id;
+        if (!instituteId) {
+          const msg = 'Institute ID not found';
+          isWeb ? alert(msg) : Alert.alert('Error', msg);
+          return;
+        }
+
+        const response = await axiosInstance.delete(`/admins/institutes/${instituteId}`);
+        if (response.data?.success) {
+          await fetchInstitutes();
+          const msg = `"${instituteName}" deleted successfully`;
+          isWeb ? alert(msg) : Alert.alert('Deleted', msg);
+        } else {
+          const msg = response.data?.message || 'Failed to delete institute';
+          isWeb ? alert(msg) : Alert.alert('Error', msg);
+        }
+      } catch (error) {
+        console.error('❌ Error deleting institute:', error);
+        const msg = error.response?.data?.message || error.response?.data?.error || 'Failed to delete institute';
+        isWeb ? alert(msg) : Alert.alert('Error', msg);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (isWeb && typeof window !== 'undefined') {
+      const confirmed = window.confirm(
+        `Delete "${instituteName}"? This will remove all its departments as well.`
+      );
+      if (confirmed) performDelete();
+      return;
+    }
+
+    Alert.alert(
+      'Delete Institute',
+      `Delete "${instituteName}"? This will remove all its departments as well.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: performDelete },
+      ]
+    );
+  };
+
   /** Start editing a department */
   const handleStartEditDepartment = (dept) => {
     setEditingDepartment(dept);
@@ -666,12 +716,21 @@ const AddInstitute = ({ onInstituteAdded }) => {
                   <View style={{ flexDirection: 'row', gap: 8 }}>
                     <TouchableOpacity
                       style={styles.editButton}
+                      disabled={loading}
                       onPress={() => handleStartEditInstitute(institute)}
                     >
                       <Text style={styles.editButtonText}>✎ Edit</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
+                      style={styles.deleteButton}
+                      disabled={loading}
+                      onPress={() => handleDeleteInstitute(institute)}
+                    >
+                      <Text style={styles.deleteButtonText}>🗑 Delete</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
                       style={styles.addDeptButton}
+                      disabled={loading}
                       onPress={() => {
                         setSelectedInstitute(institute);
                         setSingleDept(EMPTY_DEPT());
@@ -1541,6 +1600,19 @@ const styles = StyleSheet.create({
     })
   },
   editButtonText: { color: '#ffffff', fontSize: 12, fontWeight: '600' },
+  deleteButton: {
+    backgroundColor: '#7f1d1d',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    ...(isWeb && {
+      cursor: 'pointer',
+      transition: 'all 200ms ease',
+      borderWidth: 1,
+      borderColor: '#ef4444'
+    })
+  },
+  deleteButtonText: { color: '#ffffff', fontSize: 12, fontWeight: '600' },
   addDeptButton: { 
     backgroundColor: '#4b6cf7', 
     paddingHorizontal: 12, 
