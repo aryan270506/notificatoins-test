@@ -5,8 +5,27 @@ const timetableTemplateSchema = new mongoose.Schema(
     key: {
       type: String,
       required: true,
-      unique: true,
       default: 'default',
+      trim: true,
+    },
+    instituteId: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    instituteName: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    departmentCode: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    departmentName: {
+      type: String,
+      default: '',
       trim: true,
     },
     customConfig: {
@@ -25,6 +44,11 @@ const timetableTemplateSchema = new mongoose.Schema(
   {
     timestamps: true,
   }
+);
+
+timetableTemplateSchema.index(
+  { key: 1, instituteId: 1, departmentCode: 1 },
+  { unique: true }
 );
 
 module.exports = mongoose.model('TimetableTemplate', timetableTemplateSchema);
