@@ -36,6 +36,25 @@ const DEFAULT_CUSTOM_CONFIG = {
   slots: [],
 };
 
+function normalizeTemplateConfig(config) {
+  const source = config && typeof config === 'object' ? config : {};
+  const workingDays = orderDays(Array.isArray(source.workingDays) ? source.workingDays : DEFAULT_CUSTOM_CONFIG.workingDays);
+  const slots = Array.isArray(source.slots)
+    ? source.slots.map((slot, idx) => ({
+        id: slot?.id || `slot-${idx}`,
+        type: slot?.type === 'break' ? 'break' : 'lecture',
+        label: slot?.label || '',
+        startTime: slot?.startTime || '',
+        endTime: slot?.endTime || '',
+      }))
+    : [];
+
+  return {
+    workingDays: workingDays.length ? workingDays : [...DEFAULT_CUSTOM_CONFIG.workingDays],
+    slots,
+  };
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
 function uid() {
@@ -950,7 +969,7 @@ function AllYearsOverview({ timeSlots, visibleDays, hasSlots }) {
     );
   };
 
-  if (metaLoading) {
+  if (metaLoading || templateLoading) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: screenBg }}>
         <ActivityIndicator size="large" color={isDark ? '#5b9cf6' : '#2563eb'} />
@@ -1035,6 +1054,7 @@ export default function TimeTableManagement() {
   const [draftCustomConfig, setDraftCustomConfig] = useState(DEFAULT_CUSTOM_CONFIG);
   const [templateSaved, setTemplateSaved] = useState(false);
   const [isEditingTemplate, setIsEditingTemplate] = useState(false);
+  const [templateLoading, setTemplateLoading] = useState(true);
 
   const [allDivisions, setAllDivisions] = useState([]);
   const [batchMap,     setBatchMap]     = useState({});
@@ -1058,15 +1078,59 @@ export default function TimeTableManagement() {
   // ── CHANGE 3: derive whether slots are configured ─────────────────────────
   const hasSlots = (activeConfig.slots || []).length > 0;
 
+  const syncTemplateCache = useCallback(async (nextConfig, nextSaved) => {
+    try {
+      await AsyncStorage.setItem(
+        TEMPLATE_PREFS_KEY,
+        JSON.stringify({ customConfig: nextConfig, templateSaved: nextSaved })
+      );
+    } catch (error) {
+      console.warn('Template cache save failed:', error?.message);
+    }
+  }, []);
+
+  const saveTemplateToServer = useCallback(async (nextConfig) => {
+    const payload = normalizeTemplateConfig(nextConfig);
+    const { data } = await axiosInstance.put('/timetable/template', {
+      customConfig: payload,
+    });
+
+    if (!data.success) {
+      throw new Error(data.message || 'Failed to save timetable template');
+    }
+
+    const savedConfig = normalizeTemplateConfig(data.data?.customConfig || payload);
+    setCustomConfig(savedConfig);
+    setDraftCustomConfig(savedConfig);
+    setTemplateSaved(true);
+    await syncTemplateCache(savedConfig, true);
+    return savedConfig;
+  }, [syncTemplateCache]);
+
   // ── Persist preferences ───────────────────────────────────────────────────
   useEffect(() => {
+    let cancelled = false;
+
     (async () => {
       try {
+        setTemplateLoading(true);
+
+        const { data } = await axiosInstance.get('/timetable/template');
+        if (!cancelled && data?.success && data?.data?.templateSaved && data?.data?.customConfig) {
+          const savedConfig = normalizeTemplateConfig(data.data.customConfig);
+          setCustomConfig(savedConfig);
+          setDraftCustomConfig(savedConfig);
+          setTemplateSaved(Boolean(data.data.templateSaved));
+          await syncTemplateCache(savedConfig, Boolean(data.data.templateSaved));
+          return;
+        }
+
         const raw = await AsyncStorage.getItem(TEMPLATE_PREFS_KEY);
-        if (!raw) return;
+        if (!raw || cancelled) return;
+
         const parsed = JSON.parse(raw);
         if (parsed?.customConfig) {
-          const savedConfig = { ...DEFAULT_CUSTOM_CONFIG, ...parsed.customConfig };
+          const savedConfig = normalizeTemplateConfig(parsed.customConfig);
           setCustomConfig(savedConfig);
           setDraftCustomConfig(savedConfig);
         }
@@ -1077,16 +1141,36 @@ export default function TimeTableManagement() {
         );
       } catch (e) {
         console.warn('Template prefs load failed:', e?.message);
+
+        try {
+          const raw = await AsyncStorage.getItem(TEMPLATE_PREFS_KEY);
+          if (!raw || cancelled) return;
+
+          const parsed = JSON.parse(raw);
+          if (parsed?.customConfig) {
+            const savedConfig = normalizeTemplateConfig(parsed.customConfig);
+            setCustomConfig(savedConfig);
+            setDraftCustomConfig(savedConfig);
+          }
+          setTemplateSaved(
+            typeof parsed?.templateSaved === 'boolean'
+              ? parsed.templateSaved
+              : Boolean(parsed?.customConfig?.slots?.length)
+          );
+        } catch (fallbackError) {
+          console.warn('Template fallback load failed:', fallbackError?.message);
+        }
+      } finally {
+        if (!cancelled) {
+          setTemplateLoading(false);
+        }
       }
     })();
-  }, []);
 
-  useEffect(() => {
-    AsyncStorage.setItem(
-      TEMPLATE_PREFS_KEY,
-      JSON.stringify({ customConfig, templateSaved })
-    ).catch(e => console.warn('Template prefs save failed:', e?.message));
-  }, [customConfig, templateSaved]);
+    return () => {
+      cancelled = true;
+    };
+  }, [syncTemplateCache]);
 
   useEffect(() => {
     if (selectedDay >= visibleDays.length) setSelectedDay(0);
@@ -1156,14 +1240,20 @@ export default function TimeTableManagement() {
   };
 
   const handleCreateTemplate = () => {
-    if (!isTemplateConfigValid(draftCustomConfig)) {
-      Alert.alert('Incomplete Template', 'Add working days and valid HH:MM timings for all slots before creating the template.');
-      return;
-    }
-    setCustomConfig(draftCustomConfig);
-    setTemplateSaved(true);
-    setIsEditingTemplate(false);
-    Alert.alert('Template Created', 'Template has been saved successfully.');
+    (async () => {
+      try {
+        if (!isTemplateConfigValid(draftCustomConfig)) {
+          Alert.alert('Incomplete Template', 'Add working days and valid HH:MM timings for all slots before creating the template.');
+          return;
+        }
+        await saveTemplateToServer(draftCustomConfig);
+        setIsEditingTemplate(false);
+        Alert.alert('Template Created', 'Template has been saved successfully.');
+      } catch (err) {
+        console.error('Template create error:', err);
+        Alert.alert('Save Failed', err?.response?.data?.message || err.message || 'Failed to save timetable template.');
+      }
+    })();
   };
 
   const handleStartEditTemplate = () => {
@@ -1172,13 +1262,20 @@ export default function TimeTableManagement() {
   };
 
   const handleSaveTemplateChanges = () => {
-    if (!isTemplateConfigValid(draftCustomConfig)) {
-      Alert.alert('Incomplete Template', 'Please keep valid HH:MM timings for all slots before saving.');
-      return;
-    }
-    setCustomConfig(draftCustomConfig);
-    setIsEditingTemplate(false);
-    Alert.alert('Template Updated', 'Your timetable template changes are saved.');
+    (async () => {
+      try {
+        if (!isTemplateConfigValid(draftCustomConfig)) {
+          Alert.alert('Incomplete Template', 'Please keep valid HH:MM timings for all slots before saving.');
+          return;
+        }
+        await saveTemplateToServer(draftCustomConfig);
+        setIsEditingTemplate(false);
+        Alert.alert('Template Updated', 'Your timetable template changes are saved.');
+      } catch (err) {
+        console.error('Template save error:', err);
+        Alert.alert('Save Failed', err?.response?.data?.message || err.message || 'Failed to save timetable template.');
+      }
+    })();
   };
 
   const handleCancelTemplateEdit = () => {
@@ -1196,11 +1293,25 @@ export default function TimeTableManagement() {
           text: 'Delete',
           style: 'destructive',
           onPress: () => {
-            setCustomConfig(DEFAULT_CUSTOM_CONFIG);
-            setDraftCustomConfig(DEFAULT_CUSTOM_CONFIG);
-            setTemplateSaved(false);
-            setIsEditingTemplate(false);
-            setCurrentGrid({});
+            (async () => {
+              try {
+                await axiosInstance.delete('/timetable/template');
+                const resetConfig = normalizeTemplateConfig(DEFAULT_CUSTOM_CONFIG);
+                setCustomConfig(resetConfig);
+                setDraftCustomConfig(resetConfig);
+                setTemplateSaved(false);
+                setIsEditingTemplate(false);
+                setCurrentGrid({});
+                try {
+                  await AsyncStorage.removeItem(TEMPLATE_PREFS_KEY);
+                } catch (cacheError) {
+                  console.warn('Template cache delete failed:', cacheError?.message);
+                }
+              } catch (err) {
+                console.error('Template delete error:', err);
+                Alert.alert('Delete Failed', err?.response?.data?.message || err.message || 'Failed to delete timetable template.');
+              }
+            })();
           },
         },
       ]
