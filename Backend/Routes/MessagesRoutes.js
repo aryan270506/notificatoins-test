@@ -8,6 +8,7 @@ const router = express.Router();
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const jwt = require("jsonwebtoken");
 const Message = require("../Models/Messages");
 const auth = require("../Middleware/auth"); 
 const { sendNotificationToUsers } = require('../utils/pushNotificationService');
@@ -30,6 +31,33 @@ const upload = multer({
   storage,
   limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
 });
+
+const getRequestScope = (req) => {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.split(" ")[1] : null;
+
+  if (!token) {
+    return null;
+  }
+
+  try {
+    return jwt.verify(token, process.env.JWT_SECRET);
+  } catch (error) {
+    return null;
+  }
+};
+
+const resolveMessageScope = (req, body = {}) => {
+  const scopeSource = req.user || getRequestScope(req) || {};
+
+  return {
+    instituteId: body.instituteId ?? scopeSource.instituteId ?? null,
+    instituteName: body.instituteName ?? scopeSource.instituteName ?? null,
+    departmentId: body.departmentId ?? scopeSource.departmentId ?? null,
+    departmentCode: body.departmentCode ?? scopeSource.departmentCode ?? null,
+    departmentName: body.departmentName ?? scopeSource.departmentName ?? null,
+  };
+};
 
 // ─── POST: Send message with notification ─────────────────
 router.post('/send', auth, async (req, res) => {
@@ -54,6 +82,7 @@ router.post('/send', auth, async (req, res) => {
       senderId: req.user.id,
       senderName: req.user.name || 'Unknown',
       senderRole: req.user.role,
+      ...resolveMessageScope(req),
       recipientRole: recipientType || 'Student',
       academicYear: req.user.academicYear || '1',
       division: req.user.division || 'A',
@@ -140,6 +169,11 @@ router.post("/save", async (req, res) => {
       recipientRole,
       academicYear,
       division,
+      instituteId,
+      instituteName,
+      departmentId,
+      departmentCode,
+      departmentName,
       attachmentUrl,
       attachmentName,
       attachmentSize,
@@ -161,6 +195,13 @@ router.post("/save", async (req, res) => {
       senderId,
       senderName,
       senderRole,
+      ...resolveMessageScope(req, {
+        instituteId,
+        instituteName,
+        departmentId,
+        departmentCode,
+        departmentName,
+      }),
       recipientRole,
       academicYear,
       division: division || "all",
@@ -205,6 +246,7 @@ router.post('/send-message', auth, async (req, res) => {
       senderId: req.user.id,
       senderName: req.user.name,
       senderRole: req.user.role,
+      ...resolveMessageScope(req),
       recipientRole: 'student', // assuming recipientRole is student
       academicYear: req.user.academicYear,
       division: req.user.division,

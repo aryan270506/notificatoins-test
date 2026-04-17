@@ -1,6 +1,26 @@
 const mongoose = require('mongoose');
 
 const feesSchema = new mongoose.Schema({
+  instituteId: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  instituteName: {
+    type: String,
+    default: '',
+    trim: true,
+  },
+  departmentCode: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  departmentName: {
+    type: String,
+    default: '',
+    trim: true,
+  },
   year: {
     type: String,
     enum: ['1', '2', '3', '4'],
@@ -29,7 +49,7 @@ const feesSchema = new mongoose.Schema({
   },
 });
 
-// Ensure only one document per year
-feesSchema.index({ year: 1 }, { unique: true });
+// Ensure one fee config per year within an institute+department scope
+feesSchema.index({ year: 1, instituteId: 1, departmentCode: 1 }, { unique: true });
 
 module.exports = mongoose.model('Fees', feesSchema);

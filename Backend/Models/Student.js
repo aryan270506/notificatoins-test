@@ -1,6 +1,11 @@
 const mongoose = require('mongoose');
 
 const studentSchema = new mongoose.Schema({
+  instituteId: { type: String, default: null },
+  instituteName: { type: String, default: null, trim: true },
+  departmentCode: { type: String, default: null, trim: true },
+  departmentName: { type: String, default: null, trim: true },
+
   expoPushToken: { type: String, default: null },
   lastTokenUpdate: { type: Date },
 

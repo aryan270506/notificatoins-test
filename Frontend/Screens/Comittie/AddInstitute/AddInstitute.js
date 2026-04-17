@@ -138,6 +138,7 @@ const AddInstitute = ({ onInstituteAdded }) => {
 
   // ── Validations ───────────────────────────────────────────
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const normalizeText = (value) => String(value || '').trim().toLowerCase();
 
   const validateInstituteForm = () => {
     if (!formData.instituteName.trim()) return showErr('Institute name is required');
@@ -149,13 +150,29 @@ const AddInstitute = ({ onInstituteAdded }) => {
 
   const validateDeptAdmins = () => {
     if (departments.length === 0) return showErr('Please add at least one department');
+    const seenAdminIds = new Set();
+    const seenAdminEmails = new Set();
+
     for (let i = 0; i < departments.length; i++) {
       const d = departments[i];
       const label = `Department ${i + 1}`;
+      const normalizedAdminId = normalizeText(d.adminId);
+      const normalizedAdminEmail = normalizeText(d.adminEmail);
+
       if (!d.departmentName.trim()) return showErr(`${label}: Department name is required`);
       if (!d.adminId.trim()) return showErr(`${label}: Admin ID is required`);
       if (!d.adminEmail.trim()) return showErr(`${label}: Admin email is required`);
       if (!emailRegex.test(d.adminEmail)) return showErr(`${label}: Invalid email address`);
+      if (seenAdminIds.has(normalizedAdminId)) {
+        return showErr(`${label}: Admin ID is duplicated in the department list`);
+      }
+      if (seenAdminEmails.has(normalizedAdminEmail)) {
+        return showErr(`${label}: Admin email is duplicated in the department list`);
+      }
+
+      seenAdminIds.add(normalizedAdminId);
+      seenAdminEmails.add(normalizedAdminEmail);
+
       if (!d.adminPassword) return showErr(`${label}: Password is required`);
       if (d.adminPassword.length < 6) return showErr(`${label}: Password must be at least 6 characters`);
       if (d.adminPassword !== d.confirmPassword) return showErr(`${label}: Passwords do not match`);
@@ -164,10 +181,25 @@ const AddInstitute = ({ onInstituteAdded }) => {
   };
 
   const validateSingleDept = () => {
+    const existingDepartments = selectedInstitute?.departments || [];
+    const adminId = normalizeText(singleDept.adminId);
+    const adminEmail = normalizeText(singleDept.adminEmail);
+
     if (!singleDept.departmentName.trim()) return showErr('Department name is required');
     if (!singleDept.adminId.trim()) return showErr('Admin ID is required');
     if (!singleDept.adminEmail.trim()) return showErr('Admin email is required');
     if (!emailRegex.test(singleDept.adminEmail)) return showErr('Please enter a valid email address');
+
+    const duplicateAdminId = existingDepartments.some((dept) => normalizeText(dept.adminId) === adminId);
+    if (duplicateAdminId) {
+      return showErr('This Admin ID already exists in the selected institute. Please use a different ID.');
+    }
+
+    const duplicateAdminEmail = existingDepartments.some((dept) => normalizeText(dept.adminEmail) === adminEmail);
+    if (duplicateAdminEmail) {
+      return showErr('This Admin email already exists in the selected institute. Please use a different email.');
+    }
+
     if (!singleDept.adminPassword) return showErr('Password is required');
     if (singleDept.adminPassword.length < 6) return showErr('Password must be at least 6 characters');
     if (singleDept.adminPassword !== singleDept.confirmPassword) return showErr('Passwords do not match');
@@ -231,6 +263,9 @@ const AddInstitute = ({ onInstituteAdded }) => {
 
   /** Add department from modal */
   const handleAddDepartmentFromModal = () => {
+    const normalizedAdminId = normalizeText(newDeptForm.adminId);
+    const normalizedAdminEmail = normalizeText(newDeptForm.adminEmail);
+
     // Validation
     if (!newDeptForm.departmentName.trim()) {
       const msg = 'Department name is required';
@@ -264,6 +299,20 @@ const AddInstitute = ({ onInstituteAdded }) => {
     }
     if (newDeptForm.adminPassword !== newDeptForm.confirmPassword) {
       const msg = 'Passwords do not match';
+      isWeb ? alert(msg) : Alert.alert('Validation Error', msg);
+      return;
+    }
+
+    const duplicateAdminId = departments.some((dept) => normalizeText(dept.adminId) === normalizedAdminId);
+    if (duplicateAdminId) {
+      const msg = 'Admin ID already exists in the queued departments';
+      isWeb ? alert(msg) : Alert.alert('Validation Error', msg);
+      return;
+    }
+
+    const duplicateAdminEmail = departments.some((dept) => normalizeText(dept.adminEmail) === normalizedAdminEmail);
+    if (duplicateAdminEmail) {
+      const msg = 'Admin email already exists in the queued departments';
       isWeb ? alert(msg) : Alert.alert('Validation Error', msg);
       return;
     }
@@ -377,9 +426,9 @@ const AddInstitute = ({ onInstituteAdded }) => {
     try {
       const payload = {
         instituteId: selectedInstitute._id || selectedInstitute.id,
-        departmentName: singleDept.departmentName,
-        adminId: singleDept.adminId,
-        adminEmail: singleDept.adminEmail,
+        departmentName: singleDept.departmentName.trim(),
+        adminId: singleDept.adminId.trim(),
+        adminEmail: singleDept.adminEmail.trim().toLowerCase(),
         adminPassword: singleDept.adminPassword,
       };
       console.log('Adding single department payload:', payload);

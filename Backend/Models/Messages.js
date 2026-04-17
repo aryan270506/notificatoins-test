@@ -31,6 +31,31 @@ const messageSchema = new mongoose.Schema(
       enum: ["admin", "teacher", "parent", "committee"],
       required: true,
     },
+    instituteId: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    instituteName: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    departmentId: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    departmentCode: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    departmentName: {
+      type: String,
+      default: null,
+      trim: true,
+    },
     recipientRole: {
       type: String,
       enum: ["teacher", "student", "parent", "committee"],

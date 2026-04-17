@@ -2,11 +2,72 @@ const express = require('express');
 const router = express.Router();
 const Subject = require('../Models/Subject');
 const Fees = require('../Models/Fees');
+const auth = require('../Middleware/auth');
+
+function resolveAdminScope(req) {
+  const user = req.user || {};
+
+  if (String(user.role || '').toLowerCase() !== 'admin') {
+    return { error: 'Only admin users can manage configuration.' };
+  }
+
+  if (!user.instituteId) {
+    return { error: 'Institute scope not found in token. Please login again.' };
+  }
+
+  return {
+    instituteId: String(user.instituteId),
+    instituteName: String(user.instituteName || '').trim(),
+    departmentCode: String(user.departmentCode || '__INSTITUTE__').trim(),
+    departmentName: String(user.departmentName || 'Institute').trim(),
+  };
+}
+
+let scopedIndexMigrationDone = false;
+async function ensureScopedIndexes() {
+  if (scopedIndexMigrationDone) return;
+
+  const [subjectIndexes, feesIndexes] = await Promise.all([
+    Subject.collection.indexes(),
+    Fees.collection.indexes(),
+  ]);
+
+  const legacySubjectYearIndex = subjectIndexes.find((idx) => idx?.name === 'year_1' && idx?.unique);
+  if (legacySubjectYearIndex) {
+    console.log('🛠 Dropping legacy Subject unique index: year_1');
+    await Subject.collection.dropIndex('year_1');
+  }
+
+  const legacyFeesYearIndex = feesIndexes.find((idx) => idx?.name === 'year_1' && idx?.unique);
+  if (legacyFeesYearIndex) {
+    console.log('🛠 Dropping legacy Fees unique index: year_1');
+    await Fees.collection.dropIndex('year_1');
+  }
+
+  await Subject.collection.createIndex(
+    { year: 1, instituteId: 1, departmentCode: 1 },
+    { unique: true, name: 'year_1_instituteId_1_departmentCode_1' }
+  );
+
+  await Fees.collection.createIndex(
+    { year: 1, instituteId: 1, departmentCode: 1 },
+    { unique: true, name: 'year_1_instituteId_1_departmentCode_1' }
+  );
+
+  scopedIndexMigrationDone = true;
+}
 
 // Save Configuration (Subjects, Labs, Fees)
-router.post('/configuration/save', async (req, res) => {
+router.post('/configuration/save', auth, async (req, res) => {
   try {
     const { subjects, labs, fees } = req.body;
+    const scope = resolveAdminScope(req);
+
+    if (scope?.error) {
+      return res.status(401).json({ success: false, message: scope.error });
+    }
+
+    await ensureScopedIndexes();
 
     console.log('💾 Saving configuration:', { subjects, labs, fees });
 
@@ -18,9 +79,17 @@ router.post('/configuration/save', async (req, res) => {
         const labList = labs?.[`year${year}`] || [];
 
         await Subject.findOneAndUpdate(
-          { year: yearStr },
           {
             year: yearStr,
+            instituteId: scope?.instituteId,
+            departmentCode: scope?.departmentCode,
+          },
+          {
+            year: yearStr,
+            instituteId: scope?.instituteId,
+            instituteName: scope?.instituteName,
+            departmentCode: scope?.departmentCode,
+            departmentName: scope?.departmentName,
             subjects: subjectList,
             labs: labList,
             updatedAt: new Date(),
@@ -38,9 +107,17 @@ router.post('/configuration/save', async (req, res) => {
 
         if (amount !== undefined && amount !== null) {
           await Fees.findOneAndUpdate(
-            { year: yearStr },
             {
               year: yearStr,
+              instituteId: scope?.instituteId,
+              departmentCode: scope?.departmentCode,
+            },
+            {
+              year: yearStr,
+              instituteId: scope?.instituteId,
+              instituteName: scope?.instituteName,
+              departmentCode: scope?.departmentCode,
+              departmentName: scope?.departmentName,
               amount: parseFloat(amount),
               currency: 'INR',
               updatedAt: new Date(),
@@ -67,10 +144,20 @@ router.post('/configuration/save', async (req, res) => {
 });
 
 // Get all subjects by year
-router.get('/subjects/:year', async (req, res) => {
+router.get('/subjects/:year', auth, async (req, res) => {
   try {
     const { year } = req.params;
-    const subject = await Subject.findOne({ year });
+    const scope = resolveAdminScope(req);
+
+    if (scope?.error) {
+      return res.status(401).json({ success: false, message: scope.error });
+    }
+
+    const subject = await Subject.findOne({
+      year,
+      instituteId: scope?.instituteId,
+      departmentCode: scope?.departmentCode,
+    });
 
     if (!subject) {
       return res.status(404).json({
@@ -94,9 +181,18 @@ router.get('/subjects/:year', async (req, res) => {
 });
 
 // Get all subjects
-router.get('/subjects', async (req, res) => {
+router.get('/subjects', auth, async (req, res) => {
   try {
-    const subjects = await Subject.find().sort({ year: 1 });
+    const scope = resolveAdminScope(req);
+
+    if (scope?.error) {
+      return res.status(401).json({ success: false, message: scope.error });
+    }
+
+    const subjects = await Subject.find({
+      instituteId: scope?.instituteId,
+      departmentCode: scope?.departmentCode,
+    }).sort({ year: 1 });
 
     res.json({
       success: true,
@@ -113,10 +209,20 @@ router.get('/subjects', async (req, res) => {
 });
 
 // Get fees by year
-router.get('/fees/:year', async (req, res) => {
+router.get('/fees/:year', auth, async (req, res) => {
   try {
     const { year } = req.params;
-    const fees = await Fees.findOne({ year });
+    const scope = resolveAdminScope(req);
+
+    if (scope?.error) {
+      return res.status(401).json({ success: false, message: scope.error });
+    }
+
+    const fees = await Fees.findOne({
+      year,
+      instituteId: scope?.instituteId,
+      departmentCode: scope?.departmentCode,
+    });
 
     if (!fees) {
       return res.status(404).json({
@@ -140,9 +246,18 @@ router.get('/fees/:year', async (req, res) => {
 });
 
 // Get all fees
-router.get('/fees', async (req, res) => {
+router.get('/fees', auth, async (req, res) => {
   try {
-    const fees = await Fees.find().sort({ year: 1 });
+    const scope = resolveAdminScope(req);
+
+    if (scope?.error) {
+      return res.status(401).json({ success: false, message: scope.error });
+    }
+
+    const fees = await Fees.find({
+      instituteId: scope?.instituteId,
+      departmentCode: scope?.departmentCode,
+    }).sort({ year: 1 });
 
     res.json({
       success: true,
@@ -159,14 +274,30 @@ router.get('/fees', async (req, res) => {
 });
 
 // Update subject for a specific year
-router.put('/subjects/:year', async (req, res) => {
+router.put('/subjects/:year', auth, async (req, res) => {
   try {
     const { year } = req.params;
     const { subjects, labs } = req.body;
+    const scope = resolveAdminScope(req);
+
+    if (scope?.error) {
+      return res.status(401).json({ success: false, message: scope.error });
+    }
+
+    await ensureScopedIndexes();
 
     const updated = await Subject.findOneAndUpdate(
-      { year },
       {
+        year,
+        instituteId: scope?.instituteId,
+        departmentCode: scope?.departmentCode,
+      },
+      {
+        year,
+        instituteId: scope?.instituteId,
+        instituteName: scope?.instituteName,
+        departmentCode: scope?.departmentCode,
+        departmentName: scope?.departmentName,
         subjects: subjects || [],
         labs: labs || [],
         updatedAt: new Date(),
@@ -190,14 +321,30 @@ router.put('/subjects/:year', async (req, res) => {
 });
 
 // Update fees for a specific year
-router.put('/fees/:year', async (req, res) => {
+router.put('/fees/:year', auth, async (req, res) => {
   try {
     const { year } = req.params;
     const { amount, description } = req.body;
+    const scope = resolveAdminScope(req);
+
+    if (scope?.error) {
+      return res.status(401).json({ success: false, message: scope.error });
+    }
+
+    await ensureScopedIndexes();
 
     const updated = await Fees.findOneAndUpdate(
-      { year },
       {
+        year,
+        instituteId: scope?.instituteId,
+        departmentCode: scope?.departmentCode,
+      },
+      {
+        year,
+        instituteId: scope?.instituteId,
+        instituteName: scope?.instituteName,
+        departmentCode: scope?.departmentCode,
+        departmentName: scope?.departmentName,
         amount: parseFloat(amount),
         description: description || '',
         updatedAt: new Date(),

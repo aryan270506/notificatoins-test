@@ -2,6 +2,30 @@ const mongoose = require("mongoose");
 
 const teacherSchema = new mongoose.Schema(
   {
+    instituteId: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+
+    instituteName: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+
+    departmentCode: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+
+    departmentName: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+
     id: {
       type: String,
       required: true,

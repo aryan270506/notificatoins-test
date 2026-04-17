@@ -6,6 +6,37 @@ const router  = express.Router();
 const Teacher = require("../Models/Teacher");
 const multer  = require("multer");
 const { checkUploadPermission } = require("../Middleware/permissionCheck");
+const auth = require("../Middleware/auth");
+
+function resolveAdminScope(req) {
+  const user = req.user || {};
+
+  if (String(user.role || "").toLowerCase() !== "admin") {
+    return { error: "Only admin users can upload teacher data." };
+  }
+
+  if (!user.instituteId) {
+    return { error: "Institute scope not found in token. Please login again." };
+  }
+
+  if (!user.departmentCode) {
+    return { error: "Department scope not found in token. Please login again." };
+  }
+
+  return {
+    instituteId: String(user.instituteId),
+    instituteName: String(user.instituteName || "").trim(),
+    departmentCode: String(user.departmentCode || "__INSTITUTE__").trim(),
+    departmentName: String(user.departmentName || "Institute").trim(),
+  };
+}
+
+function buildTeacherScopeFilter(scope) {
+  return {
+    instituteId: scope.instituteId,
+    departmentCode: scope.departmentCode,
+  };
+}
 
 const YEAR_ALIASES_BY_NUMBER = {
   "1": ["1", "1st Year", "First Year", "FY"],
@@ -28,11 +59,13 @@ function normalizeYearToNumber(value) {
   return firstDigit ? firstDigit[0] : null;
 }
 
-function buildClassStudentFilter(classTeacher, options = {}) {
+function buildClassStudentFilter(classTeacher, options = {}, scope = {}) {
   const { strictDivision = false } = options;
   const mappedYear = normalizeYearToNumber(classTeacher?.year);
   const rawYear = String(classTeacher?.year || "").trim();
   const division = String(classTeacher?.division || "").trim();
+  const instituteId = String(scope?.instituteId || classTeacher?.instituteId || "").trim();
+  const departmentCode = String(scope?.departmentCode || classTeacher?.departmentCode || "").trim();
 
   const yearCandidates = new Set();
   if (rawYear) yearCandidates.add(rawYear);
@@ -43,6 +76,14 @@ function buildClassStudentFilter(classTeacher, options = {}) {
   const filter = {
     year: { $in: [...yearCandidates] },
   };
+
+  if (instituteId) {
+    filter.instituteId = instituteId;
+  }
+
+  if (departmentCode) {
+    filter.departmentCode = departmentCode;
+  }
 
   if (strictDivision && division) {
     filter.division = new RegExp(`^${division}$`, "i");
@@ -67,9 +108,14 @@ const upload = multer({
 // 1. BULK UPLOAD TEACHERS
 //    POST /api/teachers/upload
 // ─────────────────────────────────────────────────────────────
-router.post("/upload", checkUploadPermission("Teacher"), async (req, res) => {
+router.post("/upload", auth, checkUploadPermission("Teacher"), async (req, res) => {
   try {
     const teachers = req.body;
+    const scope = resolveAdminScope(req);
+
+    if (scope?.error) {
+      return res.status(401).json({ success: false, message: scope.error });
+    }
 
     if (!Array.isArray(teachers)) {
       return res.status(400).json({
@@ -78,6 +124,12 @@ router.post("/upload", checkUploadPermission("Teacher"), async (req, res) => {
       });
     }
 
+    // Replace only this admin's institute+department teachers.
+    await Teacher.deleteMany({
+      instituteId: scope.instituteId,
+      departmentCode: scope.departmentCode,
+    });
+
     let successCount = 0;
     const errors = [];
 
@@ -85,6 +137,11 @@ router.post("/upload", checkUploadPermission("Teacher"), async (req, res) => {
       try {
         // ✅ Normalize + Add Defaults (VERY IMPORTANT)
         const teacherData = {
+          instituteId: scope?.instituteId || null,
+          instituteName: scope?.instituteName || null,
+          departmentCode: scope?.departmentCode || null,
+          departmentName: scope?.departmentName || null,
+
           id: t.id,
           name: t.name,
           password: t.password,
@@ -105,14 +162,40 @@ router.post("/upload", checkUploadPermission("Teacher"), async (req, res) => {
           throw new Error("Missing required fields (id, name, password)");
         }
 
-        // ✅ Prevent duplicate (IMPORTANT)
+        // ✅ Handle legacy rows + scope-safe duplicates.
+        // If a teacher id already exists in the same scope (or legacy unscoped data),
+        // update that row so uploads are idempotent and old data gets migrated.
         const exists = await Teacher.findOne({ id: teacherData.id });
         if (exists) {
-          throw new Error("Duplicate teacher id");
-        }
+          const existingInstituteId = String(exists.instituteId || "").trim();
+          const existingDepartmentCode = String(exists.departmentCode || "").trim();
+          const isLegacyUnscoped = !existingInstituteId && !existingDepartmentCode;
+          const isSameScope =
+            existingInstituteId === scope.instituteId &&
+            existingDepartmentCode === scope.departmentCode;
 
-        const newTeacher = new Teacher(teacherData);
-        await newTeacher.save();
+          if (!isLegacyUnscoped && !isSameScope) {
+            throw new Error("Teacher id already exists in another institute/department scope");
+          }
+
+          exists.instituteId = teacherData.instituteId;
+          exists.instituteName = teacherData.instituteName;
+          exists.departmentCode = teacherData.departmentCode;
+          exists.departmentName = teacherData.departmentName;
+          exists.id = teacherData.id;
+          exists.name = teacherData.name;
+          exists.password = teacherData.password;
+          exists.branch = teacherData.branch;
+          exists.years = teacherData.years;
+          exists.divisions = teacherData.divisions;
+          exists.subDivisions = teacherData.subDivisions;
+          exists.subjects = teacherData.subjects;
+
+          await exists.save();
+        } else {
+          const newTeacher = new Teacher(teacherData);
+          await newTeacher.save();
+        }
 
         successCount++;
       } catch (err) {
@@ -123,9 +206,10 @@ router.post("/upload", checkUploadPermission("Teacher"), async (req, res) => {
       }
     }
 
-    res.status(201).json({
-      success: true,
-      message: "Upload processed",
+    const hasSuccess = successCount > 0;
+    res.status(hasSuccess ? 201 : 400).json({
+      success: hasSuccess,
+      message: hasSuccess ? "Upload processed" : "No teacher records were uploaded",
       count: successCount,
       failed: errors.length,
       errors,
@@ -144,10 +228,18 @@ router.post("/upload", checkUploadPermission("Teacher"), async (req, res) => {
 // 2. GET ALL TEACHERS
 //    GET /api/teachers/all
 // ─────────────────────────────────────────────────────────────
-router.get("/all", async (req, res) => {
+router.get("/all", auth, async (req, res) => {
   try {
+    const scope = resolveAdminScope(req);
+    if (scope?.error) {
+      return res.status(401).json({ success: false, message: scope.error });
+    }
+
     // Exclude binary profileImage data from list view for performance
-    const teachers = await Teacher.find({}, { "profileImage.data": 0 });
+    const teachers = await Teacher.find(
+      buildTeacherScopeFilter(scope),
+      { "profileImage.data": 0 }
+    );
 
  const formatted = teachers.map(t => ({
   _id: t._id,
@@ -324,11 +416,17 @@ router.get("/marksheet/:studentId", async (req, res) => {
 //    { assignments: { "1st Year-A": { name, teacherId }, ... } }
 //    Used by the committee dashboard to render the CT grid.
 // ─────────────────────────────────────────────────────────────
-router.get("/class-teachers", async (req, res) => {
+router.get("/class-teachers", auth, async (req, res) => {
   try {
+    const scope = resolveAdminScope(req);
+    if (scope?.error) {
+      return res.status(401).json({ success: false, message: scope.error });
+    }
+
     // Only fetch teachers who actually have a classTeacher assignment
     const assigned = await Teacher.find(
       {
+        ...buildTeacherScopeFilter(scope),
         "classTeacher.year":     { $ne: null },
         "classTeacher.division": { $ne: null },
       },
@@ -367,8 +465,13 @@ router.get("/class-teachers", async (req, res) => {
 //
 //     This guarantees exactly one CT per year+division at all times.
 // ─────────────────────────────────────────────────────────────
-router.post("/assign-class-teacher", async (req, res) => {
+router.post("/assign-class-teacher", auth, async (req, res) => {
   try {
+    const scope = resolveAdminScope(req);
+    if (scope?.error) {
+      return res.status(401).json({ success: false, message: scope.error });
+    }
+
     const { teacherId, year, division } = req.body;
 
     // ── Validation ──────────────────────────────────────────
@@ -396,15 +499,32 @@ router.post("/assign-class-teacher", async (req, res) => {
     }
 
     // ── Confirm the target teacher exists ───────────────────
-    const newCT = await Teacher.findById(teacherId);
+    const newCT = await Teacher.findOne({
+      _id: teacherId,
+      ...buildTeacherScopeFilter(scope),
+    });
     if (!newCT) {
-      return res.status(404).json({ success: false, message: "Teacher not found." });
+      return res.status(404).json({ success: false, message: "Teacher not found in your institute/department." });
+    }
+
+    const previousYear = String(newCT.classTeacher?.year || "").trim();
+    const previousDivision = String(newCT.classTeacher?.division || "").trim();
+    const hadPreviousAssignment = Boolean(previousYear && previousDivision);
+    const isSameAssignment =
+      hadPreviousAssignment && previousYear === year && previousDivision === division;
+
+    if (hadPreviousAssignment && !isSameAssignment) {
+      return res.status(409).json({
+        success: false,
+        message: `${newCT.name} is already assigned as Class Teacher for ${previousYear} Division ${previousDivision}. Unassign them first before assigning to another class.`,
+      });
     }
 
     // ── Step 1: Clear the slot from its current holder ──────
-    // (skip if the same teacher is being re-assigned — still update assignedAt)
+    // Replace the class slot only if another teacher already holds it.
     await Teacher.updateMany(
       {
+        ...buildTeacherScopeFilter(scope),
         _id: { $ne: newCT._id },           // not the incoming teacher
         "classTeacher.year":     year,
         "classTeacher.division": division,
@@ -419,12 +539,18 @@ router.post("/assign-class-teacher", async (req, res) => {
     );
 
     // ── Step 2: Assign the slot to the new teacher ──────────
+    // A teacher can only be class teacher of one class at a time because
+    // classTeacher is a single object on Teacher and gets overwritten here.
     newCT.classTeacher = { year, division, assignedAt: new Date() };
     await newCT.save();
 
+    const actionMessage = isSameAssignment
+      ? `${newCT.name} is already Class Teacher for ${year} Division ${division}. Timestamp refreshed.`
+      : `${newCT.name} assigned as Class Teacher for ${year} Division ${division}.`;
+
     res.status(200).json({
       success: true,
-      message: `${newCT.name} assigned as Class Teacher for ${year} Division ${division}.`,
+      message: actionMessage,
       data: {
         teacherId: newCT._id,
         name:      newCT.name,
@@ -446,11 +572,19 @@ router.post("/assign-class-teacher", async (req, res) => {
 //     Clears the classTeacher field from a specific teacher.
 //     Useful if a committee wants to unassign without replacing.
 // ─────────────────────────────────────────────────────────────
-router.delete("/class-teachers/:teacherId", async (req, res) => {
+router.delete("/class-teachers/:teacherId", auth, async (req, res) => {
   try {
-    const teacher = await Teacher.findById(req.params.teacherId);
+    const scope = resolveAdminScope(req);
+    if (scope?.error) {
+      return res.status(401).json({ success: false, message: scope.error });
+    }
+
+    const teacher = await Teacher.findOne({
+      _id: req.params.teacherId,
+      ...buildTeacherScopeFilter(scope),
+    });
     if (!teacher) {
-      return res.status(404).json({ success: false, message: "Teacher not found." });
+      return res.status(404).json({ success: false, message: "Teacher not found in your institute/department." });
     }
 
     const wasYear = teacher.classTeacher?.year;
@@ -592,8 +726,19 @@ router.get("/:teacherId/students-for-class", async (req, res) => {
       });
     }
 
+    if (!teacher.instituteId || !teacher.departmentCode) {
+      return res.status(400).json({
+        success: false,
+        message: "Teacher scope is missing institute or department information.",
+      });
+    }
+
     const Student = require("../Models/Student");
-    const classFilter = buildClassStudentFilter(teacher.classTeacher, { strictDivision });
+    const classFilter = buildClassStudentFilter(
+      teacher.classTeacher,
+      { strictDivision },
+      { instituteId: teacher.instituteId, departmentCode: teacher.departmentCode }
+    );
     const students = await Student.find(classFilter, {
       // Return only the fields the frontend needs — excludes password, etc.
       _id: 1, id: 1, name: 1, email: 1,
@@ -642,11 +787,19 @@ router.put("/:teacherId/assign-batch", async (req, res) => {
       return res.status(404).json({ success: false, message: "Teacher not found" });
     }
 
+    if (!teacher.instituteId || !teacher.departmentCode) {
+      return res.status(400).json({ success: false, message: "Teacher scope is missing institute or department information." });
+    }
+
     const Student = require("../Models/Student");
 
     // ── 1. Sync Student documents ───────────────────────────────
     // Clear all students currently in this batch (for this teacher's class)
-    const classFilter = buildClassStudentFilter(teacher.classTeacher, { strictDivision: true });
+    const classFilter = buildClassStudentFilter(
+      teacher.classTeacher,
+      { strictDivision: true },
+      { instituteId: teacher.instituteId, departmentCode: teacher.departmentCode }
+    );
 
     // Unassign everyone in this batch within the class
     await Student.updateMany(
@@ -715,11 +868,20 @@ router.post("/:teacherId/create-batch", async (req, res) => {
       return res.status(404).json({ success: false, message: "Teacher not found" });
     }
 
+    if (!teacher.instituteId || !teacher.departmentCode) {
+      return res.status(400).json({ success: false, message: "Teacher scope is missing institute or department information." });
+    }
+
     // Fetch student details.
     // The frontend sends the student's custom `id` field (e.g. "252141001"),
     // NOT MongoDB _ids. Query by the `id` field accordingly.
     const Student = require("../Models/Student");
-    const students = await Student.find({ id: { $in: studentIds } }).lean();
+    const classFilter = buildClassStudentFilter(
+      teacher.classTeacher,
+      { strictDivision: true },
+      { instituteId: teacher.instituteId, departmentCode: teacher.departmentCode }
+    );
+    const students = await Student.find({ ...classFilter, id: { $in: studentIds } }).lean();
 
     const studentDetails = students.map((s) => ({
       studentId: s.id,
@@ -789,13 +951,21 @@ router.delete("/:teacherId/batch/:batchId", async (req, res) => {
       return res.status(404).json({ success: false, message: "Teacher not found" });
     }
 
+    if (!teacher.instituteId || !teacher.departmentCode) {
+      return res.status(400).json({ success: false, message: "Teacher scope is missing institute or department information." });
+    }
+
     const batchToDelete = teacher.batches.find((b) => b._id.toString() === batchId);
     if (!batchToDelete) {
       return res.status(404).json({ success: false, message: "Batch not found" });
     }
 
     const Student = require("../Models/Student");
-    const classFilter = buildClassStudentFilter(teacher.classTeacher, { strictDivision: true });
+    const classFilter = buildClassStudentFilter(
+      teacher.classTeacher,
+      { strictDivision: true },
+      { instituteId: teacher.instituteId, departmentCode: teacher.departmentCode }
+    );
     await Student.updateMany(
       {
         ...classFilter,
@@ -841,6 +1011,10 @@ router.put("/:teacherId/batch/:batchId", async (req, res) => {
       return res.status(404).json({ success: false, message: "Teacher not found" });
     }
 
+    if (!teacher.instituteId || !teacher.departmentCode) {
+      return res.status(400).json({ success: false, message: "Teacher scope is missing institute or department information." });
+    }
+
     const batch = teacher.batches.find((b) => b._id.toString() === batchId);
     if (!batch) {
       return res.status(404).json({ success: false, message: "Batch not found" });
@@ -856,7 +1030,11 @@ router.put("/:teacherId/batch/:batchId", async (req, res) => {
     // Update students if provided
     if (studentIds && Array.isArray(studentIds)) {
       const Student = require("../Models/Student");
-      const classFilter = buildClassStudentFilter(teacher.classTeacher, { strictDivision: true });
+      const classFilter = buildClassStudentFilter(
+        teacher.classTeacher,
+        { strictDivision: true },
+        { instituteId: teacher.instituteId, departmentCode: teacher.departmentCode }
+      );
 
       // Remove this sub-division from previously assigned students in the same class/division.
       await Student.updateMany(

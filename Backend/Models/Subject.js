@@ -1,6 +1,26 @@
 const mongoose = require('mongoose');
 
 const subjectSchema = new mongoose.Schema({
+  instituteId: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  instituteName: {
+    type: String,
+    default: '',
+    trim: true,
+  },
+  departmentCode: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  departmentName: {
+    type: String,
+    default: '',
+    trim: true,
+  },
   year: {
     type: String,
     enum: ['1', '2', '3', '4'],
@@ -25,7 +45,7 @@ const subjectSchema = new mongoose.Schema({
   },
 });
 
-// Ensure only one document per year
-subjectSchema.index({ year: 1 }, { unique: true });
+// Ensure one subject config per year within an institute+department scope
+subjectSchema.index({ year: 1, instituteId: 1, departmentCode: 1 }, { unique: true });
 
 module.exports = mongoose.model('Subject', subjectSchema);

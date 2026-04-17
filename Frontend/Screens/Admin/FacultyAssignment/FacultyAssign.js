@@ -571,7 +571,9 @@ const ClassTeacherModal = ({ visible, onClose, teachers, assignments, onAssign, 
             style={modalStyles.teacherList}
             showsVerticalScrollIndicator={false}
             renderItem={({ item }) => {
-              const isCurrentCT = currentAssignment?.name === item.name;
+              const currentTeacherId = currentAssignment?.teacherId ? String(currentAssignment.teacherId) : '';
+              const itemTeacherId = item?._id ? String(item._id) : String(item?.id || '');
+              const isCurrentCT = Boolean(currentTeacherId && itemTeacherId && currentTeacherId === itemTeacherId);
               return (
                 <TouchableOpacity
                   style={[
@@ -802,7 +804,7 @@ const modalStyles = StyleSheet.create({
 });
 
 // ─── Class Teacher Grid Card ──────────────────────────────────────────────────
-const ClassTeacherGrid = ({ assignments, onPressCell, divisions = ['A', 'B', 'C'], onEditDivisions }) => {
+const ClassTeacherGrid = ({ assignments, onPressCell, onRemoveAssignment, divisions = ['A', 'B', 'C'], onEditDivisions }) => {
   return (
     <View style={styles.card}>
       <View style={styles.facultyHeader}>
@@ -851,7 +853,7 @@ const ClassTeacherGrid = ({ assignments, onPressCell, divisions = ['A', 'B', 'C'
                 style={[ctStyles.gridCell, assigned && ctStyles.gridCellAssigned]}
                 onPress={() => onPressCell(year, div)}>
                 {assigned ? (
-                  <>
+                  <View style={{ alignItems: 'center', width: '100%' }}>
                     <Image
                       source={{ uri: `https://ui-avatars.com/api/?name=${encodeURIComponent(assigned.name)}&background=f59e0b&color=fff&size=28` }}
                       style={ctStyles.cellAvatar}
@@ -859,8 +861,17 @@ const ClassTeacherGrid = ({ assignments, onPressCell, divisions = ['A', 'B', 'C'
                     <Text style={ctStyles.cellName} numberOfLines={2}>
                       {assigned.name}
                     </Text>
-                    <Text style={{ fontSize: 8 }}>👑</Text>
-                  </>
+                    <View style={ctStyles.cellActionRow}>
+                      <TouchableOpacity
+                        style={ctStyles.cellRemoveBtn}
+                        onPress={(event) => {
+                          event?.stopPropagation?.();
+                          onRemoveAssignment?.(assigned.teacherId, year, div);
+                        }}>
+                        <Text style={ctStyles.cellRemoveText}>Remove</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
                 ) : (
                   <>
                     <Text style={ctStyles.cellPlus}>+</Text>
@@ -931,6 +942,16 @@ const ctStyles = StyleSheet.create({
   },
   cellAvatar: { width: 28, height: 28, borderRadius: 14, marginBottom: 4, borderWidth: 1, borderColor: C.gold },
   cellName: { color: '#fff', fontSize: 8, fontWeight: '700', textAlign: 'center', marginBottom: 2, lineHeight: 12 },
+  cellActionRow: { marginTop: 4, alignItems: 'center' },
+  cellRemoveBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: '#2e1010',
+    borderWidth: 1,
+    borderColor: '#ef4444',
+  },
+  cellRemoveText: { color: '#fca5a5', fontSize: 8, fontWeight: '700' },
   cellPlus: { color: C.textMuted, fontSize: 18, fontWeight: '300', lineHeight: 20 },
   cellEmpty: { color: C.textMuted, fontSize: 9, fontWeight: '600' },
 });
@@ -1057,6 +1078,54 @@ export default function TeacherManagementDashboard() {
     }
   };
 
+  const fetchClassTeacherAssignments = async () => {
+    try {
+      const res = await axiosInstance.get('/teachers/class-teachers');
+      if (res.data?.assignments) {
+        const assignments = {};
+        Object.keys(res.data.assignments).forEach(keyStr => {
+          const ct = res.data.assignments[keyStr];
+          assignments[keyStr] = {
+            name: ct.name,
+            teacherId: ct.teacherId,
+            assignedAt: ct.assignedAt,
+          };
+        });
+        setCtAssignments(assignments);
+      }
+    } catch (error) {
+      console.warn('Could not refresh class teacher assignments:', error.message);
+    }
+  };
+
+  const handleRemoveCT = async (teacherId, year, div) => {
+    Alert.alert(
+      'Remove Class Teacher',
+      `Remove the class teacher from ${year} Division ${div}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const response = await axiosInstance.delete(`/teachers/class-teachers/${teacherId}`);
+              if (!response.data?.success) {
+                throw new Error(response.data?.message || 'Failed to remove assignment');
+              }
+
+              await fetchClassTeacherAssignments();
+              Alert.alert('✅ Success', response.data.message || 'Class teacher removed');
+            } catch (error) {
+              console.error('Remove assignment error:', error);
+              Alert.alert('❌ Error', error.response?.data?.message || error.message || 'Failed to remove class teacher');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const openCTModal = (year = null, div = null) => {
     setCtInitialYear(year);
     setCtInitialDiv(div);
@@ -1070,6 +1139,18 @@ export default function TeacherManagementDashboard() {
       const teacherId = teacher._id || teacher.id;
       if (!teacherId) {
         Alert.alert('Error', 'Teacher ID not found. Please refresh and try again.');
+        return;
+      }
+
+      const assignedKeyForTeacher = Object.entries(ctAssignments).find(([, assignment]) => {
+        return String(assignment?.teacherId) === String(teacherId);
+      })?.[0] || null;
+
+      if (assignedKeyForTeacher && assignedKeyForTeacher !== key) {
+        Alert.alert(
+          'Already Assigned',
+          `${teacher.name} is already class teacher for ${assignedKeyForTeacher.replace('-', ' Division ')}. Remove that assignment first.`
+        );
         return;
       }
 
@@ -1087,14 +1168,25 @@ export default function TeacherManagementDashboard() {
       }
 
       // ✅ Update UI with success
-      setCtAssignments(prev => ({
-        ...prev,
-        [key]: { 
-          name: teacher.name, 
-          teacherId: teacherId,
-          assignedAt: new Date().toISOString()
-        },
-      }));
+      setCtAssignments(prev => {
+        const next = { ...prev };
+
+        // Keep only one class assignment per teacher in local UI state.
+        Object.keys(next).forEach((k) => {
+          const assignedTeacherId = next[k]?.teacherId ? String(next[k].teacherId) : '';
+          if (assignedTeacherId && assignedTeacherId === String(teacherId)) {
+            delete next[k];
+          }
+        });
+
+        next[key] = {
+          name: teacher.name,
+          teacherId,
+          assignedAt: new Date().toISOString(),
+        };
+
+        return next;
+      });
 
       Alert.alert(
         '✅ Success',
@@ -1103,21 +1195,9 @@ export default function TeacherManagementDashboard() {
 
       // 🔄 Refetch assignments to verify they were saved
       setTimeout(() => {
-        axiosInstance
-          .get('/teachers/class-teachers')
-          .then(res => {
-            if (res.data?.assignments) {
-              // Build the flat map like the backend returns
-              const assignments = {};
-              Object.keys(res.data.assignments).forEach(keyStr => {
-                const ct = res.data.assignments[keyStr];
-                assignments[keyStr] = { name: ct.name, teacherId: ct.teacherId };
-              });
-              setCtAssignments(assignments);
-              console.log('✅ Assignments verified from database:', assignments);
-            }
-          })
-          .catch(err => console.warn('Could not verify assignments:', err.message));
+        fetchClassTeacherAssignments().then(() => {
+          console.log('✅ Assignments verified from database');
+        });
       }, 500);
     } catch (e) {
       console.error('Assignment error:', e);
@@ -1176,6 +1256,7 @@ export default function TeacherManagementDashboard() {
             <ClassTeacherGrid
               assignments={ctAssignments}
               onPressCell={(year, div) => openCTModal(year, div)}
+              onRemoveAssignment={handleRemoveCT}
               divisions={divisions}
               onEditDivisions={() => setDivisionsEditVisible(true)}
             />

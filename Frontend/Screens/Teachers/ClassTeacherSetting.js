@@ -982,6 +982,7 @@ export function BatchManagementScreen() {
   const [saving,         setSaving]         = useState(false);
   const [selectorSearch, setSelectorSearch] = useState('');    // search filter inside modal
   const [assigningStudentId, setAssigningStudentId] = useState(null);
+  const [unassigningStudentId, setUnassigningStudentId] = useState(null);
   const [deletingBatch, setDeletingBatch] = useState(false);
   const blockRowPressRef = useRef({});
 
@@ -1227,6 +1228,64 @@ export function BatchManagementScreen() {
       Alert.alert('Error', 'Failed to assign student to division.');
     } finally {
       setAssigningStudentId(null);
+    }
+  };
+
+  const handleUnassignStudentFromDivision = async (student) => {
+    if (!student?.id || unassigningStudentId) return;
+
+    const confirmMessage = `Remove ${student.name || 'this student'} from Division ${classInfo?.division}? This will also remove them from any sub-batches.`;
+
+    if (Platform.OS === 'web') {
+      const ok = typeof globalThis.confirm === 'function'
+        ? globalThis.confirm(confirmMessage)
+        : false;
+
+      if (!ok) return;
+    } else {
+      const confirmed = await new Promise((resolve) => {
+        Alert.alert(
+          'Remove Student From Division',
+          confirmMessage,
+          [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Remove', style: 'destructive', onPress: () => resolve(true) },
+          ],
+          { cancelable: true }
+        );
+      });
+
+      if (!confirmed) return;
+    }
+
+    try {
+      setUnassigningStudentId(student.id);
+      const res = await axiosInstance.put(`/students/unassign-division/${student.id}`);
+
+      if (res.data?.success) {
+        await fetchAllYearStudents(teacherMongoId);
+        await fetchSubDivStudents(teacherMongoId);
+
+        const batchesRes = await axiosInstance.get(`/teachers/${teacherMongoId}/batches`);
+        if (batchesRes.data?.success && Array.isArray(batchesRes.data.data)) {
+          setBatchesData(batchesRes.data.data);
+        }
+
+        setSelected((prev) => {
+          const next = new Set(prev);
+          next.delete(student.id);
+          return next;
+        });
+
+        Alert.alert('✅ Removed', `${student.name || 'Student'} removed from division successfully.`);
+      } else {
+        Alert.alert('Error', res.data?.message || 'Failed to remove student from division.');
+      }
+    } catch (err) {
+      console.warn('Unassign student error:', err);
+      Alert.alert('Error', err.response?.data?.message || 'Failed to remove student from division.');
+    } finally {
+      setUnassigningStudentId(null);
     }
   };
 
@@ -1514,21 +1573,48 @@ export function BatchManagementScreen() {
                   <Text style={[bs.stuName, { color: T.textPrimary }]}>{item.name}</Text>
                   <Text style={[bs.stuMeta, { color: T.textMuted }]}>{item.prn || ''}</Text>
                 </View>
-                {isAssigningThis ? (
-                  <ActivityIndicator size="small" color={T.accent} />
-                ) : studentBatch ? (
-                  <View style={[bs.batchPillSmall, { backgroundColor: batchColor + '22', borderColor: batchColor + '55' }]}>
-                    <Text style={[bs.batchPillSmallText, { color: batchColor }]}>{studentBatch}</Text>
-                  </View>
-                ) : isAssignedToDivision ? (
-                  <View style={[bs.batchPillSmall, { backgroundColor: T.greenSoft, borderColor: T.green }]}>
-                    <Text style={[bs.batchPillSmallText, { color: T.green }]}>Div {classInfo?.division}</Text>
-                  </View>
-                ) : (
-                  <View style={[bs.unassignedPill, { backgroundColor: T.surface, borderColor: T.border }]}>
-                    <Text style={[bs.unassignedPillText, { color: T.textMuted }]}>Tap to assign Div {classInfo?.division}</Text>
-                  </View>
-                )}
+                <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                  {isAssigningThis ? (
+                    <ActivityIndicator size="small" color={T.accent} />
+                  ) : studentBatch ? (
+                    <View style={[bs.batchPillSmall, { backgroundColor: batchColor + '22', borderColor: batchColor + '55' }]}>
+                      <Text style={[bs.batchPillSmallText, { color: batchColor }]}>{studentBatch}</Text>
+                    </View>
+                  ) : isAssignedToDivision ? (
+                    <View style={[bs.batchPillSmall, { backgroundColor: T.greenSoft, borderColor: T.green }]}>
+                      <Text style={[bs.batchPillSmallText, { color: T.green }]}>Div {classInfo?.division}</Text>
+                    </View>
+                  ) : (
+                    <View style={[bs.unassignedPill, { backgroundColor: T.surface, borderColor: T.border }]}>
+                      <Text style={[bs.unassignedPillText, { color: T.textMuted }]}>Tap to assign Div {classInfo?.division}</Text>
+                    </View>
+                  )}
+
+                  {isAssignedToDivision ? (
+                    <TouchableOpacity
+                      onPress={() => handleUnassignStudentFromDivision(item)}
+                      disabled={isAssigningThis || unassigningStudentId === item.id}
+                      activeOpacity={0.8}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 4,
+                        paddingHorizontal: 10,
+                        paddingVertical: 6,
+                        borderRadius: 8,
+                        borderWidth: 1,
+                        borderColor: T.red,
+                        backgroundColor: T.redSoft,
+                        opacity: unassigningStudentId === item.id ? 0.7 : 1,
+                      }}>
+                      {unassigningStudentId === item.id ? (
+                        <ActivityIndicator size="small" color={T.red} />
+                      ) : (
+                        <Text style={{ color: T.red, fontSize: 12, fontWeight: '700' }}>Remove from Div</Text>
+                      )}
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
               </TouchableOpacity>
             );
           }}

@@ -1,22 +1,102 @@
 const express = require("express");
 const router = express.Router();
 const Student = require("../Models/Student");
+const Teacher = require("../Models/Teacher");
 const bcrypt = require("bcryptjs");
 const multer = require("multer");
 const path = require("path");
 const { checkUploadPermission } = require("../Middleware/permissionCheck");
+const auth = require("../Middleware/auth");
+
+function resolveAdminScope(req) {
+  const user = req.user || {};
+
+  if (String(user.role || "").toLowerCase() !== "admin") {
+    return { error: "Only admin users can upload student data." };
+  }
+
+  if (!user.instituteId) {
+    return { error: "Institute scope not found in token. Please login again." };
+  }
+
+  if (!user.departmentCode) {
+    return { error: "Department scope not found in token. Please login again." };
+  }
+
+  return {
+    instituteId: String(user.instituteId),
+    instituteName: String(user.instituteName || "").trim(),
+    departmentCode: String(user.departmentCode || "__INSTITUTE__").trim(),
+    departmentName: String(user.departmentName || "Institute").trim(),
+  };
+}
+
+function resolveRequestScope(req) {
+  const user = req.user || {};
+
+  if (!user.instituteId) {
+    return { error: "Institute scope not found in token. Please login again." };
+  }
+
+  if (!user.departmentCode) {
+    return { error: "Department scope not found in token. Please login again." };
+  }
+
+  return {
+    instituteId: String(user.instituteId),
+    departmentCode: String(user.departmentCode).trim(),
+  };
+}
+
+async function findScopedStudent(incomingId, scope) {
+  let student = await Student.findOne({
+    id: incomingId,
+    instituteId: scope.instituteId,
+    departmentCode: scope.departmentCode,
+  });
+
+  if (student) {
+    return student;
+  }
+
+  const mongoose = require("mongoose");
+  if (mongoose.Types.ObjectId.isValid(incomingId)) {
+    student = await Student.findOne({
+      _id: incomingId,
+      instituteId: scope.instituteId,
+      departmentCode: scope.departmentCode,
+    });
+    if (student) {
+      return student;
+    }
+  }
+
+  return Student.findOne({
+    prn: incomingId,
+    instituteId: scope.instituteId,
+    departmentCode: scope.departmentCode,
+  });
+}
 
 // 🔥 Upload students from frontend
-router.post("/upload", checkUploadPermission("Student"), async (req, res) => {
+router.post("/upload", auth, checkUploadPermission("Student"), async (req, res) => {
   try {
     const students = req.body; // frontend will send array
+    const scope = resolveAdminScope(req);
+
+    if (scope?.error) {
+      return res.status(401).json({ success: false, message: scope.error });
+    }
 
     if (!Array.isArray(students)) {
       return res.status(400).json({ message: "Expected array of students" });
     }
 
-    // Optional: Clear old data
-    await Student.deleteMany();
+    // Strictly replace only this admin's institute+department students.
+    await Student.deleteMany({
+      instituteId: scope.instituteId,
+      departmentCode: scope.departmentCode,
+    });
 
     const formattedStudents = await Promise.all(
       students.map(async (student) => {
@@ -25,11 +105,15 @@ router.post("/upload", checkUploadPermission("Student"), async (req, res) => {
         return {
           ...student,
           password: hashedPassword,
+          instituteId: scope?.instituteId || null,
+          instituteName: scope?.instituteName || null,
+          departmentCode: scope?.departmentCode || null,
+          departmentName: scope?.departmentName || null,
         };
       })
     );
 
-    await Student.insertMany(formattedStudents);
+    await Student.insertMany(formattedStudents, { ordered: false });
 
     res.status(200).json({
       message: "Students uploaded successfully",
@@ -37,6 +121,14 @@ router.post("/upload", checkUploadPermission("Student"), async (req, res) => {
     });
 
   } catch (error) {
+    if (error?.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "Duplicate student ID/email exists in another scope. Please use unique records per upload.",
+        error: error.message,
+      });
+    }
+
     res.status(500).json({ error: error.message });
   }
 });
@@ -204,27 +296,107 @@ router.put("/update-photo/:id", async (req, res) => {
   }
 });
 
+// 🔥 Remove a student from the authenticated teacher's division
+router.put("/unassign-division/:id", auth, async (req, res) => {
+  try {
+    const incomingId = req.params.id;
+    const scope = resolveRequestScope(req);
+
+    if (scope?.error) {
+      return res.status(401).json({ success: false, message: scope.error });
+    }
+
+    const student = await findScopedStudent(incomingId, scope);
+
+    if (!student) {
+      return res.status(404).json({ success: false, message: "Student not found" });
+    }
+
+    student.division = null;
+    student.batch = null;
+    await student.save();
+
+    const teachers = await Teacher.find({
+      instituteId: scope.instituteId,
+      departmentCode: scope.departmentCode,
+    });
+
+    for (const teacher of teachers) {
+      let dirty = false;
+
+      teacher.batches.forEach((batch) => {
+        if (!Array.isArray(batch.students)) {
+          return;
+        }
+
+        const before = batch.students.length;
+        batch.students = batch.students.filter((entry) => String(entry.studentId) !== String(student.id));
+        if (batch.students.length !== before) {
+          dirty = true;
+        }
+      });
+
+      if (dirty) {
+        await teacher.save();
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Student removed from division successfully",
+      data: {
+        _id: student._id,
+        id: student.id,
+        prn: student.prn,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to remove student from division",
+      error: error.message,
+    });
+  }
+});
+
 // 🔥 Assign division to a single student (class teacher action)
-router.put("/assign-division/:id", async (req, res) => {
+router.put("/assign-division/:id", auth, async (req, res) => {
   try {
     const incomingId = req.params.id;
     const { division } = req.body;
+    const scope = resolveRequestScope(req);
 
     if (typeof division !== "string" || !division.trim()) {
       return res.status(400).json({ success: false, message: "division is required" });
     }
 
-    let student = await Student.findOne({ id: incomingId });
+    if (scope?.error) {
+      return res.status(401).json({ success: false, message: scope.error });
+    }
+
+    let student = await Student.findOne({
+      id: incomingId,
+      instituteId: scope.instituteId,
+      departmentCode: scope.departmentCode,
+    });
 
     if (!student) {
       const mongoose = require("mongoose");
       if (mongoose.Types.ObjectId.isValid(incomingId)) {
-        student = await Student.findById(incomingId);
+        student = await Student.findOne({
+          _id: incomingId,
+          instituteId: scope.instituteId,
+          departmentCode: scope.departmentCode,
+        });
       }
     }
 
     if (!student) {
-      student = await Student.findOne({ prn: incomingId });
+      student = await Student.findOne({
+        prn: incomingId,
+        instituteId: scope.instituteId,
+        departmentCode: scope.departmentCode,
+      });
     }
 
     if (!student) {

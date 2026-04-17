@@ -84,6 +84,19 @@ export default function TeacherAssignmentModal({ visible, onClose, onSuccess }) 
       return;
     }
 
+    const selectedKey = getAssignmentKey(selectedYear, selectedDivision);
+    const assignedKeyForTeacher = Object.entries(assignments).find(([, assignment]) => {
+      return String(assignment?.teacherId) === String(selectedTeacher._id);
+    })?.[0] || null;
+
+    if (assignedKeyForTeacher && assignedKeyForTeacher !== selectedKey) {
+      Alert.alert(
+        'Already Assigned',
+        `${selectedTeacher.name} is already class teacher for ${assignedKeyForTeacher.replace('-', ' Division ')}. Remove that assignment first.`
+      );
+      return;
+    }
+
     setAssigning(true);
     try {
       const response = await axiosInstance.post('/teachers/assign-class-teacher', {
@@ -136,6 +149,12 @@ export default function TeacherAssignmentModal({ visible, onClose, onSuccess }) 
 
   const getAssignmentKey = (year, division) => `${year}-${division}`;
   const getAssignment = (year, division) => assignments[getAssignmentKey(year, division)];
+  const getTeacherAssignmentKey = (teacherId) =>
+    Object.entries(assignments).find(([, assignment]) => String(assignment?.teacherId) === String(teacherId))?.[0] || null;
+  const formatAssignmentKey = (key) => {
+    const [year, division] = String(key || '').split('-');
+    return year && division ? `${year} Division ${division}` : String(key || '');
+  };
 
   const AssignmentGrid = () => (
     <View style={styles.gridContainer}>
@@ -239,12 +258,16 @@ export default function TeacherAssignmentModal({ visible, onClose, onSuccess }) 
                               {new Date(assignment.assignedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                             </Text>
                           )}
-                          <TouchableOpacity
-                            onPress={() => handleRemoveAssignment(assignment.teacherId)}
+                          <Pressable
+                            onPress={(event) => {
+                              event?.stopPropagation?.();
+                              handleRemoveAssignment(assignment.teacherId);
+                            }}
+                            onPressIn={(event) => event?.stopPropagation?.()}
                             hitSlop={{ top: 5, bottom: 5, left: 5, right: 5 }}
                             style={{ marginTop: 4 }}>
                             <Text style={{ fontSize: 9, color: '#ef4444', fontWeight: '700' }}>Remove</Text>
-                          </TouchableOpacity>
+                          </Pressable>
                         </View>
                       ) : (
                         <View style={{ alignItems: 'center', justifyContent: 'center', flex: 1 }}>
@@ -362,8 +385,24 @@ export default function TeacherAssignmentModal({ visible, onClose, onSuccess }) 
         keyExtractor={item => item._id}
         scrollEnabled={false}
         renderItem={({ item }) => (
+          (() => {
+            const selectedKey = getAssignmentKey(selectedYear, selectedDivision);
+            const teacherAssignmentKey = getTeacherAssignmentKey(item._id);
+            const isAssignedElsewhere = Boolean(teacherAssignmentKey && teacherAssignmentKey !== selectedKey);
+            const isCurrentCT = Boolean(teacherAssignmentKey && teacherAssignmentKey === selectedKey);
+
+            const assignmentLabel = teacherAssignmentKey ? formatAssignmentKey(teacherAssignmentKey) : '';
+
+            return (
           <TouchableOpacity
             onPress={() => {
+              if (isAssignedElsewhere) {
+                Alert.alert(
+                  'Already Assigned',
+                  `${item.name} is already class teacher for ${assignmentLabel}. Remove that assignment first.`
+                );
+                return;
+              }
               setSelectedTeacher(item);
               setSearchInput('');
             }}
@@ -375,9 +414,11 @@ export default function TeacherAssignmentModal({ visible, onClose, onSuccess }) 
                     ? '#6366f1'
                     : colors.bg,
                 borderColor: colors.border,
+                opacity: isAssignedElsewhere ? 0.7 : 1,
               },
             ]}
-            activeOpacity={0.75}>
+            activeOpacity={0.75}
+            disabled={isAssignedElsewhere}>
             <View style={{ flex: 1 }}>
               <Text
                 style={[
@@ -399,9 +440,26 @@ export default function TeacherAssignmentModal({ visible, onClose, onSuccess }) 
                 ]}>
                 ID: {item.id}
               </Text>
+              {isAssignedElsewhere ? (
+                <Text style={{ marginTop: 4, fontSize: 11, color: '#f59e0b', fontWeight: '700' }}>
+                  Already assigned to {assignmentLabel}
+                </Text>
+              ) : isCurrentCT ? (
+                <Text style={{ marginTop: 4, fontSize: 11, color: '#10b981', fontWeight: '700' }}>
+                  Assigned here
+                </Text>
+              ) : null}
             </View>
-            {selectedTeacher?._id === item._id && <Text style={{ fontSize: 18 }}>✓</Text>}
+            {isCurrentCT ? (
+              <Text style={{ fontSize: 18 }}>✓</Text>
+            ) : isAssignedElsewhere ? (
+              <Text style={{ fontSize: 11, color: colors.textMuted, fontWeight: '700' }}>Assigned</Text>
+            ) : selectedTeacher?._id === item._id ? (
+              <Text style={{ fontSize: 18 }}>✓</Text>
+            ) : null}
           </TouchableOpacity>
+            );
+          })()
         )}
         ListEmptyComponent={
           <View style={styles.emptySearch}>
@@ -438,7 +496,11 @@ export default function TeacherAssignmentModal({ visible, onClose, onSuccess }) 
   );
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType={Platform.OS === 'web' ? 'fade' : 'slide'}
+      onRequestClose={onClose}>
       <Pressable
         style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.80)', justifyContent: 'flex-end' }}
         onPress={onClose}>
