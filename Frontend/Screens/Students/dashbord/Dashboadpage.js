@@ -687,19 +687,10 @@ export default function Dashboardpage({ C, onThemeToggle, onNavigateToTab, user 
     const mongoId  = user._id || user.id;
     try {
       setLoading(true);
-      const normalizedYear = normalizeYearValue(user?.year ?? user?.academicYear ?? user?.academic_year);
-
-      if (normalizedYear) {
-        const configRes = await axiosInstance.get(`/configuration/subjects/${normalizedYear}`);
-        const subjectDoc = configRes.data?.data || {};
-        setSubjects(Array.isArray(subjectDoc.subjects) ? subjectDoc.subjects : []);
-        setLabs(Array.isArray(subjectDoc.labs) ? subjectDoc.labs : []);
-      } else {
-        const res = await axiosInstance.get(`/students/subjects/${customId}`);
-        const data = res.data;
-        setSubjects(Array.isArray(data.subjects) ? data.subjects : []);
-        setLabs(Array.isArray(data.lab) ? data.lab : []);
-      }
+      const res = await axiosInstance.get(`/students/subjects/${customId}`);
+      const data = res.data || {};
+      setSubjects(Array.isArray(data.subjects) ? data.subjects : []);
+      setLabs(Array.isArray(data.labs) ? data.labs : []);
 
       const attRes  = await axiosInstance.get(`/attendance/student/${mongoId}`);
       const attData = attRes.data;

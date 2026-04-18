@@ -38,6 +38,22 @@ function RootNavigator({ navigationRef }) {
   const [initialRoute, setInitialRoute] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  const DEFAULT_ROUTE_BY_ROLE = {
+    admin: 'AdminMain',
+    teacher: 'TeacherStack',
+    student: 'StudentMain',
+    parent: 'Parentmaindashboard',
+    committee: 'ComitteiSideBar',
+  };
+
+  const ALLOWED_ROUTE_BY_ROLE = {
+    admin: new Set(['AdminMain']),
+    teacher: new Set(['TeacherStack']),
+    student: new Set(['StudentMain']),
+    parent: new Set(['Parentmaindashboard', 'Dashboardpage', 'Analytics', 'Message', 'Examresult', 'ParentFinance', 'ParentSchedule']),
+    committee: new Set(['ComitteiSideBar', 'CommitteeDash']),
+  };
+
   useEffect(() => {
     bootstrapAsync();
   }, []);
@@ -70,26 +86,27 @@ function RootNavigator({ navigationRef }) {
 
       if (token) {
         try {
-          const response = await axiosInstance.post('/auth/verify-token', {});
+          const response = await axiosInstance.post(
+            '/auth/verify-token',
+            {},
+            {
+              headers: { Authorization: `Bearer ${token}` },
+              skipAuthRedirect: true,
+            }
+          );
 
           if (response.data.valid) {
             const userRole = await AsyncStorage.getItem('userRole');
             const currentScreen = await AsyncStorage.getItem('currentScreen');
 
-            if (currentScreen && userRole) {
+            const role = String(userRole || '').toLowerCase();
+            const defaultRoute = DEFAULT_ROUTE_BY_ROLE[role] || 'Login';
+            const allowedRoutes = ALLOWED_ROUTE_BY_ROLE[role] || new Set();
+
+            if (currentScreen && allowedRoutes.has(currentScreen)) {
               setInitialRoute(currentScreen);
-            } else if (userRole === 'admin') {
-              setInitialRoute('AdminMain');
-            } else if (userRole === 'teacher') {
-              setInitialRoute('TeacherStack');
-            } else if (userRole === 'student') {
-              setInitialRoute('StudentMain');
-            } else if (userRole === 'parent') {
-              setInitialRoute('Parentmaindashboard');
-            } else if (userRole === 'committee') {
-              setInitialRoute('ComitteiSideBar');
             } else {
-              setInitialRoute('Login');
+              setInitialRoute(defaultRoute);
             }
           } else {
             setInitialRoute('Login');
