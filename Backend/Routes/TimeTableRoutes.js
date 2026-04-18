@@ -53,7 +53,12 @@ function normalizeTemplateConfig(config) {
           startTime: String(slot.startTime || "").trim(),
           endTime: String(slot.endTime || "").trim(),
         }))
-        .filter((slot) => slot.id && slot.startTime && slot.endTime)
+        // Only filter out slots that are completely missing critical data
+        .filter((slot) => {
+          // A slot must have at least: id and (startTime AND endTime) for lecture, OR just id for break
+          const hasCriticalData = slot.id && slot.startTime && slot.endTime;
+          return hasCriticalData;
+        })
     : [];
 
   return {
@@ -91,13 +96,96 @@ function resolveTemplateScope(req) {
   };
 }
 
+// ─── Resolve teacher scope from database ─────────────────────────────────────
+async function resolveTeacherScope(req) {
+  const user = req.user || {};
+
+  // ✅ FIRST: Check if scope fields already exist in the JWT token
+  if (user.instituteId) {
+    console.log(`✅ Using scope from JWT token: institute=${user.instituteId}, dept=${user.departmentCode || "__INSTITUTE__"}`);
+    return {
+      instituteId: String(user.instituteId),
+      instituteName: String(user.instituteName || "").trim(),
+      departmentCode: String(user.departmentCode || "__INSTITUTE__").trim(),
+      departmentName: String(user.departmentName || "").trim(),
+    };
+  }
+
+  // ✅ SECOND: Try to fetch from database if not in token
+  const teacherId = req.teacher?._id || req.teacher?.id || user._id || user.id;
+
+  if (!teacherId) {
+    console.warn("⚠️ No teacher ID found in request");
+    return null;
+  }
+
+  console.log(`📍 Token missing scope info, fetching from database for teacher: ${teacherId}`);
+
+  // Fetch fresh teacher doc to get institute/department info
+  const teacherDoc = await Teacher.findById(teacherId, 
+    "instituteId instituteName departmentCode departmentName"
+  ).lean();
+
+  if (!teacherDoc) {
+    console.warn(`⚠️ Teacher document not found for ID: ${teacherId}`);
+    return null;
+  }
+
+  if (!teacherDoc.instituteId) {
+    console.warn(`⚠️ Teacher ${teacherId} has no instituteId set`);
+    return null;
+  }
+
+  if (!teacherDoc.departmentCode) {
+    console.warn(`⚠️ Teacher ${teacherId} has no departmentCode set. Using __INSTITUTE__ as fallback.`);
+    // Use __INSTITUTE__ as fallback for teachers without department assignment
+    return {
+      instituteId: String(teacherDoc.instituteId),
+      instituteName: String(teacherDoc.instituteName || "").trim(),
+      departmentCode: "__INSTITUTE__", // Fallback to institute-wide template
+      departmentName: String(teacherDoc.departmentName || "").trim(),
+    };
+  }
+
+  console.log(`✅ Teacher scope resolved from DB: institute=${teacherDoc.instituteId}, dept=${teacherDoc.departmentCode}`);
+  return {
+    instituteId: String(teacherDoc.instituteId),
+    instituteName: String(teacherDoc.instituteName || "").trim(),
+    departmentCode: String(teacherDoc.departmentCode || "").trim(),
+    departmentName: String(teacherDoc.departmentName || "").trim(),
+  };
+}
+
 async function getScopedActiveTemplateDocument(scope) {
-  return TimetableTemplate.findOne({
+  // Try exact match first (institute + department specific)
+  let template = await TimetableTemplate.findOne({
     key: "default",
     isActive: true,
     instituteId: scope.instituteId,
     departmentCode: scope.departmentCode,
   }).lean();
+
+  if (template) {
+    console.log(`✅ Found scoped template for institute: ${scope.instituteId}, dept: ${scope.departmentCode}`);
+    return template;
+  }
+
+  // Fallback: Try institute-level template (no department restriction)
+  console.log(`⚠️ No department-specific template found. Trying institute-level for ${scope.instituteId}`);
+  template = await TimetableTemplate.findOne({
+    key: "default",
+    isActive: true,
+    instituteId: scope.instituteId,
+    departmentCode: { $in: ["__INSTITUTE__", ""] }, // Institute-wide template
+  }).lean();
+
+  if (template) {
+    console.log(`✅ Found institute-level template for ${scope.instituteId}`);
+    return template;
+  }
+
+  console.log(`❌ No template found for scope: institute=${scope.instituteId}, dept=${scope.departmentCode}`);
+  return null;
 }
 
 let templateIndexMigrationDone = false;
@@ -199,14 +287,29 @@ function parseRollNo(roll_no) {
 
 router.get("/meta", auth, async (req, res) => {
   try {
-    const scope = resolveTemplateScope(req);
+    // Try to resolve admin scope first
+    let scope = resolveTemplateScope(req);
+
+    // If not admin, try to resolve teacher scope
+    if (!scope) {
+      scope = await resolveTeacherScope(req);
+    }
+
+    // If we have a scope error, return it
     if (scope?.error) {
       return res.status(401).json({ success: false, message: scope.error });
     }
 
-    const templateDoc = scope
-      ? await getScopedActiveTemplateDocument(scope)
-      : await getActiveTemplateDocument();
+    // If no scope and not admin, deny access
+    if (!scope) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have permission to access this resource, or your institute/department is not configured",
+      });
+    }
+
+    // Fetch the scoped template
+    const templateDoc = await getScopedActiveTemplateDocument(scope);
     const teachers = await Teacher.find({}, "_id id name subjects").lean();
 
     const studentAgg = await Student.aggregate([
@@ -245,6 +348,12 @@ router.get("/meta", auth, async (req, res) => {
         divisions,
         template: templateDoc ? normalizeTemplateConfig(templateDoc.customConfig) : DEFAULT_TEMPLATE_CONFIG,
         templateSaved: Boolean(templateDoc),
+        instituteInfo: {
+          instituteId: scope.instituteId,
+          instituteName: scope.instituteName,
+          departmentCode: scope.departmentCode,
+          departmentName: scope.departmentName,
+        },
       },
     });
   } catch (err) {
@@ -262,29 +371,50 @@ router.get("/meta", auth, async (req, res) => {
 
 router.get("/template", auth, async (req, res) => {
   try {
-    const scope = resolveTemplateScope(req);
-    if (scope?.error) {
-      return res.status(401).json({ success: false, message: scope.error });
+    // Try to resolve admin scope first
+    let scope = resolveTemplateScope(req);
+
+    // If not admin, try to resolve teacher scope
+    if (!scope) {
+      scope = await resolveTeacherScope(req);
     }
 
-    const templateDoc = scope
-      ? await getScopedActiveTemplateDocument(scope)
-      : await getActiveTemplateDocument();
+    console.log(`📍 Resolved scope for template fetch:`, JSON.stringify(scope, null, 2));
 
+    // If we have a scope, fetch the scoped template
+    let templateDoc = null;
+    if (scope && !scope.error) {
+      templateDoc = await getScopedActiveTemplateDocument(scope);
+    } else if (scope?.error) {
+      return res.status(401).json({ success: false, message: scope.error });
+    } else if (!scope) {
+      // No scope - user is neither admin nor teacher with proper assignment
+      return res.status(403).json({
+        success: false,
+        message: "You do not have permission to access templates, or your institute/department is not configured",
+      });
+    }
+
+    // If no template found, return appropriate message
     if (!templateDoc) {
+      console.log(`⚠️ No template found for scope. Returning default config with empty slots.`);
       return res.status(200).json({
         success: true,
         data: {
           customConfig: DEFAULT_TEMPLATE_CONFIG,
           templateSaved: false,
+          message: "Template not yet uploaded by your institute/department",
         },
       });
     }
 
+    const normalizedConfig = normalizeTemplateConfig(templateDoc.customConfig);
+    console.log("📋 Template found, normalized config:", JSON.stringify(normalizedConfig, null, 2));
+
     res.status(200).json({
       success: true,
       data: {
-        customConfig: normalizeTemplateConfig(templateDoc.customConfig),
+        customConfig: normalizedConfig,
         templateSaved: true,
       },
     });

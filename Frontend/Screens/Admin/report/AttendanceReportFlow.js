@@ -1010,6 +1010,35 @@ function StudentReportScreen({ student, year, division, onBack }) {
   const [dateTo,   setDateTo]               = useState(null);
   const [realAttendance, setRealAttendance] = useState(null);
   const [attLoading, setAttLoading]         = useState(false);
+  const [subjectsLoading, setSubjectsLoading] = useState(false);
+  const [backendSubjects, setBackendSubjects] = useState([]);
+  const [backendLabs, setBackendLabs] = useState([]);
+
+  // Fetch subjects from backend based on year
+  useEffect(() => {
+    (async () => {
+      const yearNum = typeof year === 'object' ? (year.id || year.short || year).toString().replace(/\D/g, '') : year.toString().replace(/\D/g, '');
+      if (!yearNum) return;
+      
+      setSubjectsLoading(true);
+      try {
+        const res = await axiosInstance.get('/subjects', {
+          params: { year: yearNum }
+        });
+        if (res.data.success && res.data.data) {
+          setBackendSubjects(res.data.data.subjects || []);
+          setBackendLabs(res.data.data.labs || []);
+        }
+      } catch (err) {
+        console.error('Error fetching subjects:', err.message);
+        // Fall back to dummy data if endpoint fails
+        setBackendSubjects(LECTURE_SUBJECTS);
+        setBackendLabs(LAB_SUBJECTS);
+      } finally {
+        setSubjectsLoading(false);
+      }
+    })();
+  }, [year]);
 
   // Fetch individual attendance from backend
   useEffect(() => {
@@ -1036,10 +1065,10 @@ function StudentReportScreen({ student, year, division, onBack }) {
     })();
   }, [student.mongoId, student.id]);
 
-  // Derive subjects from student record (real data) or fall back to defaults
-  const stLectureSubs = student.subjects || LECTURE_SUBJECTS;
-  const stLabSubs = student.labs || LAB_SUBJECTS;
-  const stAllSubs = student.allSubjects || ALL_SUBJECTS;
+  // Use fetched subjects if available, otherwise fall back to dummy data
+  const stLectureSubs = backendSubjects.length > 0 ? backendSubjects : LECTURE_SUBJECTS;
+  const stLabSubs = backendLabs.length > 0 ? backendLabs : LAB_SUBJECTS;
+  const stAllSubs = [...stLectureSubs, ...stLabSubs];
 
   // Use real backend attendance if available, otherwise fall back to what was passed in
   // Case-insensitive merge: subject stored as "DATA STRUCTURE" in attendance but "Data Structure" in student profile

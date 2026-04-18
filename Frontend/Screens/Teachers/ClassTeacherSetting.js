@@ -284,19 +284,42 @@ export function TimetableManagementScreen() {
   const [saving,         setSaving]         = useState(false);
   const [loadError,      setLoadError]      = useState(null);
 
+  /* ── Template State ───────────────────────────────────────────── */
+  const [templateSlots,       setTemplateSlots]       = useState([]); // Fetched from backend
+  const [templateWorkingDays, setTemplateWorkingDays] = useState([]); // Fetched from backend
+  const [templateLoaded,      setTemplateLoaded]      = useState(false);
+
   /**
    * timetables keyed by div_batch:
    * { 'A_A1': { Monday: { t1: { subject, teacher }, … }, … }, … }
    */
   const emptyDaySlots = () =>
-    Object.fromEntries(SLOTS.map(s => [s.id, { subject: '', teacher: '' }]));
+    Object.fromEntries((templateSlots.length > 0 ? templateSlots : SLOTS).map(s => [s.id, { subject: '', teacher: '' }]));
   const emptyGrid = () =>
-    Object.fromEntries(DAYS.map(d => [d, emptyDaySlots()]));
+    Object.fromEntries((templateWorkingDays.length > 0 ? templateWorkingDays : DAYS).map(d => [d, emptyDaySlots()]));
 
   const [timetables, setTimetables] = useState({});
 
   const ttKey  = activeDiv && activeBatch ? `${activeDiv}_${activeBatch}` : null;
   const getTT  = () => ttKey ? (timetables[ttKey] ?? emptyGrid()) : emptyGrid();
+
+  /* ── Build grid columns from template ──────────────────────────── */
+  const buildGridColumns = () => {
+    if (templateSlots.length === 0) return [];
+    
+    return templateSlots.map((slot) => ({
+      kind: slot.type === 'break' ? 'break' : 'slot',
+      label: slot.label,
+      slotId: slot.id,
+      startTime: slot.startTime,
+      endTime: slot.endTime,
+      type: slot.type,
+    }));
+  };
+
+  const dynamicGridCols = buildGridColumns();
+  const dynamicDays = templateWorkingDays.length > 0 ? templateWorkingDays : DAYS;
+  const dynamicSlots = templateSlots.length > 0 ? templateSlots : SLOTS;
 
   /* ── Edit modal ───────────────────────────────────────────────── */
   const [editModal,   setEditModal]   = useState(false);
@@ -369,17 +392,36 @@ export function TimetableManagementScreen() {
           return;
         }
 
-        // Fetch timetable if classId exists
-        if (cid) {
-          try {
-            const ttRes = await axiosInstance.get(`/class-timetable/${cid}`);
-            if (ttRes.data?.success && ttRes.data?.data) {
-              setTimetables(ttRes.data.data);
+        // Fetch timetable template from backend
+        try {
+          const templateRes = await axiosInstance.get(`/timetable/template`);
+          if (templateRes.data?.success && templateRes.data?.data?.customConfig) {
+            const config = templateRes.data.data.customConfig;
+            console.log('📋 Template fetched:', config);
+            
+            if (Array.isArray(config.workingDays)) {
+              setTemplateWorkingDays(config.workingDays);
             }
-          } catch (ttErr) {
-            console.warn('⚠️ Timetable fetch warning:', ttErr.message);
-            // Don't error out, timetable might just be empty
+            
+            if (Array.isArray(config.slots)) {
+              const processedSlots = config.slots.map(slot => ({
+                id: slot.id || `slot-${Math.random().toString(36).slice(2, 8)}`,
+                type: slot.type || 'lecture',
+                label: slot.label || '',
+                startTime: slot.startTime || '',
+                endTime: slot.endTime || '',
+              }));
+              setTemplateSlots(processedSlots);
+            }
+            
+            setTemplateLoaded(true);
+          } else {
+            console.warn('⚠️ Template not available, using defaults');
+            setTemplateLoaded(true);
           }
+        } catch (templateErr) {
+          console.warn('⚠️ Template fetch warning:', templateErr.message);
+          setTemplateLoaded(true); // Don't block on template
         }
       } catch (err) {
         console.error('🔴 TimetableManagement: Unexpected error', err);
@@ -389,6 +431,46 @@ export function TimetableManagementScreen() {
       }
     })();
   }, []);
+
+  /* ── Fetch Timetable Data ────────────────────────────────────────────── */
+  useEffect(() => {
+    if (!assignedYear || !assignedDiv) return; // Wait until we have year & division
+
+    (async () => {
+      try {
+        // Extract year number from format "1st Year", "2nd Year", etc.
+        const yearMatch = assignedYear.match(/^(\d+)/);
+        const yearNum = yearMatch ? yearMatch[1] : null;
+        
+        if (!yearNum) {
+          console.warn('⚠️ Could not extract year number from:', assignedYear);
+          return;
+        }
+
+        // Fetch timetable for assigned year, division, and initial batch
+        const initialBatch = `${assignedDiv}1`;
+        console.log(`📚 Fetching timetable for year=${yearNum}, division=${assignedDiv}, batch=${initialBatch}`);
+        
+        const ttRes = await axiosInstance.get('/timetable', {
+          params: {
+            year: yearNum,
+            division: assignedDiv,
+            batch: initialBatch,
+          },
+        });
+
+        if (ttRes.data?.success && ttRes.data?.data) {
+          console.log('✅ Timetable fetched:', ttRes.data.data);
+          setTimetables(ttRes.data.data);
+        } else {
+          console.warn('⚠️ No timetable data returned');
+        }
+      } catch (err) {
+        console.warn('⚠️ Timetable fetch error:', err.message);
+        // Don't error out, timetable might just be empty
+      }
+    })();
+  }, [assignedYear, assignedDiv]);
 
   /* ── Helpers ──────────────────────────────────────────────────── */
   const openEdit = (day, slotId) => {
@@ -613,9 +695,23 @@ export function TimetableManagementScreen() {
               {ACADEMIC_YEARS[yearIdx].split('(')[0].trim()} • Division {assignedDiv} • Batch {activeBatch}
             </Text>
           </View>
+
+          {/* ── Template Info Banner ─────────────────────────────── */}
+          {templateLoaded && dynamicDays.length > 0 && dynamicSlots.length > 0 && (
+            <View style={[ts.templateInfoBanner, { backgroundColor: T.accentSoft, borderColor: T.accent }]}>
+              <Text style={[ts.templateInfoIcon]}>📋</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={[ts.templateInfoLabel, { color: T.accentBright }]}>Template Loaded</Text>
+                <Text style={[ts.templateInfoText, { color: T.textSec }]}>
+                  {dynamicDays.length} working days • {dynamicSlots.filter(s => s.type === 'lecture').length} lectures • {dynamicSlots.filter(s => s.type === 'break').length} breaks
+                </Text>
+              </View>
+              <Text style={[ts.templateInfoCheckmark, { color: T.accentBright }]}>✓</Text>
+            </View>
+          )}
         </View>
 
-        {/* \u2500\u2500 Timetable Grid \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */}
+        {/* ──────── Timetable Grid ────────────────────────────────────────────────────────────────────── */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={ts.gridScrollH}>
           <View style={[ts.grid, { borderColor: T.border }]}>
 
@@ -625,33 +721,38 @@ export function TimetableManagementScreen() {
                 <Text style={[ts.gridCornerText, { color: T.textMuted }]}>DAY / TIME</Text>
               </View>
 
-              {GRID_COLS.map((col, ci) => {
+              {dynamicGridCols.map((col, ci) => {
                 if (col.kind === 'break') {
                   return (
                     <View key={`bh_${ci}`} style={[ts.gridBreakHeaderCell, { borderRightColor: T.border }]}>
-                      <Text style={[ts.gridBreakHeaderText, { color: T.textMuted }]}>{col.time}</Text>
+                      <Text style={[ts.gridBreakHeaderText, { color: T.textMuted }]}>
+                        {col.startTime && col.endTime 
+                          ? `${col.startTime} – ${col.endTime}`
+                          : col.label}
+                      </Text>
                     </View>
                   );
                 }
-                const slot = SLOTS[col.slotIdx];
                 return (
-                  <View key={slot.id} style={[ts.gridSlotHeaderCell, { borderRightColor: T.border }]}>
-                    <Text style={[ts.gridSlotTime,  { color: T.textPrimary }]}>{slot.time}</Text>
-                    <Text style={[ts.gridSlotLabel, { color: T.textMuted   }]}>{slot.label.toUpperCase()}</Text>
+                  <View key={col.slotId} style={[ts.gridSlotHeaderCell, { borderRightColor: T.border }]}>
+                    <Text style={[ts.gridSlotTime,  { color: T.textPrimary }]}>
+                      {col.startTime && col.endTime ? `${col.startTime} – ${col.endTime}` : ''}
+                    </Text>
+                    <Text style={[ts.gridSlotLabel, { color: T.textMuted   }]}>{col.label.toUpperCase()}</Text>
                   </View>
                 );
               })}
             </View>
 
             {/* Day rows */}
-            {DAYS.map((day, di) => (
+            {dynamicDays.map((day, di) => (
               <View
                 key={day}
                 style={[
                   ts.gridRow,
                   {
                     borderBottomColor: T.border,
-                    borderBottomWidth: di < DAYS.length - 1 ? 1 : 0,
+                    borderBottomWidth: di < dynamicDays.length - 1 ? 1 : 0,
                   },
                 ]}>
                 {/* Day label */}
@@ -659,7 +760,7 @@ export function TimetableManagementScreen() {
                   <Text style={[ts.gridDayText, { color: T.textPrimary }]}>{day}</Text>
                 </View>
 
-                {GRID_COLS.map((col, ci) => {
+                {dynamicGridCols.map((col, ci) => {
                   if (col.kind === 'break') {
                     return (
                       <View key={`br_${day}_${ci}`} style={[ts.gridBreakCell, { borderRightColor: T.border, backgroundColor: T.surface }]}>
@@ -668,15 +769,15 @@ export function TimetableManagementScreen() {
                     );
                   }
 
-                  const slot   = SLOTS[col.slotIdx];
-                  const entry  = currentTT[day]?.[slot.id] || { subject: '', teacher: '' };
+                  const entry  = currentTT[day]?.[col.slotId] || { subject: '', teacher: '' };
                   const filled = !!entry.subject;
-                  const color  = SLOT_COLORS[col.slotIdx % SLOT_COLORS.length];
+                  // Use a deterministic color based on slot index
+                  const color  = SLOT_COLORS[ci % SLOT_COLORS.length];
 
                   return (
                     <TouchableOpacity
-                      key={`${day}_${slot.id}`}
-                      onPress={() => openEdit(day, slot.id)}
+                      key={`${day}_${col.slotId}`}
+                      onPress={() => openEdit(day, col.slotId)}
                       activeOpacity={0.75}
                       style={[
                         ts.gridCell,
@@ -689,7 +790,7 @@ export function TimetableManagementScreen() {
                       ]}>
                       {filled ? (
                         <View style={ts.gridCellFilled}>
-                          <Text style={[ts.gridCellSlotLabel, { color }]}>{slot.label}</Text>
+                          <Text style={[ts.gridCellSlotLabel, { color }]}>{col.label}</Text>
                           <Text style={[ts.gridCellSubject,   { color: T.textPrimary }]} numberOfLines={2}>
                             {entry.subject}
                           </Text>
@@ -718,7 +819,7 @@ export function TimetableManagementScreen() {
         <View style={{ height: 32 }} />
       </ScrollView>
 
-      {/* \u2500\u2500 Edit Modal \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */}
+      {/* ── Edit Modal ─────────────────────────────────────────────── */}
       <Modal
         visible={editModal}
         transparent
@@ -727,12 +828,21 @@ export function TimetableManagementScreen() {
         <Pressable style={ts.modalBackdrop} onPress={() => setEditModal(false)} />
         <View style={[ts.modalCard, { backgroundColor: T.modalBg, borderColor: T.border, shadowColor: T.shadowColor }]}>
           <View style={ts.modalHandle} />
-          <Text style={[ts.modalTitle, { color: T.textPrimary }]}>
-            {editCell?.day}   {SLOTS.find(s => s.id === editCell?.slotId)?.label}
-          </Text>
-          <Text style={[ts.modalTime, { color: T.textMuted }]}>
-            {SLOTS.find(s => s.id === editCell?.slotId)?.time}
-          </Text>
+          {(() => {
+            const col = dynamicGridCols.find(c => c.slotId === editCell?.slotId);
+            return (
+              <>
+                <Text style={[ts.modalTitle, { color: T.textPrimary }]}>
+                  {editCell?.day} • {col?.label || 'Slot'}
+                </Text>
+                <Text style={[ts.modalTime, { color: T.textMuted }]}>
+                  {col?.startTime && col?.endTime 
+                    ? `${col.startTime} – ${col.endTime}` 
+                    : col?.label}
+                </Text>
+              </>
+            );
+          })()}
 
           <Text style={[ts.modalFieldLabel, { color: T.textSec }]}>Subject</Text>
           <TextInput
@@ -862,6 +972,17 @@ const ts = StyleSheet.create({
   activeDot:       { width: 7, height: 7, borderRadius: 4 },
   activeBadgeText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
   breadcrumbText:  { fontSize: 12 },
+
+  /* Template Info Banner */
+  templateInfoBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10,
+    marginTop: 12,
+  },
+  templateInfoIcon: { fontSize: 18 },
+  templateInfoLabel: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
+  templateInfoText: { fontSize: 10, marginTop: 2, lineHeight: 14 },
+  templateInfoCheckmark: { fontSize: 14, fontWeight: '700' },
 
   /* Grid */
   gridScrollH: { flex: 1 },
