@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const Student = require("../Models/Student");
+const Subject = require("../Models/Subject");
 const Teacher = require("../Models/Teacher");
 const bcrypt = require("bcryptjs");
 const multer = require("multer");
@@ -105,6 +106,8 @@ router.post("/upload", auth, checkUploadPermission("Student"), async (req, res) 
         return {
           ...student,
           password: hashedPassword,
+          parent_pass: "Pass@123",
+          parents_pass: "Pass@123",
           instituteId: scope?.instituteId || null,
           instituteName: scope?.instituteName || null,
           departmentCode: scope?.departmentCode || null,
@@ -259,13 +262,41 @@ router.get("/year/:year/division/:division", async (req, res) => {
 // 🔥 Get subjects of logged-in student
 router.get("/subjects/:id", async (req, res) => {
   try {
-    const student = await Student.findOne({ id: req.params.id });
+    const incomingId = req.params.id;
+    let student = await Student.findOne({ id: incomingId }).lean();
+
+    if (!student) {
+      const mongoose = require("mongoose");
+      if (mongoose.Types.ObjectId.isValid(incomingId)) {
+        student = await Student.findById(incomingId).lean();
+      }
+    }
+
+    if (!student) {
+      student = await Student.findOne({ prn: incomingId }).lean();
+    }
 
     if (!student) {
       return res.status(404).json({ message: "Student not found" });
     }
 
-    res.json(student);
+    const subjectConfig = await Subject.findOne({
+      year: String(student.year || ""),
+      instituteId: String(student.instituteId || ""),
+      departmentCode: String(student.departmentCode || "").trim(),
+    }).lean();
+
+    const fallbackSubjects = Array.isArray(student.subjects) ? student.subjects : [];
+    const fallbackLabs = Array.isArray(student.lab) ? student.lab : [];
+
+    return res.status(200).json({
+      success: true,
+      year: String(student.year || ""),
+      instituteId: student.instituteId || null,
+      departmentCode: student.departmentCode || null,
+      subjects: Array.isArray(subjectConfig?.subjects) ? subjectConfig.subjects : fallbackSubjects,
+      labs: Array.isArray(subjectConfig?.labs) ? subjectConfig.labs : fallbackLabs,
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

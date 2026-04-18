@@ -69,12 +69,12 @@ router.post("/login", async (req, res) => {
     }
 
     // ================= CHECK STUDENT (PRIORITY) =================
-    // If user ID exists in both Student and Parent, fetch from Student
+    // If user ID exists in Student, allow either student-password or parent-password login.
     const student = await Student.findOne({ id: email });
     if (student) {
       console.log("👤 Student found:", email);
-      const isMatch = await bcrypt.compare(password, student.password);
-      if (isMatch) {
+      const isStudentPasswordMatch = await bcrypt.compare(password, student.password).catch(() => false);
+      if (isStudentPasswordMatch) {
         // Check if Student login is allowed by committee
         const canLogin = await checkLoginPermission("Student");
         if (!canLogin) {
@@ -85,29 +85,44 @@ router.post("/login", async (req, res) => {
         const token = generateToken(student, "student");
         console.log("✅ Student logged in successfully\n");
         return res.json({ role: "student", user: student, token });
-      } else {
-        console.log("❌ Password incorrect for student");
       }
-    }
 
-    // ================= CHECK PARENT (only if not a student) =================
-    const parent = await Parent.findOne({ id: email });
-    if (parent) {
-      console.log("👥 Parent found:", email);
-      if (password.trim() === parent.password.trim()) {
+      const parentPass = student.parent_pass || student.parents_pass || "";
+      const isParentPasswordMatch =
+        typeof parentPass === "string" && parentPass.length > 0 && password.trim() === parentPass.trim();
+
+      if (isParentPasswordMatch) {
         // Check if Parent login is allowed by committee
         const canLogin = await checkLoginPermission("Parent");
         if (!canLogin) {
           console.log("🚫 Parent login denied by committee permission");
           return res.status(403).json({ message: "Login access for Parents has been denied by the committee" });
         }
+
+        const parentProfile = await Parent.findOne({ id: student.id }).lean();
+        const parentUser = {
+          _id: String(student.id),
+          id: String(student.id),
+          name: parentProfile?.name || `${student.name}'s Parent`,
+          email: parentProfile?.email || student.email,
+          prn: student.prn || null,
+          roll_no: student.roll_no || null,
+          branch: student.branch || null,
+          division: student.division || null,
+          year: student.year || null,
+          instituteId: student.instituteId || null,
+          instituteName: student.instituteName || null,
+          departmentCode: student.departmentCode || null,
+          departmentName: student.departmentName || null,
+        };
+
         console.log("🔐 Password matched for parent");
-        const token = generateToken(parent, "parent");
+        const token = generateToken(parentUser, "parent");
         console.log("✅ Parent logged in successfully\n");
-        return res.json({ role: "parent", user: parent, token });
-      } else {
-        console.log("❌ Password incorrect for parent");
+        return res.json({ role: "parent", user: parentUser, token });
       }
+
+      console.log("❌ Password incorrect for student/parent");
     }
 
     // ================= CHECK TEACHER =================

@@ -71,6 +71,19 @@ axiosInstance.interceptors.response.use(
 
     // 🔐 Handle 401 (Unauthorized)
     if (error.response?.status === 401) {
+      const skipAuthRedirect = error.config?.skipAuthRedirect === true;
+      const serverMessage = String(error.response?.data?.message || '').toLowerCase();
+      const isTokenRelated =
+        serverMessage.includes('token expired') ||
+        serverMessage.includes('invalid token') ||
+        serverMessage.includes('invalid or expired token') ||
+        serverMessage.includes('access token required') ||
+        serverMessage.includes('token has been revoked');
+
+      if (skipAuthRedirect || !isTokenRelated) {
+        return Promise.reject(error);
+      }
+
       console.log("⏰ Session expired → Logging out...");
 
       await AsyncStorage.multiRemove([

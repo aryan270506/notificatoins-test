@@ -25,6 +25,8 @@ const studentSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
+  parent_pass: { type: String, default: "Pass@123" },
+  parents_pass: { type: String, default: "Pass@123" },
   id: { type: String, required: true, unique: true },
   year: { type: String, required: true },
 

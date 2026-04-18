@@ -4,9 +4,55 @@ const { checkUploadPermission } = require("../Middleware/permissionCheck");
 
 const Student        = require("../Models/Student");
 const Parent         = require("../Models/Parent");       // adjust path if different
+const Subject        = require("../Models/Subject");
 const Timetable      = require("../Models/Timetable");
 const StudentFinance = require("../Models/Finance");
 const ExamMarks      = require("../Models/Exammarks");
+
+async function findLinkedStudent(parent, parentId) {
+  let student = null;
+
+  if (parent?.prn) {
+    student = await Student.findOne({ prn: parent.prn }).lean();
+  }
+
+  if (!student && parent?.roll_no) {
+    student = await Student.findOne({ roll_no: parent.roll_no }).lean();
+  }
+
+  // Parent login can now be based on Student.id directly.
+  if (!student && parentId) {
+    student = await Student.findOne({ id: String(parentId) }).lean();
+  }
+
+  return student;
+}
+
+async function getScopedSubjectsForStudent(student) {
+  const fallback = {
+    subjects: Array.isArray(student?.subjects) ? student.subjects : [],
+    labs: Array.isArray(student?.lab) ? student.lab : [],
+  };
+
+  if (!student?.year || !student?.instituteId || !student?.departmentCode) {
+    return fallback;
+  }
+
+  const subjectConfig = await Subject.findOne({
+    year: String(student.year),
+    instituteId: String(student.instituteId),
+    departmentCode: String(student.departmentCode).trim(),
+  }).lean();
+
+  if (!subjectConfig) {
+    return fallback;
+  }
+
+  return {
+    subjects: Array.isArray(subjectConfig.subjects) ? subjectConfig.subjects : [],
+    labs: Array.isArray(subjectConfig.labs) ? subjectConfig.labs : [],
+  };
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 🔥 Upload Parents (JSON Array)
@@ -99,16 +145,22 @@ router.get("/subjects/:parentId", async (req, res) => {
   try {
     const { parentId } = req.params;
 
-    // 🔥 IMPORTANT: you are using custom "id", not _id
-    const parent = await Parent.findOne({ id: parentId }).lean();
-
+    let parent = await Parent.findOne({ id: parentId }).lean();
     if (!parent) {
-      return res.status(404).json({ message: "Parent not found" });
+      parent = await Parent.findById(parentId).lean().catch(() => null);
     }
 
+    const student = await findLinkedStudent(parent, parentId);
+
+    if (!student) {
+      return res.status(404).json({ message: "Linked student not found" });
+    }
+
+    const scopedSubjects = await getScopedSubjectsForStudent(student);
+
     res.status(200).json({
-      subjects: parent.subjects || [],
-      labs: parent.lab || [],   // your field name is "lab", not "labs"
+      subjects: scopedSubjects.subjects,
+      labs: scopedSubjects.labs,
     });
 
   } catch (error) {
@@ -182,7 +234,7 @@ router.get("/finance/:parentId", async (req, res) => {
     // Look up parent by custom id first, then by MongoDB _id
     let parent = await Parent.findOne({ id: parentId }).lean();
     if (!parent) {
-      parent = await Parent.findById(parentId).lean();
+      parent = await Parent.findById(parentId).lean().catch(() => null);
     }
     if (!parent) {
       return res.status(404).json({ success: false, message: "Parent not found" });
@@ -244,21 +296,18 @@ router.get("/child-info/:parentId", async (req, res) => {
     const { parentId } = req.params;
 
     let parent = await Parent.findOne({ id: parentId }).lean();
-    if (!parent) parent = await Parent.findById(parentId).lean();
-    if (!parent) {
-      return res.status(404).json({ success: false, message: "Parent not found" });
-    }
+    if (!parent) parent = await Parent.findById(parentId).lean().catch(() => null);
 
-    // Find linked student via PRN or roll_no
-    let student = null;
-    if (parent.prn)     student = await Student.findOne({ prn: parent.prn }).lean();
-    if (!student && parent.roll_no) student = await Student.findOne({ roll_no: parent.roll_no }).lean();
+    const student = await findLinkedStudent(parent, parentId);
+
     if (!student) {
       return res.status(404).json({
         success: false,
         message: "Linked student not found.",
       });
     }
+
+    const scopedSubjects = await getScopedSubjectsForStudent(student);
 
     return res.status(200).json({
       success: true,
@@ -272,8 +321,8 @@ router.get("/child-info/:parentId", async (req, res) => {
         branch:   student.branch,
         division: student.division,
         year:     student.year,
-        subjects: student.subjects || [],
-        labs:     student.lab || [],
+        subjects: scopedSubjects.subjects,
+        labs:     scopedSubjects.labs,
       },
     });
   } catch (err) {
@@ -293,21 +342,21 @@ router.get("/exam-results/:parentId", async (req, res) => {
     const { parentId } = req.params;
 
     let parent = await Parent.findOne({ id: parentId }).lean();
-    if (!parent) parent = await Parent.findById(parentId).lean();
+    if (!parent) parent = await Parent.findById(parentId).lean().catch(() => null);
     if (!parent) {
       return res.status(404).json({ success: false, message: "Parent not found" });
     }
 
     // Find the linked student
-    let student = null;
-    if (parent.prn)     student = await Student.findOne({ prn: parent.prn }).lean();
-    if (!student && parent.roll_no) student = await Student.findOne({ roll_no: parent.roll_no }).lean();
+    const student = await findLinkedStudent(parent, parentId);
     if (!student) {
       return res.status(404).json({
         success: false,
         message: "Linked student not found.",
       });
     }
+
+    const scopedSubjects = await getScopedSubjectsForStudent(student);
 
     // ── 1. Build a base subject map from ALL enrolled subjects ──────────────
     //    student.subjects = ["Mathematics", "Physics", …]
@@ -330,8 +379,8 @@ router.get("/exam-results/:parentId", async (req, res) => {
       }
     };
 
-    (student.subjects || []).forEach((s) => ensureSubject(s, "Theory"));
-    (student.lab      || []).forEach((s) => ensureSubject(s, "Lab"));
+    (scopedSubjects.subjects || []).forEach((s) => ensureSubject(s, "Theory"));
+    (scopedSubjects.labs || []).forEach((s) => ensureSubject(s, "Lab"));
 
     // ── 2. Query all ExamMarks for this student's year & division ───────────
     //    This fetches ALL exam-mark docs that *could* relate to the student
