@@ -7,6 +7,7 @@ import {
   Animated, Dimensions, Platform, StatusBar, Modal,
   useWindowDimensions, ActivityIndicator,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
@@ -17,12 +18,12 @@ import { ThemeContext } from './TeacherStack';
 
 /* ─── Colors ─────────────────────────────────────────────────────────────── */
 const C_DARK = {
-  bg:           '#07090F',
-  surface:      '#0D1120',
-  surfaceEl:    '#111827',
-  card:         '#0F1523',
-  border:       '#1A2035',
-  borderLight:  '#1E2845',
+  bg:           '#0B1020',
+  surface:      '#121A33',
+  surfaceEl:    '#192543',
+  card:         '#161F3D',
+  border:       '#29365C',
+  borderLight:  '#334572',
   accent:       '#3B82F6',
   accentSoft:   'rgba(59,130,246,0.14)',
   accentGlow:   'rgba(59,130,246,0.06)',
@@ -37,8 +38,8 @@ const C_DARK = {
   red:          '#EF4444',
   redSoft:      'rgba(239,68,68,0.14)',
   textPrimary:  '#EEF2FF',
-  textSec:      '#8B96BE',
-  textMuted:    '#3D4A6A',
+  textSec:      '#AAB7DE',
+  textMuted:    '#6C7FAF',
   cancelled:    '#EF4444',
   cancelledSoft:'rgba(239,68,68,0.14)',
   postponed:    '#F59E0B',
@@ -223,7 +224,10 @@ export default function TimetableScreen({ navigation, route, user }) {
   const C = isDark ? C_DARK : C_LIGHT;
   const styles = makeStyles(C);
   const TYPE_LABELS = TYPE_LABELS_FN(C);
-  const teacherId   = user?._id || route?.params?.teacherId || route?.params?.user?._id;
+  const [resolvedTeacherId, setResolvedTeacherId] = useState(
+    user?._id || user?.id || route?.params?.teacherId || route?.params?.user?._id || route?.params?.user?.id || null
+  );
+  const teacherId   = resolvedTeacherId;
   const teacherName = user?.name || route?.params?.user?.name || 'Teacher';
 
   const { width }  = useWindowDimensions();
@@ -248,9 +252,32 @@ export default function TimetableScreen({ navigation, route, user }) {
   const [postponeDate, setPostponeDate] = useState(POSTPONE_DATE_OPTIONS[0]);
   const [postponeTime, setPostponeTime] = useState(POSTPONE_TIME_OPTIONS[0]);
 
-  const fadeAnim  = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(16)).current;
+  const fadeAnim  = useRef(new Animated.Value(Platform.OS === 'web' ? 1 : 0)).current;
+  const slideAnim = useRef(new Animated.Value(Platform.OS === 'web' ? 0 : 16)).current;
   const weekStart = getWeekStart();
+
+  useEffect(() => {
+    let mounted = true;
+
+    const resolveTeacherId = async () => {
+      const fromProps = user?._id || user?.id || route?.params?.teacherId || route?.params?.user?._id || route?.params?.user?.id;
+      if (fromProps) {
+        if (mounted) setResolvedTeacherId(String(fromProps));
+        return;
+      }
+
+      const fromStorage =
+        (await AsyncStorage.getItem('teacherId')) ||
+        (await AsyncStorage.getItem('userId'));
+
+      if (fromStorage && mounted) {
+        setResolvedTeacherId(String(fromStorage));
+      }
+    };
+
+    resolveTeacherId().catch(() => {});
+    return () => { mounted = false; };
+  }, [user?._id, user?.id, route?.params?.teacherId, route?.params?.user?._id, route?.params?.user?.id]);
 
   /* ── Fetch teacher's assigned classes from the Timetable collection ────────
    *
@@ -322,6 +349,12 @@ export default function TimetableScreen({ navigation, route, user }) {
   }, [fetchSchedule, fetchStatuses]);
 
   useEffect(() => {
+    if (Platform.OS === 'web') {
+      fadeAnim.setValue(1);
+      slideAnim.setValue(0);
+      return;
+    }
+
     Animated.parallel([
       Animated.timing(fadeAnim,  { toValue: 1, duration: 500, useNativeDriver: true }),
       Animated.spring(slideAnim, { toValue: 0, tension: 80, friction: 14, useNativeDriver: true }),

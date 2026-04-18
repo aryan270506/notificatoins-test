@@ -610,8 +610,19 @@ router.get("/teacher/:teacherId", async (req, res) => {
   try {
     const { teacherId } = req.params;
 
-    // ✅ Get teacher's scope info
-    const teacher = await Teacher.findById(teacherId, "instituteId departmentCode").lean();
+    // Resolve teacher by Mongo _id first, then fallback to custom teacher id
+    let teacher = null;
+    if (mongoose.Types.ObjectId.isValid(teacherId)) {
+      teacher = await Teacher.findById(teacherId, "_id instituteId departmentCode").lean();
+    }
+    if (!teacher) {
+      teacher = await Teacher.findOne({ id: String(teacherId) }, "_id instituteId departmentCode").lean();
+    }
+    if (!teacher) {
+      return res.status(404).json({ success: false, message: "Teacher not found" });
+    }
+
+    const resolvedTeacherId = String(teacher._id);
     
     // Build filter for timetables scoped to teacher's institute/department
     const timetableFilter = {};
@@ -644,7 +655,7 @@ router.get("/teacher/:teacherId", async (req, res) => {
         SLOTS.forEach((slotId) => {
           const slot = tt[day][slotId];
           if (!slot) return;
-          if (String(slot.teacherId) !== String(teacherId)) return;
+          if (String(slot.teacherId) !== resolvedTeacherId) return;
 
           results.push({
             id:          `${tt._id}-${day}-${slotId}`,
