@@ -17,6 +17,8 @@ const LabBadge = ({ color }) => (
   </View>
 );
 
+const isMongoObjectId = (value) => /^[a-f\d]{24}$/i.test(String(value || '').trim());
+
 // ─── Weekly Grid (from Backend Data) ──────────────────────────────────────────
 const WeeklyGridFromData = ({ colWidth, timeColWidth, C, s, timetable }) => {
   const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -217,7 +219,30 @@ const fetchTimetable = async () => {
       return;
     }
 
-    const response = await axiosInstance.get(`/timetable/parent/${parentId}`);
+    const parentIdStr = String(parentId).trim();
+
+    // Support both formats:
+    // 1) custom parent id (e.g. 3f7a2b9c) -> /parents/timetable/:parentId
+    // 2) Mongo _id (24-hex)             -> /timetable/parent/:parentId
+    const primaryEndpoint = isMongoObjectId(parentIdStr)
+      ? `/timetable/parent/${parentIdStr}`
+      : `/parents/timetable/${parentIdStr}`;
+
+    const fallbackEndpoint = isMongoObjectId(parentIdStr)
+      ? `/parents/timetable/${parentIdStr}`
+      : `/timetable/parent/${parentIdStr}`;
+
+    let response;
+    try {
+      response = await axiosInstance.get(primaryEndpoint);
+    } catch (primaryErr) {
+      const status = primaryErr?.response?.status;
+      if (status === 400 || status === 404) {
+        response = await axiosInstance.get(fallbackEndpoint);
+      } else {
+        throw primaryErr;
+      }
+    }
     console.log("RESPONSE:", response.data);
 
     if (response.data?.success) {

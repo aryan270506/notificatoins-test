@@ -320,6 +320,64 @@ export function TimetableManagementScreen() {
   const dynamicDays = templateWorkingDays.length > 0 ? templateWorkingDays : DAYS;
   const dynamicSlots = templateSlots.length > 0 ? templateSlots : SLOTS;
 
+  const normalizeBackendTimetable = useCallback((doc) => {
+    const safeGrid = emptyGrid();
+    if (!doc || typeof doc !== 'object') return safeGrid;
+
+    dynamicDays.forEach((day) => {
+      const dayData = doc?.[day];
+      if (!dayData || typeof dayData !== 'object') return;
+
+      Object.entries(dayData).forEach(([slotId, slot]) => {
+        if (!safeGrid?.[day]?.[slotId]) return;
+        if (!slot || typeof slot !== 'object') return;
+
+        safeGrid[day][slotId] = {
+          subject: slot.subject || '',
+          teacherName: slot.teacherName || slot.teacher || '',
+          teacherId: slot.teacherId || null,
+          lectureLocation: slot.lectureLocation || slot.room || '',
+        };
+      });
+    });
+
+    return safeGrid;
+  }, [dynamicDays, dynamicSlots]);
+
+  const fetchTimetableForBatch = useCallback(async (batchCode) => {
+    if (!assignedYear || !assignedDiv || !batchCode) return;
+
+    const yearMatch = assignedYear.match(/^(\d+)/);
+    const yearNum = yearMatch ? yearMatch[1] : null;
+    if (!yearNum) {
+      console.warn('⚠️ Could not extract year number from:', assignedYear);
+      return;
+    }
+
+    const key = `${assignedDiv}_${batchCode}`;
+    try {
+      const ttRes = await axiosInstance.get('/timetable', {
+        params: {
+          year: yearNum,
+          division: assignedDiv,
+          batch: batchCode,
+        },
+      });
+
+      const normalized = normalizeBackendTimetable(ttRes.data?.data);
+      setTimetables((prev) => ({
+        ...prev,
+        [key]: normalized,
+      }));
+    } catch (err) {
+      console.warn('⚠️ Timetable fetch error:', err.message);
+      setTimetables((prev) => ({
+        ...prev,
+        [key]: emptyGrid(),
+      }));
+    }
+  }, [assignedYear, assignedDiv, normalizeBackendTimetable]);
+
   /* ── Edit modal ───────────────────────────────────────────────── */
   const [editModal,   setEditModal]   = useState(false);
   const [editCell,    setEditCell]    = useState(null); // { day, slotId }
@@ -445,45 +503,11 @@ export function TimetableManagementScreen() {
     })();
   }, []);
 
-  /* ── Fetch Timetable Data ────────────────────────────────────────────── */
+  /* ── Fetch Timetable Data (per selected batch) ───────────────────────── */
   useEffect(() => {
-    if (!assignedYear || !assignedDiv) return; // Wait until we have year & division
-
-    (async () => {
-      try {
-        // Extract year number from format "1st Year", "2nd Year", etc.
-        const yearMatch = assignedYear.match(/^(\d+)/);
-        const yearNum = yearMatch ? yearMatch[1] : null;
-        
-        if (!yearNum) {
-          console.warn('⚠️ Could not extract year number from:', assignedYear);
-          return;
-        }
-
-        // Fetch timetable for assigned year, division, and initial batch
-        const initialBatch = `${assignedDiv}1`;
-        console.log(`📚 Fetching timetable for year=${yearNum}, division=${assignedDiv}, batch=${initialBatch}`);
-        
-        const ttRes = await axiosInstance.get('/timetable', {
-          params: {
-            year: yearNum,
-            division: assignedDiv,
-            batch: initialBatch,
-          },
-        });
-
-        if (ttRes.data?.success && ttRes.data?.data) {
-          console.log('✅ Timetable fetched:', ttRes.data.data);
-          setTimetables(ttRes.data.data);
-        } else {
-          console.warn('⚠️ No timetable data returned');
-        }
-      } catch (err) {
-        console.warn('⚠️ Timetable fetch error:', err.message);
-        // Don't error out, timetable might just be empty
-      }
-    })();
-  }, [assignedYear, assignedDiv]);
+    if (!assignedYear || !assignedDiv || !activeBatch) return;
+    fetchTimetableForBatch(activeBatch);
+  }, [assignedYear, assignedDiv, activeBatch, fetchTimetableForBatch]);
 
   /* ── Helpers ──────────────────────────────────────────────────── */
   

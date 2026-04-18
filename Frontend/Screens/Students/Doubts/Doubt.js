@@ -153,17 +153,26 @@ export default function StudentDoubt({ C, onThemeToggle, user }) {
         );
 
         let subjectList = [];
-        if (normalizedYear) {
-          try {
-            const cfgRes = await axiosInstance.get(`/configuration/subjects/${normalizedYear}`);
-            const cfgDoc = cfgRes.data?.data || {};
-            subjectList = Array.isArray(cfgDoc.subjects) ? cfgDoc.subjects : [];
-          } catch (e) {
-            // Fallback only when configuration fetch fails
+        try {
+          // Keep subject source aligned with Notes screen endpoint
+          const subRes = await axiosInstance.get(`/students/subjects/${studentId}`);
+          const subDoc = subRes.data || {};
+          const theorySubjects = Array.isArray(subDoc.subjects) ? subDoc.subjects : [];
+          const labSubjects = Array.isArray(subDoc.labs) ? subDoc.labs : [];
+          subjectList = [...theorySubjects, ...labSubjects];
+        } catch (e) {
+          // Fallback to existing sources if dedicated subjects endpoint fails
+          if (normalizedYear) {
+            try {
+              const cfgRes = await axiosInstance.get(`/configuration/subjects/${normalizedYear}`);
+              const cfgDoc = cfgRes.data?.data || {};
+              subjectList = Array.isArray(cfgDoc.subjects) ? cfgDoc.subjects : [];
+            } catch (cfgErr) {
+              subjectList = Array.isArray(studentData?.subjects) ? studentData.subjects : [];
+            }
+          } else {
             subjectList = Array.isArray(studentData?.subjects) ? studentData.subjects : [];
           }
-        } else {
-          subjectList = Array.isArray(studentData?.subjects) ? studentData.subjects : [];
         }
 
         if (subjectList.length === 0) {
@@ -194,7 +203,16 @@ export default function StudentDoubt({ C, onThemeToggle, user }) {
           } catch (e) { /* timetable fetch failed */ }
         }
 
-        const formatted = subjectList.map((sub, index) => {
+        const uniqueSubjects = Array.from(
+          new Set(
+            subjectList
+              .map((sub) => (typeof sub === 'string' ? sub : sub?.name || ''))
+              .map((name) => String(name || '').trim())
+              .filter(Boolean)
+          )
+        );
+
+        const formatted = uniqueSubjects.map((sub, index) => {
           const norm  = normalize(sub);
           let entry   = subjectTeacherMap[norm];
           if (!entry) {
