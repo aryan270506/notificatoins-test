@@ -851,7 +851,7 @@ router.post("/", auth, classTeacherGuard, async (req, res) => {
 
 router.put("/slot", auth, classTeacherGuard, async (req, res) => {
   try {
-    const { year, division, batch, day, slotId, teacherId, subject, room, color } = req.body;
+    const { year, division, batch, day, slotId, teacherId, subject, room, color, lectureLocation } = req.body;
 
     if (!year || !division || !batch || !day || !slotId || !teacherId || !subject) {
       return res.status(400).json({
@@ -872,6 +872,7 @@ router.put("/slot", auth, classTeacherGuard, async (req, res) => {
       teacherName: teacher.name,
       subject:     subject.trim().toUpperCase(),
       room:        room?.trim() || null,
+      lectureLocation: lectureLocation?.trim() || null,
       color:       color || "teal",
     };
 
@@ -1448,6 +1449,109 @@ router.put('/update-timetable', auth, classTeacherGuard, async (req, res) => {
   } catch (error) {
     console.error('Error updating timetable:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 10. GET TEACHERS BY INSTITUTE & DEPARTMENT (for dropdown in timetable)
+//     GET /api/timetable/teachers-list
+//     Query: none (uses auth token for scope)
+// ══════════════════════════════════════════════════════════════════════════════
+
+router.get("/teachers-list", auth, async (req, res) => {
+  try {
+    const user = req.user || {};
+    
+    if (!user.instituteId || !user.departmentCode) {
+      return res.status(400).json({
+        success: false,
+        message: 'Institute and department scope required'
+      });
+    }
+
+    const teachers = await Teacher.find(
+      {
+        instituteId: user.instituteId,
+        departmentCode: user.departmentCode,
+      },
+      { id: 1, name: 1, _id: 1 }
+    ).lean();
+
+    return res.json({
+      success: true,
+      data: teachers
+    });
+  } catch (error) {
+    console.error('Error fetching teachers list:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch teachers',
+      error: error.message
+    });
+  }
+});
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 11. GET SUBJECTS BY INSTITUTE, DEPARTMENT & YEAR (for dropdown in timetable)
+//     GET /api/timetable/subjects-list
+//     Query: year (required)
+// ══════════════════════════════════════════════════════════════════════════════
+
+router.get("/subjects-list", auth, async (req, res) => {
+  try {
+    const user = req.user || {};
+    const { year } = req.query;
+
+    if (!user.instituteId || !user.departmentCode) {
+      return res.status(400).json({
+        success: false,
+        message: 'Institute and department scope required'
+      });
+    }
+
+    if (!year) {
+      return res.status(400).json({
+        success: false,
+        message: 'Year parameter is required'
+      });
+    }
+
+    const Subject = require("../Models/Subject");
+
+    const subjectDoc = await Subject.findOne(
+      {
+        instituteId: user.instituteId,
+        departmentCode: user.departmentCode,
+        year: String(year),
+      }
+    ).lean();
+
+    if (!subjectDoc) {
+      return res.json({
+        success: true,
+        data: {
+          subjects: [],
+          labs: []
+        }
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        subjects: subjectDoc.subjects || [],
+        labs: subjectDoc.labs || []
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching subjects list:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch subjects',
+      error: error.message
+    });
   }
 });
 
