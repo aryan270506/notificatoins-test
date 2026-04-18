@@ -32,6 +32,7 @@ const permissionRoutes = require("./Routes/PermissionRoutes");
 // additional routes
 const aiRoutes = require("./Routes/AiRoutes");
 const notificationRoutes = require('./Routes/NotificationRoutes');
+const subjectsRoutes = require('./Routes/SubjectsRoutes');
 
 // ─── Socket ───────────────────────────────────────────────────────
 const { initSocket } = require("./socket");
@@ -154,9 +155,11 @@ app.use("/api/permissions", permissionRoutes);
 app.use("/api/finance", StudentFinanceRoutes);
 app.use("/api/ai", aiRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/subjects', subjectsRoutes);
 app.use('/api/configuration', configurationRoutes);
 console.log('✅ Notification routes registered at /api/notifications');
 console.log('✅ Configuration routes registered at /api/configuration');
+console.log('✅ Subjects routes registered at /api/subjects');
 
 // ─── Static Files ─────────────────────────────────────────────────
 app.use("/uploads", express.static("uploads"));

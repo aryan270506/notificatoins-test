@@ -702,8 +702,8 @@ function AssignCell() {
 function BreakCell({ label }) {
   const { isDark, colors } = useContext(ThemeContext);
   return (
-    <View style={[tStyles.breakCell, { backgroundColor: isDark ? 'rgba(255,255,255,0.02)' : colors.surfaceAlt }]}>
-      <Text style={[tStyles.breakCellText, { color: isDark ? 'rgba(255,255,255,0.15)' : colors.textMuted }]}>{label}</Text>
+    <View style={[tStyles.breakCell, { backgroundColor: isDark ? '#0b1437' : '#eaecf0' }]}>
+      <Text style={[tStyles.breakCellText, { color: isDark ? 'rgba(255,255,255,0.25)' : colors.textMuted }]}>{label}</Text>
     </View>
   );
 }
@@ -842,7 +842,7 @@ function AllYearsOverview({ timeSlots, visibleDays, hasSlots }) {
 
   const CELL_W  = 140;
   const DAY_COL = 86;
-  const BRK_W   = 48;
+  const BRK_W   = 44;
 
   const renderMasterGrid = () => (
     <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -857,8 +857,13 @@ function AllYearsOverview({ timeSlots, visibleDays, hasSlots }) {
               { width: slot.isBreak ? BRK_W : CELL_W, borderRightColor: borderC },
               slot.isBreak && { backgroundColor: breakBg },
             ]}>
-              <Text style={[mvStyles.timeHeaderLabel, { color: colors.textPrim }]}>{slot.label}</Text>
-              {!slot.isBreak && <Text style={[mvStyles.timeHeaderSub, { color: mutedC }]}>{slot.sub}</Text>}
+              {slot.isBreak
+                ? <Text style={[mvStyles.timeHeaderSub, { color: mutedC, transform: [{ rotate: '-90deg' }] }]}>{slot.sub}</Text>
+                : <>
+                    <Text style={[mvStyles.timeHeaderLabel, { color: colors.textPrim }]}>{slot.label}</Text>
+                    <Text style={[mvStyles.timeHeaderSub, { color: mutedC }]}>{slot.sub}</Text>
+                  </>
+              }
             </View>
           ))}
         </View>
@@ -886,8 +891,8 @@ function AllYearsOverview({ timeSlots, visibleDays, hasSlots }) {
                   {timeSlots.map(slot => {
                     if (slot.isBreak) {
                       return (
-                        <View key={slot.id} style={[mvStyles.cellWrapper, { width: BRK_W, borderRightColor: borderC, backgroundColor: breakBg }]}>
-                          {yIdx === 0 && <Text style={[mvStyles.breakText, { color: mutedC }]}>{slot.sub}</Text>}
+                        <View key={slot.id} style={[mvStyles.cellWrapper, { width: BRK_W, borderRightColor: borderC, backgroundColor: breakBg, padding: 0 }]}>
+                          <Text style={[mvStyles.breakText, { color: mutedC }]}>{slot.sub}</Text>
                         </View>
                       );
                     }
@@ -1677,7 +1682,7 @@ export default function TimeTableManagement() {
   // ── TABLET layout ─────────────────────────────────────────────────────────
   const CELL_WIDTH  = 148;
   const DAY_COL     = 90;
-  const BREAK_WIDTH = 54;
+  const BREAK_WIDTH = 44;
 
   return (
     <View style={[baseStyles.screen, { backgroundColor: screenBg }]}>
@@ -1700,8 +1705,13 @@ export default function TimeTableManagement() {
                     key={slot.id}
                     style={[tStyles.timeHeaderCell, { width: slot.isBreak ? BREAK_WIDTH : CELL_WIDTH, borderRightColor: dayCellBorder }, slot.isBreak && { backgroundColor: breakHeaderBg }]}
                   >
-                    <Text style={[tStyles.timeLabel, { color: colors.textPrim }]}>{slot.label}</Text>
-                    {!slot.isBreak && <Text style={[tStyles.timeSub, { color: timeSubColor }]}>{slot.sub}</Text>}
+                    {slot.isBreak
+                      ? <Text style={[tStyles.timeSub, { color: timeSubColor, transform: [{ rotate: '-90deg' }] }]}>{slot.sub}</Text>
+                      : <>
+                          <Text style={[tStyles.timeLabel, { color: colors.textPrim }]}>{slot.label}</Text>
+                          <Text style={[tStyles.timeSub, { color: timeSubColor }]}>{slot.sub}</Text>
+                        </>
+                    }
                   </View>
                 ))}
               </View>
@@ -1716,7 +1726,7 @@ export default function TimeTableManagement() {
                     {activeTimeSlots.map((slot) => {
                       if (slot.isBreak) {
                         return (
-                          <View key={slot.id} style={[tStyles.cellWrapper, { width: BREAK_WIDTH, borderRightColor: cellBorder }]}>
+                          <View key={slot.id} style={[tStyles.cellWrapper, { width: BREAK_WIDTH, borderRightColor: cellBorder, padding: 0 }]}>
                             <BreakCell label={slot.sub} />
                           </View>
                         );
@@ -1735,7 +1745,7 @@ export default function TimeTableManagement() {
               <View style={[tStyles.gridRow, { borderBottomWidth: 0 }]}>
                 <View style={[tStyles.dayCell, { width: DAY_COL, backgroundColor: dayCellBg, borderRightColor: dayCellBorder }]} />
                 {activeTimeSlots.map((slot) => (
-                  <View key={slot.id} style={[tStyles.cellWrapper, { width: slot.isBreak ? BREAK_WIDTH : CELL_WIDTH, borderRightColor: cellBorder }]}>
+                  <View key={slot.id} style={[tStyles.cellWrapper, { width: slot.isBreak ? BREAK_WIDTH : CELL_WIDTH, borderRightColor: cellBorder, padding: slot.isBreak ? 0 : 5 }, slot.isBreak && { backgroundColor: breakHeaderBg }]}>
                     {!slot.isBreak && slot.id === activeTimeSlots.filter(s => !s.isBreak).at(-1)?.id && (
                       <View style={tStyles.extraBadge}>
                         <Text style={[tStyles.extraIcon, { color: extraIconColor }]}>☆</Text>
@@ -1900,7 +1910,7 @@ const tStyles = StyleSheet.create({
   assignCell:     { flex: 1, minHeight: 88, borderWidth: 1, borderRadius: 10, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', gap: 4 },
   assignPlus:     { fontSize: 20 },
   assignLabel:    { fontSize: 9, fontWeight: '600', letterSpacing: 0.8 },
-  breakCell:      { flex: 1, minHeight: 88, alignItems: 'center', justifyContent: 'center', borderRadius: 6 },
+  breakCell:      { flex: 1, minHeight: 88, alignItems: 'center', justifyContent: 'center' },
   breakCellText:  { fontSize: 8, fontWeight: '700', letterSpacing: 0.6, transform: [{ rotate: '-90deg' }] },
   extraBadge:     { alignItems: 'center', justifyContent: 'center', flex: 1, gap: 4 },
   extraIcon:      { fontSize: 16 },
