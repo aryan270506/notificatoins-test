@@ -191,8 +191,9 @@ export default function StudentQuiz({ C, themeC, onThemeToggle, user }) {
       if (studentData.division && String(studentData.division).trim() !== '') {
         params.division = studentData.division;
       }
-      if (studentData.roll_no) {
-        const parts = studentData.roll_no.split('-');
+      if (studentData.roll_no !== null && studentData.roll_no !== undefined) {
+        const rollNoValue = String(studentData.roll_no).trim();
+        const parts = rollNoValue.split('-');
         if (parts[1]) {
           const subDivNum = parts[1].replace(/^[A-Za-z]+/, '');
           if (subDivNum) params.subDiv = subDivNum;
