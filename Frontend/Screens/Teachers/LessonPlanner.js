@@ -1,6 +1,6 @@
 // Screens/Teacher/LessonPlannerScreen.js
 // ═══════════════════════════════════════════════════════════════════════════════
-//  Campus360 — Lesson Planner  (Teacher View)
+//  Campus360 — Notes  (Teacher View)
 //
 //  FLOW:
 //  SubjectListView  →  tap subject  →  SubjectDetailView
@@ -793,7 +793,7 @@ export default function LessonPlannerScreen() {
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={s.headerTitle}>
-            {activeSubject || 'Lesson Planner'}
+            {activeSubject || 'Notes'}
           </Text>
           <Text style={s.headerSub}>
             {activeSubject ? 'Notes & resources' : 'Select a subject to manage resources'}

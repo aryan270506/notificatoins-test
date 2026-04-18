@@ -63,7 +63,7 @@ const NAV_ITEMS = [
   { id: 'attendanceMarking',  label: 'Attendance Marking', route: 'AttendanceScreen' },
   { id: 'studentAttendance',  label: 'Attendance',        route: 'StudentAttendanceScreen' },
   { id: 'assignments',        label: 'Assignments',       route: 'AssignmentScreen' },
-  { id: 'planner',            label: 'Lesson Planner',    route: 'PlannerScreen' },
+  { id: 'planner',            label: 'Notes',             route: 'PlannerScreen' },
   { id: 'exams',              label: 'Exams',             route: 'TeacherExamScreen' },
   { id: 'quiz',               label: 'Quiz Session',      route: 'QuizzSessionScreen' },
   { id: 'addquizz',           label: 'Add Quiz',          route: 'QuizBuilderScreen' },
