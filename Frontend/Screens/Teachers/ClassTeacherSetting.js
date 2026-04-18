@@ -1,5 +1,3 @@
-
-
 import React, {
   useState, useEffect, useCallback, useContext, useRef,
 } from 'react';
@@ -524,7 +522,7 @@ export function TimetableManagementScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* \u2500\u2500 Scrollable body \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */}
+      
       <ScrollView
         style={{ flex: 1 }}
         showsVerticalScrollIndicator={false}
