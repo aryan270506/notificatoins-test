@@ -708,7 +708,7 @@ export function TimetableManagementScreen() {
           onPress={() => navigation.goBack()}
           style={[ts.backBtn, { backgroundColor: T.accentSoft, borderColor: T.border }]}
           activeOpacity={0.75}>
-          <Text style={[ts.backArrow, { color: T.accentBright }]}></Text>
+          <Text style={[ts.backArrow, { color: T.accentBright }]}>←</Text>
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={[ts.headerTitle, { color: T.textPrimary }]}>Timetable Management</Text>
