@@ -25,6 +25,12 @@ const slotEntrySchema = new mongoose.Schema(
       default: null,
     },
 
+    lectureLocation: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+
     color: {
       type: String,
       enum: ["teal", "blue", "purple", "orange", "green", "pink"],

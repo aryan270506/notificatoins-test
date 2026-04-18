@@ -98,6 +98,22 @@ subDivisions: {
       },
     },
 
+    // ✅ Subject Assignments (Timetable-related)
+    // Maps: year+division+batch → [subjects]
+    // Used to track which subjects this teacher teaches to specific classes
+    subjectAssignments: [
+      {
+        year: String, // "1", "2", "3", "4"
+        division: String, // "A", "B", "C"
+        batch: String, // "A1", "A2", "B1", etc.
+        subjects: [String], // List of subjects taught
+        assignedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
+
     // ✅ Profile Image
     profileImage: {
       data: Buffer,

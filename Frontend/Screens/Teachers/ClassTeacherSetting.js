@@ -324,6 +324,15 @@ export function TimetableManagementScreen() {
   const [editCell,    setEditCell]    = useState(null); // { day, slotId }
   const [editSubject, setEditSubject] = useState('');
   const [editTeacher, setEditTeacher] = useState('');
+  const [editTeacherId, setEditTeacherId] = useState(null);
+  const [editLectureLocation, setEditLectureLocation] = useState('');
+
+  /* ── Dropdown Data ────────────────────────────────────────────── */
+  const [teachersList, setTeachersList] = useState([]);
+  const [subjectsList, setSubjectsList] = useState([]);
+  const [dropdownLoading, setDropdownLoading] = useState(false);
+  const [teacherPickerOpen, setTeacherPickerOpen] = useState(false);
+  const [subjectPickerOpen, setSubjectPickerOpen] = useState(false);
 
   /* ── Fetch Teacher's Assigned Year/Division & Timetable ────────────────────────────────────────────────────– */
   useEffect(() => {
@@ -471,30 +480,112 @@ export function TimetableManagementScreen() {
   }, [assignedYear, assignedDiv]);
 
   /* ── Helpers ──────────────────────────────────────────────────── */
+  
+  const fetchTeachersAndSubjects = async () => {
+    try {
+      setDropdownLoading(true);
+      
+      // Fetch teachers from same institute and department
+      const teachersRes = await axiosInstance.get('/timetable/teachers-list');
+      if (teachersRes.data?.success) {
+        setTeachersList(teachersRes.data.data || []);
+      }
+
+      // Extract year number from assignedYear format "1st Year", "2nd Year", etc.
+      const yearMatch = assignedYear?.match(/^(\d+)/);
+      const yearNum = yearMatch ? yearMatch[1] : null;
+
+      // Fetch subjects for the current year
+      if (yearNum) {
+        const subjectsRes = await axiosInstance.get('/timetable/subjects-list', {
+          params: { year: yearNum }
+        });
+        if (subjectsRes.data?.success) {
+          const allSubjects = [
+            ...(subjectsRes.data.data?.subjects || []),
+            ...(subjectsRes.data.data?.labs || [])
+          ];
+          setSubjectsList(allSubjects);
+        }
+      }
+    } catch (err) {
+      console.warn('⚠️ Error fetching teachers/subjects:', err.message);
+    } finally {
+      setDropdownLoading(false);
+    }
+  };
+
   const openEdit = (day, slotId) => {
     const entry = getTT()[day]?.[slotId] || {};
     setEditCell({ day, slotId });
     setEditSubject(entry.subject || '');
-    setEditTeacher(entry.teacher || '');
+    setEditTeacher(entry.teacherName || '');
+    setEditTeacherId(entry.teacherId || null);
+    setEditLectureLocation(entry.lectureLocation || '');
+    
+    // Fetch teachers and subjects when modal opens
+    fetchTeachersAndSubjects();
     setEditModal(true);
   };
 
-  const saveEdit = () => {
-    if (!ttKey) return;
-    setTimetables(prev => ({
-      ...prev,
-      [ttKey]: {
-        ...(prev[ttKey] ?? emptyGrid()),
-        [editCell.day]: {
-          ...(prev[ttKey]?.[editCell.day] ?? emptyDaySlots()),
-          [editCell.slotId]: {
-            subject: editSubject.trim(),
-            teacher: editTeacher.trim(),
+  const saveEdit = async () => {
+    if (!ttKey || !editTeacherId) {
+      Alert.alert('Error', 'Please select a teacher');
+      return;
+    }
+    
+    if (!editSubject.trim()) {
+      Alert.alert('Error', 'Please select a subject');
+      return;
+    }
+    
+    try {
+      setSaving(true);
+      
+      // Extract year number
+      const yearMatch = assignedYear?.match(/^(\d+)/);
+      const yearNum = yearMatch ? yearMatch[1] : null;
+
+      // Send to backend to save
+      const response = await axiosInstance.put('/timetable/slot', {
+        year: yearNum,
+        division: activeDiv,
+        batch: activeBatch,
+        day: editCell.day,
+        slotId: editCell.slotId,
+        teacherId: editTeacherId,
+        subject: editSubject.trim(),
+        lectureLocation: editLectureLocation.trim(),
+        color: 'teal'
+      });
+
+      if (response.data?.success) {
+        // Update local state
+        setTimetables(prev => ({
+          ...prev,
+          [ttKey]: {
+            ...(prev[ttKey] ?? emptyGrid()),
+            [editCell.day]: {
+              ...(prev[ttKey]?.[editCell.day] ?? emptyDaySlots()),
+              [editCell.slotId]: {
+                subject: editSubject.trim(),
+                teacherName: editTeacher.trim(),
+                teacherId: editTeacherId,
+                lectureLocation: editLectureLocation.trim(),
+              },
+            },
           },
-        },
-      },
-    }));
-    setEditModal(false);
+        }));
+        setEditModal(false);
+      } else {
+        Alert.alert('Error', response.data?.message || 'Failed to save slot');
+      }
+    } catch (err) {
+      console.error('Error saving slot:', err);
+      Alert.alert('Error', 'Failed to save slot. Please try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleSave = async () => {
@@ -826,39 +917,110 @@ export function TimetableManagementScreen() {
         <Pressable style={ts.modalBackdrop} onPress={() => setEditModal(false)} />
         <View style={[ts.modalCard, { backgroundColor: T.modalBg, borderColor: T.border, shadowColor: T.shadowColor }]}>
           <View style={ts.modalHandle} />
-          {(() => {
-            const col = dynamicGridCols.find(c => c.slotId === editCell?.slotId);
-            return (
-              <>
-                <Text style={[ts.modalTitle, { color: T.textPrimary }]}>
-                  {editCell?.day} • {col?.label || 'Slot'}
-                </Text>
-                <Text style={[ts.modalTime, { color: T.textMuted }]}>
-                  {col?.startTime && col?.endTime 
-                    ? `${col.startTime} – ${col.endTime}` 
-                    : col?.label}
-                </Text>
-              </>
-            );
-          })()}
+          <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
+            {(() => {
+              const col = dynamicGridCols.find(c => c.slotId === editCell?.slotId);
+              return (
+                <>
+                  <Text style={[ts.modalTitle, { color: T.textPrimary }]}>
+                    {editCell?.day} • {col?.label || 'Slot'}
+                  </Text>
+                  <Text style={[ts.modalTime, { color: T.textMuted }]}>
+                    {col?.startTime && col?.endTime 
+                      ? `${col.startTime} – ${col.endTime}` 
+                      : col?.label}
+                  </Text>
+                </>
+              );
+            })()}
 
-          <Text style={[ts.modalFieldLabel, { color: T.textSec }]}>Subject</Text>
-          <TextInput
-            value={editSubject}
-            onChangeText={setEditSubject}
-            placeholder="e.g. Mathematics"
-            placeholderTextColor={T.textMuted}
-            style={[ts.modalInput, { backgroundColor: T.inputBg, borderColor: T.inputBorder, color: T.inputText }]}
-          />
+            {/* ── Teacher Selection ─────────────────────────────────── */}
+            <Text style={[ts.modalFieldLabel, { color: T.textSec }]}>Teacher *</Text>
+            {dropdownLoading ? (
+              <ActivityIndicator size="small" color={T.accent} />
+            ) : (
+              <View style={[ts.dropdownContainer, { borderColor: T.inputBorder, backgroundColor: T.inputBg }]}>
+                <FlatList
+                  data={teachersList}
+                  keyExtractor={(item) => String(item._id)}
+                  scrollEnabled={true}
+                  nestedScrollEnabled={true}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      onPress={() => {
+                        setEditTeacherId(item._id);
+                        setEditTeacher(item.name);
+                      }}
+                      style={[
+                        ts.dropdownItem,
+                        {
+                          backgroundColor: editTeacherId === item._id ? T.selectedPillBg : 'transparent',
+                          borderBottomColor: T.border,
+                        },
+                      ]}>
+                      <Text style={[
+                        ts.dropdownItemText,
+                        { color: editTeacherId === item._id ? '#fff' : T.textPrimary }
+                      ]}>
+                        {item.name}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                  ListEmptyMessage={
+                    <Text style={[ts.emptyText, { color: T.textMuted }]}>No teachers found</Text>
+                  }
+                />
+              </View>
+            )}
 
-          <Text style={[ts.modalFieldLabel, { color: T.textSec }]}>Teacher (optional)</Text>
-          <TextInput
-            value={editTeacher}
-            onChangeText={setEditTeacher}
-            placeholder="e.g. Prof. Sharma"
-            placeholderTextColor={T.textMuted}
-            style={[ts.modalInput, { backgroundColor: T.inputBg, borderColor: T.inputBorder, color: T.inputText }]}
-          />
+            {/* ── Subject Selection ─────────────────────────────────── */}
+            <Text style={[ts.modalFieldLabel, { color: T.textSec, marginTop: 16 }]}>Subject *</Text>
+            {dropdownLoading ? (
+              <ActivityIndicator size="small" color={T.accent} />
+            ) : (
+              <View style={[ts.dropdownContainer, { borderColor: T.inputBorder, backgroundColor: T.inputBg }]}>
+                <FlatList
+                  data={subjectsList}
+                  keyExtractor={(item, idx) => `${item}_${idx}`}
+                  scrollEnabled={true}
+                  nestedScrollEnabled={true}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      onPress={() => setEditSubject(item)}
+                      style={[
+                        ts.dropdownItem,
+                        {
+                          backgroundColor: editSubject === item ? T.selectedPillBg : 'transparent',
+                          borderBottomColor: T.border,
+                        },
+                      ]}>
+                      <Text style={[
+                        ts.dropdownItemText,
+                        { color: editSubject === item ? '#fff' : T.textPrimary }
+                      ]}>
+                        {item}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                  ListEmptyMessage={
+                    <Text style={[ts.emptyText, { color: T.textMuted }]}>No subjects found</Text>
+                  }
+                />
+              </View>
+            )}
+
+            {/* ── Lecture Location Input ────────────────────────────── */}
+            <Text style={[ts.modalFieldLabel, { color: T.textSec, marginTop: 16 }]}>
+              Lecture Location (optional)
+            </Text>
+            <TextInput
+              value={editLectureLocation}
+              onChangeText={setEditLectureLocation}
+              placeholder="e.g. Room 101, Lab A"
+              placeholderTextColor={T.textMuted}
+              style={[ts.modalInput, { backgroundColor: T.inputBg, borderColor: T.inputBorder, color: T.inputText }]}
+            />
+          </ScrollView>
 
           <View style={ts.modalBtnRow}>
             <TouchableOpacity
@@ -869,9 +1031,19 @@ export function TimetableManagementScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               onPress={saveEdit}
-              style={[ts.modalSaveBtn, { backgroundColor: T.accent }]}
+              disabled={saving || !editTeacherId || !editSubject}
+              style={[
+                ts.modalSaveBtn, 
+                { 
+                  backgroundColor: (saving || !editTeacherId || !editSubject) ? T.textMuted : T.accent 
+                }
+              ]}
               activeOpacity={0.8}>
-              <Text style={ts.modalSaveText}>Save Slot</Text>
+              {saving ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={ts.modalSaveText}>Save Slot</Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -1061,6 +1233,18 @@ const ts = StyleSheet.create({
   modalInput: {
     borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 11,
     fontSize: 14, marginBottom: 8,
+  },
+  dropdownContainer: {
+    borderWidth: 1, borderRadius: 10, marginBottom: 8, maxHeight: 250, overflow: 'hidden'
+  },
+  dropdownItem: {
+    paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1,
+  },
+  dropdownItemText: {
+    fontSize: 14, fontWeight: '500'
+  },
+  emptyText: {
+    textAlign: 'center', paddingVertical: 20, fontSize: 12
   },
   modalBtnRow:     { flexDirection: 'row', gap: 10, marginTop: 8 },
   modalCancelBtn:  { flex: 1, paddingVertical: 13, borderRadius: 10, borderWidth: 1, alignItems: 'center' },
