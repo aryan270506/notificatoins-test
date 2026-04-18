@@ -18,12 +18,12 @@ import { ThemeContext } from './TeacherStack';
 
 /* ─── Colors ─────────────────────────────────────────────────────────────── */
 const C_DARK = {
-  bg:           '#0B1020',
-  surface:      '#121A33',
-  surfaceEl:    '#192543',
-  card:         '#161F3D',
-  border:       '#29365C',
-  borderLight:  '#334572',
+  bg:           '#07090F',
+  surface:      '#0D1120',
+  surfaceEl:    '#111827',
+  card:         '#0F1523',
+  border:       '#1A2035',
+  borderLight:  '#1E2845',
   accent:       '#3B82F6',
   accentSoft:   'rgba(59,130,246,0.14)',
   accentGlow:   'rgba(59,130,246,0.06)',
@@ -38,8 +38,8 @@ const C_DARK = {
   red:          '#EF4444',
   redSoft:      'rgba(239,68,68,0.14)',
   textPrimary:  '#EEF2FF',
-  textSec:      '#AAB7DE',
-  textMuted:    '#6C7FAF',
+  textSec:      '#8B96BE',
+  textMuted:    '#3D4A6A',
   cancelled:    '#EF4444',
   cancelledSoft:'rgba(239,68,68,0.14)',
   postponed:    '#F59E0B',
@@ -107,8 +107,8 @@ const DAY_TO_SHORT = {
   Thursday: 'THU', Friday: 'FRI', Saturday: 'SAT',
 };
 
-// Default slot times (fallback if template fetch fails)
-const DEFAULT_SLOT_TIMES = {
+// Slot times — must match SLOT_TIMES in the backend /timetable/teacher route
+const SLOT_TIMES = {
   t1: { start: '10:30', end: '11:30' },
   t2: { start: '11:30', end: '12:30' },
   t3: { start: '13:15', end: '14:15' },
@@ -176,12 +176,9 @@ function getWeekStart() {
  *   end,      // "11:30"
  * }
  */
-function transformSchedule(apiData, slotTimesMap = {}) {
+function transformSchedule(apiData) {
   const grouped = {};
   DAYS.forEach((d) => { grouped[d] = []; });
-
-  // Use provided slot times, fallback to defaults
-  const slotTimes = Object.keys(slotTimesMap).length > 0 ? slotTimesMap : DEFAULT_SLOT_TIMES;
 
   apiData.forEach((item) => {
     const short = DAY_TO_SHORT[item.day];
@@ -196,8 +193,8 @@ function transformSchedule(apiData, slotTimesMap = {}) {
     const type  = isLab ? 'LAB' : 'LECTURE';
 
     // Use start/end provided by the backend (which come from its own SLOT_TIMES),
-    // falling back to our local slotTimes as a safety net.
-    const times = slotTimes[item.slotId] || { start: '09:00', end: '10:00' };
+    // falling back to our local SLOT_TIMES as a safety net.
+    const times = SLOT_TIMES[item.slotId] || { start: '09:00', end: '10:00' };
 
     grouped[short].push({
       id:          item.id,          // composite key: "<timetableId>-<day>-<slotId>"
@@ -249,7 +246,6 @@ export default function TimetableScreen({ navigation, route, user }) {
   const [schedule, setSchedule]   = useState({});   // { MON: [cls, ...], TUE: [...] }
   const [statusMap, setStatusMap] = useState({});   // { "day-slotId": { status, postponedTo } }
   const [loading, setLoading]     = useState(true); // starts true — fixed bug where it was set false before fetch
-  const [template, setTemplate]   = useState(null); // ✅ Template with slot times
 
   // Postpone modal state
   const [postponeModalVisible, setPostponeModalVisible] = useState(false);
@@ -259,6 +255,29 @@ export default function TimetableScreen({ navigation, route, user }) {
   const fadeAnim  = useRef(new Animated.Value(Platform.OS === 'web' ? 1 : 0)).current;
   const slideAnim = useRef(new Animated.Value(Platform.OS === 'web' ? 0 : 16)).current;
   const weekStart = getWeekStart();
+
+  useEffect(() => {
+    let mounted = true;
+
+    const resolveTeacherId = async () => {
+      const fromProps = user?._id || user?.id || route?.params?.teacherId || route?.params?.user?._id || route?.params?.user?.id;
+      if (fromProps) {
+        if (mounted) setResolvedTeacherId(String(fromProps));
+        return;
+      }
+
+      const fromStorage =
+        (await AsyncStorage.getItem('teacherId')) ||
+        (await AsyncStorage.getItem('userId'));
+
+      if (fromStorage && mounted) {
+        setResolvedTeacherId(String(fromStorage));
+      }
+    };
+
+    resolveTeacherId().catch(() => {});
+    return () => { mounted = false; };
+  }, [user?._id, user?.id, route?.params?.teacherId, route?.params?.user?._id, route?.params?.user?.id]);
 
   /* ── Fetch teacher's assigned classes from the Timetable collection ────────
    *
@@ -281,7 +300,7 @@ export default function TimetableScreen({ navigation, route, user }) {
       const { data } = await axiosInstance.get(`/timetable/teacher/${teacherId}`);
       console.log(`✅ TimetableScreen: Fetch successful, received ${data.data?.length || 0} classes`, data.data);
       if (data.success) {
-        const transformed = transformSchedule(data.data, template || DEFAULT_SLOT_TIMES);
+        const transformed = transformSchedule(data.data);
         console.log('🔄 Transformed schedule:', transformed);
         setSchedule(transformed);
       }
@@ -290,7 +309,7 @@ export default function TimetableScreen({ navigation, route, user }) {
     } finally {
       setLoading(false);
     }
-  }, [teacherId, template]);
+  }, [teacherId]);
 
   /* ── Fetch cancel/postpone statuses for this teacher's week ── */
   const fetchStatuses = useCallback(async () => {
@@ -325,12 +344,13 @@ export default function TimetableScreen({ navigation, route, user }) {
   }, [teacherId, teacherName]);
 
   useEffect(() => {
-    fetchTemplate();
     fetchSchedule();
     fetchStatuses();
-  }, [fetchTemplate, fetchSchedule, fetchStatuses]);
+  }, [fetchSchedule, fetchStatuses]);
 
   useEffect(() => {
+    // Web can occasionally keep the animated container semi-transparent;
+    // render immediately at full opacity there for consistent visibility.
     if (Platform.OS === 'web') {
       fadeAnim.setValue(1);
       slideAnim.setValue(0);
@@ -548,15 +568,12 @@ export default function TimetableScreen({ navigation, route, user }) {
                           activeOpacity={0.85}>
                           <View style={[styles.classTypePill, { backgroundColor: (cancelled ? C.cancelled : postponed ? C.postponed : cls.color) + '30' }]}>
                             <Text style={[styles.classTypeText, { color: cancelled ? C.cancelled : postponed ? C.postponed : cls.color }]}>
-                              {cancelled ? '✕ CANCELLED' : postponed ? '↪ POSTPONED' : cls.type}
+                              {cancelled ? 'CANCELLED' : postponed ? 'POSTPONED' : cls.type}
                             </Text>
                           </View>
                           <Text style={[styles.classSubject, cancelled && { textDecorationLine: 'line-through', color: C.textMuted }]} numberOfLines={2}>{cls.subject}</Text>
-                          <Text style={[styles.classYear, { color: cancelled ? C.textMuted : C.textSec }]}>{cls.division}-{cls.batch}</Text>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 2 }}>
-                            <Ionicons name="clock-outline" size={10} color={cancelled ? C.textMuted : C.textSec} />
-                            <Text style={[styles.classTime, { color: cancelled ? C.textMuted : C.textSec }]}>{formatTime(cls.start)} • {formatTime(cls.end)}</Text>
-                          </View>
+                          <Text style={[styles.classYear, { color: cancelled ? C.textMuted : C.textSec }]}>Year {cls.year} • {cls.division}-{cls.batch}</Text>
+                          <Text style={styles.classTime}>{formatTime(cls.start)} – {formatTime(cls.end)}</Text>
                           {h > 80 && <Text style={styles.classRoom} numberOfLines={1}>📍 {cls.room}</Text>}
                           {postponed && pInfo && h > 60 && (
                             <Text style={[styles.classRoom, { color: C.postponed, marginTop: 2 }]} numberOfLines={1}>
@@ -614,43 +631,29 @@ export default function TimetableScreen({ navigation, route, user }) {
                 onPress={() => handleClassPress(cls)}
                 activeOpacity={0.85}>
                 <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 14 }}>
-                  {/* Time Block — visual timeline */}
                   <View style={styles.dailyTimeBlock}>
                     <Text style={styles.dailyTimeStart}>{formatTime(cls.start)}</Text>
                     <View style={[styles.dailyTimeLine, { backgroundColor: statusColor }]} />
                     <Text style={styles.dailyTimeEnd}>{formatTime(cls.end)}</Text>
                   </View>
-                  
-                  {/* Main content */}
                   <View style={{ flex: 1 }}>
-                    {/* Status pill + Duration */}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                       <View style={[styles.typeChip, { backgroundColor: statusColor + '22' }]}>
                         <Ionicons name={cancelled ? 'close-circle-outline' : postponed ? 'arrow-forward-circle-outline' : typeMeta.icon} size={11} color={statusColor} />
                         <Text style={[styles.typeChipText, { color: statusColor }]}>
                           {cancelled ? 'CANCELLED' : postponed ? 'POSTPONED' : typeMeta.label}
                         </Text>
                       </View>
-                      <Text style={styles.durationText}>({duration} mins)</Text>
+                      <Text style={styles.durationText}>{duration} min</Text>
                     </View>
-                    
-                    {/* Subject (main highlight) */}
                     <Text style={[styles.dailySubject, cancelled && { textDecorationLine: 'line-through', color: C.textMuted }]}>{cls.subject}</Text>
-                    
-                    {/* Class info (Year • Division • Batch) */}
                     <Text style={[styles.dailyYear, { color: cancelled ? C.textMuted : C.textSec }]}>Year {cls.year} • {cls.division}-{cls.batch}</Text>
-                    
-                    {/* Reschedule info if postponed */}
+                    <Text style={styles.dailyCode}>{cls.section}</Text>
                     {postponed && pInfo && (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: C.border }}>
-                        <Ionicons name="arrow-forward-circle-outline" size={12} color={C.postponed} />
-                        <Text style={{ fontSize: 11, color: C.postponed, fontWeight: '600' }}>
-                          Rescheduled: {pInfo.date} • {pInfo.time}
-                        </Text>
-                      </View>
+                      <Text style={{ fontSize: 11, color: C.postponed, marginTop: 4, fontWeight: '600' }}>
+                        ↪ Rescheduled to {pInfo.date} at {pInfo.time}
+                      </Text>
                     )}
-                    
-                    {/* Location */}
                     <View style={{ flexDirection: 'row', gap: 16, marginTop: 8 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                         <Ionicons name="location-outline" size={12} color={C.textMuted} />
@@ -989,136 +992,136 @@ const makeStyles = (C) => StyleSheet.create({
   /* Header */
   header: {
     flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: Platform.OS === 'ios' ? 60 : 20, paddingBottom: 16,
+    paddingHorizontal: 16, paddingTop: Platform.OS === 'ios' ? 60 : 20, paddingBottom: 12,
   },
-  headerSub:   { fontSize: 11, fontWeight: '700', color: C.textMuted, letterSpacing: 1.2, marginBottom: 6 },
-  headerTitle: { fontSize: 28, fontWeight: '900', color: C.textPrimary, fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif', marginBottom: 2 },
-  headerWeek:  { fontSize: 13, color: C.textSec, marginTop: 2, fontWeight: '500' },
+  headerSub:   { fontSize: 11, fontWeight: '700', color: C.textMuted, letterSpacing: 1, marginBottom: 4 },
+  headerTitle: { fontSize: 26, fontWeight: '900', color: C.textPrimary, fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif' },
+  headerWeek:  { fontSize: 12, color: C.textSec, marginTop: 2 },
   headerRight: { alignItems: 'flex-end' },
 
   /* Teacher chip */
   teacherChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: C.surfaceEl, borderRadius: 14, borderWidth: 1.2,
-    paddingVertical: 10, paddingHorizontal: 12,
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: C.surfaceEl, borderRadius: 12, borderWidth: 1,
+    paddingVertical: 8, paddingHorizontal: 10,
   },
-  teacherAvatar:     { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  teacherAvatarText: { fontWeight: '800', fontSize: 13 },
-  teacherName:       { fontSize: 14, fontWeight: '700', color: C.textPrimary },
-  teacherDept:       { fontSize: 11, color: C.textSec, marginTop: 1 },
+  teacherAvatar:     { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
+  teacherAvatarText: { fontWeight: '800', fontSize: 12 },
+  teacherName:       { fontSize: 13, fontWeight: '700', color: C.textPrimary },
+  teacherDept:       { fontSize: 11, color: C.textSec },
 
   /* Stats */
-  statsRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 14 },
+  statsRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 12 },
   statCard:  {
-    flex: 1, backgroundColor: C.surface, borderRadius: 12, borderWidth: 1.2, borderColor: C.border,
-    padding: 11, alignItems: 'center', gap: 5,
+    flex: 1, backgroundColor: C.surface, borderRadius: 10, borderWidth: 1,
+    padding: 10, alignItems: 'center', gap: 4,
   },
-  statIcon:  { width: 30, height: 30, borderRadius: 9, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
-  statValue: { fontSize: 19, fontWeight: '900', color: C.textPrimary },
-  statLabel: { fontSize: 10, color: C.textMuted, textAlign: 'center', fontWeight: '600', letterSpacing: 0.4 },
+  statIcon:  { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
+  statValue: { fontSize: 18, fontWeight: '900', color: C.textPrimary },
+  statLabel: { fontSize: 9, color: C.textMuted, textAlign: 'center', fontWeight: '600', letterSpacing: 0.3 },
 
   /* Toolbar */
   toolbar: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, marginBottom: 14, gap: 10,
   },
-  viewToggle:    { flexDirection: 'row', backgroundColor: C.surface, borderRadius: 12, borderWidth: 1.2, borderColor: C.border, overflow: 'hidden', padding: 2 },
-  viewBtn:       { paddingHorizontal: 18, paddingVertical: 9, borderRadius: 10 },
+  viewToggle:    { flexDirection: 'row', backgroundColor: C.surface, borderRadius: 10, borderWidth: 1, borderColor: C.border, overflow: 'hidden' },
+  viewBtn:       { paddingHorizontal: 16, paddingVertical: 8 },
   viewBtnActive: { backgroundColor: C.accent },
-  viewBtnText:   { fontSize: 13, fontWeight: '700', color: C.textSec },
-  downloadBtn:   { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: C.accentSoft, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 9, borderWidth: 1, borderColor: C.accent + '40' },
-  downloadText:  { fontSize: 13, fontWeight: '700', color: C.accent },
+  viewBtnText:   { fontSize: 13, fontWeight: '600', color: C.textSec },
+  downloadBtn:   { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.accentSoft, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8 },
+  downloadText:  { fontSize: 13, fontWeight: '600', color: C.accent },
 
   /* ── Weekly grid ── */
   timeCol:       { width: 60, paddingTop: 40, position: 'relative' },
   timeSlotLabel: { position: 'absolute', right: 8, width: 56 },
-  timeText:      { fontSize: 9, color: C.textMuted, textAlign: 'right', fontWeight: '700', letterSpacing: 0.3 },
+  timeText:      { fontSize: 10, color: C.textMuted, textAlign: 'right', fontWeight: '600' },
   dayCol:        { borderLeftWidth: 1, borderLeftColor: C.border },
   dayHeader: {
-    height: 44, alignItems: 'center', justifyContent: 'center',
-    borderBottomWidth: 1, borderBottomColor: C.border, position: 'relative', backgroundColor: C.surfaceEl,
+    height: 40, alignItems: 'center', justifyContent: 'center',
+    borderBottomWidth: 1, borderBottomColor: C.border, position: 'relative',
   },
   dayHeaderActive: { backgroundColor: C.accentGlow },
-  dayName:         { fontSize: 13, fontWeight: '900', color: C.textSec, letterSpacing: 0.5 },
-  todayUnderline:  { position: 'absolute', bottom: 0, left: '15%', right: '15%', height: 3, backgroundColor: C.accent, borderRadius: 1.5 },
-  hourLine:        { position: 'absolute', left: 0, right: 0, height: 1, backgroundColor: C.border + '60' },
+  dayName:         { fontSize: 12, fontWeight: '800', color: C.textSec, letterSpacing: 0.5 },
+  todayUnderline:  { position: 'absolute', bottom: 0, left: '20%', right: '20%', height: 2, backgroundColor: C.accent, borderRadius: 1 },
+  hourLine:        { position: 'absolute', left: 0, right: 0, height: 1, backgroundColor: C.border + '80' },
   breakStripe:     { position: 'absolute', left: 0, right: 0 },
   classCard: {
-    position: 'absolute', left: 3, borderRadius: 10,
-    borderLeftWidth: 4, padding: 8, overflow: 'hidden',
+    position: 'absolute', left: 3, borderRadius: 8,
+    borderLeftWidth: 3, padding: 6, overflow: 'hidden',
   },
-  classTypePill: { alignSelf: 'flex-start', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3, marginBottom: 4 },
+  classTypePill: { alignSelf: 'flex-start', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2, marginBottom: 4 },
   classTypeText: { fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
-  classSubject:  { fontSize: 12, fontWeight: '700', color: C.textPrimary, lineHeight: 15, marginBottom: 2 },
-  classYear:     { fontSize: 10, fontWeight: '600', color: C.textSec, marginBottom: 1 },
-  classTime:     { fontSize: 9, color: C.textSec, fontWeight: '500' },
-  classRoom:     { fontSize: 9, color: C.textMuted, marginTop: 3 },
+  classSubject:  { fontSize: 11, fontWeight: '700', color: C.textPrimary, lineHeight: 14, marginBottom: 2 },
+  classYear:     { fontSize: 9, fontWeight: '600', color: C.textSec, marginBottom: 1 },
+  classTime:     { fontSize: 9, color: C.textSec },
+  classRoom:     { fontSize: 9, color: C.textMuted, marginTop: 2 },
 
   /* ── Daily view ── */
   daySelectorPill: {
-    paddingHorizontal: 16, paddingVertical: 11, borderRadius: 12,
-    backgroundColor: C.surface, borderWidth: 1.2, borderColor: C.border, alignItems: 'center',
+    paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12,
+    backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, alignItems: 'center',
   },
   daySelectorPillActive: { backgroundColor: C.accent, borderColor: C.accent },
   daySelectorText:       { fontSize: 13, fontWeight: '800', color: C.textSec },
   emptyDay:  { alignItems: 'center', justifyContent: 'center', paddingVertical: 60, gap: 12 },
-  emptyText: { fontSize: 15, color: C.textMuted, fontWeight: '500' },
+  emptyText: { fontSize: 14, color: C.textMuted },
   dailyCard: {
-    backgroundColor: C.surface, borderRadius: 14, borderWidth: 1.2, borderColor: C.border,
-    borderLeftWidth: 4, padding: 16, marginBottom: 12,
+    backgroundColor: C.surface, borderRadius: 14, borderWidth: 1, borderColor: C.border,
+    borderLeftWidth: 3, padding: 14, marginBottom: 10,
   },
-  dailyTimeBlock:  { width: 54, alignItems: 'center' },
-  dailyTimeStart:  { fontSize: 12, fontWeight: '800', color: C.textPrimary },
-  dailyTimeLine:   { width: 3, flex: 1, marginVertical: 6, minHeight: 28, borderRadius: 1.5 },
-  dailyTimeEnd:    { fontSize: 12, fontWeight: '700', color: C.textSec },
-  dailySubject:    { fontSize: 17, fontWeight: '800', color: C.textPrimary, marginBottom: 6 },
-  dailyYear:       { fontSize: 13, fontWeight: '700', color: C.textSec, marginBottom: 4 },
-  dailyCode:       { fontSize: 12, color: C.textMuted },
-  dailyMeta:       { fontSize: 12, color: C.textMuted, fontWeight: '500' },
-  typeChip:        { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 7, paddingHorizontal: 8, paddingVertical: 4 },
-  typeChipText:    { fontSize: 10, fontWeight: '700', letterSpacing: 0.3 },
-  durationText:    { fontSize: 11, color: C.textMuted, fontWeight: '600' },
+  dailyTimeBlock:  { width: 52, alignItems: 'center' },
+  dailyTimeStart:  { fontSize: 11, fontWeight: '700', color: C.textSec },
+  dailyTimeLine:   { width: 2, flex: 1, marginVertical: 4, minHeight: 20, borderRadius: 1 },
+  dailyTimeEnd:    { fontSize: 11, fontWeight: '600', color: C.textMuted },
+  dailySubject:    { fontSize: 16, fontWeight: '800', color: C.textPrimary, marginBottom: 4 },
+  dailyYear:       { fontSize: 12, fontWeight: '600', color: C.textSec, marginBottom: 2 },
+  dailyCode:       { fontSize: 12, color: C.textSec },
+  dailyMeta:       { fontSize: 12, color: C.textMuted },
+  typeChip:        { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3 },
+  typeChipText:    { fontSize: 10, fontWeight: '700' },
+  durationText:    { fontSize: 11, color: C.textMuted },
 
   /* ── List view ── */
   listDayHeader: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
-    marginBottom: 10, paddingVertical: 10, paddingHorizontal: 4, borderBottomWidth: 2, borderBottomColor: C.border,
+    marginBottom: 8, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border,
   },
-  listDayName:      { fontSize: 16, fontWeight: '800', color: C.textPrimary },
-  listDayCount:     { backgroundColor: C.accentSoft, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
-  listDayCountText: { fontSize: 11, fontWeight: '700', color: C.accent },
-  listEmpty:        { fontSize: 13, color: C.textMuted, paddingVertical: 10, paddingLeft: 4, fontStyle: 'italic' },
+  listDayName:      { fontSize: 15, fontWeight: '800', color: C.textPrimary },
+  listDayCount:     { backgroundColor: C.accentSoft, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  listDayCountText: { fontSize: 10, fontWeight: '700', color: C.accent },
+  listEmpty:        { fontSize: 12, color: C.textMuted, paddingVertical: 8, paddingLeft: 4 },
   listCard: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: 12,
-    backgroundColor: C.surface, borderRadius: 12, borderWidth: 1.2, borderColor: C.border,
-    padding: 14, marginBottom: 8,
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: C.surface, borderRadius: 10, borderWidth: 1, borderColor: C.border,
+    padding: 12, marginBottom: 6,
   },
-  listColorDot:  { width: 12, height: 12, borderRadius: 6, marginTop: 4 },
-  listSubject:   { fontSize: 14, fontWeight: '800', color: C.textPrimary },
-  listMeta:      { fontSize: 12, color: C.textSec, marginTop: 3, lineHeight: 16 },
-  listTypePill:  { borderRadius: 7, paddingHorizontal: 9, paddingVertical: 5 },
-  listTypeText:  { fontSize: 11, fontWeight: '700' },
+  listColorDot:  { width: 10, height: 10, borderRadius: 5 },
+  listSubject:   { fontSize: 13, fontWeight: '700', color: C.textPrimary },
+  listMeta:      { fontSize: 11, color: C.textSec, marginTop: 2 },
+  listTypePill:  { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 },
+  listTypeText:  { fontSize: 10, fontWeight: '700' },
 
   /* ── Modal ── */
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.70)', justifyContent: 'flex-end' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' },
   modalSheet: {
-    backgroundColor: C.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28,
-    padding: 24, paddingBottom: Platform.OS === 'ios' ? 40 : 28,
-    borderTopWidth: 1.2, borderTopColor: C.border,
+    backgroundColor: C.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 20, paddingBottom: Platform.OS === 'ios' ? 36 : 24,
+    borderTopWidth: 1, borderTopColor: C.border,
   },
-  modalHandle:  { width: 40, height: 4, borderRadius: 2, backgroundColor: C.border, alignSelf: 'center', marginBottom: 22 },
-  modalHeader:  { borderLeftWidth: 5, paddingLeft: 16, marginBottom: 24, flexDirection: 'row', alignItems: 'flex-start' },
-  modalSubject: { fontSize: 22, fontWeight: '800', color: C.textPrimary, marginBottom: 4 },
-  modalCode:    { fontSize: 14, color: C.textSec, fontWeight: '600' },
-  modalClose:   { width: 36, height: 36, borderRadius: 18, backgroundColor: C.surfaceEl, alignItems: 'center', justifyContent: 'center' },
-  modalGrid:    { gap: 14, marginBottom: 24 },
-  modalDetailRow:   { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  modalDetailIcon:  { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  modalDetailLabel: { fontSize: 11, color: C.textMuted, fontWeight: '700', letterSpacing: 0.5 },
-  modalDetailValue: { fontSize: 15, fontWeight: '700', color: C.textPrimary, marginTop: 2 },
+  modalHandle:  { width: 36, height: 4, borderRadius: 2, backgroundColor: C.border, alignSelf: 'center', marginBottom: 20 },
+  modalHeader:  { borderLeftWidth: 4, paddingLeft: 14, marginBottom: 20, flexDirection: 'row', alignItems: 'flex-start' },
+  modalSubject: { fontSize: 20, fontWeight: '800', color: C.textPrimary, marginBottom: 4 },
+  modalCode:    { fontSize: 13, color: C.textSec },
+  modalClose:   { width: 34, height: 34, borderRadius: 17, backgroundColor: C.surfaceEl, alignItems: 'center', justifyContent: 'center' },
+  modalGrid:    { gap: 12, marginBottom: 20 },
+  modalDetailRow:   { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  modalDetailIcon:  { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  modalDetailLabel: { fontSize: 11, color: C.textMuted, fontWeight: '600' },
+  modalDetailValue: { fontSize: 14, fontWeight: '700', color: C.textPrimary },
   modalActions:     { flexDirection: 'row', gap: 10 },
-  modalBtn:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 18 },
-  modalBtnText:     { fontSize: 14, fontWeight: '700' },
+  modalBtn:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 16 },
+  modalBtnText:     { fontSize: 13, fontWeight: '700' },
 
   /* ── Upload feedback ── */
   uploadFeedback: {
