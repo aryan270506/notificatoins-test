@@ -303,9 +303,10 @@ export function TimetableManagementScreen() {
 
   /* ── Build grid columns from template ──────────────────────────── */
   const buildGridColumns = () => {
-    if (templateSlots.length === 0) return [];
+    // Use template slots if available, otherwise fall back to hardcoded SLOTS
+    const slotsToUse = templateSlots.length > 0 ? templateSlots : SLOTS;
     
-    return templateSlots.map((slot) => ({
+    return slotsToUse.map((slot) => ({
       kind: slot.type === 'break' ? 'break' : 'slot',
       label: slot.label,
       slotId: slot.id,
@@ -411,13 +412,18 @@ export function TimetableManagementScreen() {
             }
             
             if (Array.isArray(config.slots)) {
-              const processedSlots = config.slots.map(slot => ({
-                id: slot.id || `slot-${Math.random().toString(36).slice(2, 8)}`,
-                type: slot.type || 'lecture',
-                label: slot.label || '',
-                startTime: slot.startTime || '',
-                endTime: slot.endTime || '',
-              }));
+              const VALID_SLOT_IDS = ['t1', 't2', 't3', 't4', 't5', 't6'];
+              const processedSlots = config.slots.map((slot, index) => {
+                // Ensure slot.id is valid (one of t1-t6), otherwise assign based on index
+                const slotId = VALID_SLOT_IDS.includes(slot.id) ? slot.id : VALID_SLOT_IDS[index] || `t${index + 1}`;
+                return {
+                  id: slotId,
+                  type: slot.type === 'break' ? 'break' : 'lecture',
+                  label: slot.label || `Slot ${index + 1}`,
+                  startTime: slot.startTime || '',
+                  endTime: slot.endTime || '',
+                };
+              });
               setTemplateSlots(processedSlots);
             }
             

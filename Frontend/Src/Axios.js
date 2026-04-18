@@ -24,16 +24,17 @@ axiosInstance.interceptors.request.use(
       const token = await AsyncStorage.getItem("authToken");
 
       console.log(`📤 ${config.method?.toUpperCase()} ${config.url}`);
+      console.log(`🔑 Token present: ${token ? 'YES (length: ' + token.length + ')' : 'NO'}`);
 
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
-        console.log("🔐 Token attached");
+        console.log("🔐 Token attached to request");
       } else {
-        console.log("⚠️ No token found");
+        console.log("⚠️ No token found in AsyncStorage - request will be sent without authorization");
       }
 
     } catch (error) {
-      console.error("❌ Token error:", error);
+      console.error("❌ Token retrieval error:", error);
     }
 
     return config;
@@ -86,11 +87,13 @@ axiosInstance.interceptors.response.use(
         const { getNavigationRef } = require('../App');
         const nav = getNavigationRef();
 
-        if (nav) {
+        if (nav && typeof nav.reset === 'function') {
           nav.reset({
             index: 0,
             routes: [{ name: 'Login' }],
           });
+        } else if (nav && nav.navigate && typeof nav.navigate === 'function') {
+          nav.navigate('Login');
         }
       } catch (e) {
         console.error("❌ Navigation error:", e);

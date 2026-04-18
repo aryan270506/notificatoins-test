@@ -57,6 +57,31 @@ const daySchema = new mongoose.Schema(
 // ─── Main Timetable schema ─────────────────────────────────────────────────────
 const timetableSchema = new mongoose.Schema(
   {
+    // ✅ Institute & Department Scope
+    instituteId: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+
+    instituteName: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+
+    departmentCode: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+
+    departmentName: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+
     // Scope – mirrors what the frontend filter bar exposes
     year: {
       type: String,
@@ -106,10 +131,10 @@ const timetableSchema = new mongoose.Schema(
   }
 );
 
-// ─── Compound unique index: one timetable per year + division + batch ─────────
+// ─── Compound unique index: one timetable per institute + department + year + division + batch ─────────
 timetableSchema.index(
-  { year: 1, division: 1, batch: 1 },
-  { unique: true }
+  { instituteId: 1, departmentCode: 1, year: 1, division: 1, batch: 1 },
+  { unique: true, sparse: true }
 );
 
 module.exports = mongoose.model("Timetable", timetableSchema);

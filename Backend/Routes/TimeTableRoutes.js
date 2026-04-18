@@ -39,6 +39,8 @@ function yearCodeToNumber(code) {
 
 function normalizeTemplateConfig(config) {
   const source = config && typeof config === "object" ? config : {};
+  const VALID_SLOT_IDS = ["t1", "t2", "t3", "t4", "t5", "t6"];
+  
   const workingDays = Array.isArray(source.workingDays)
     ? source.workingDays.filter((day) => VALID_DAYS.includes(day))
     : [];
@@ -46,8 +48,11 @@ function normalizeTemplateConfig(config) {
   const slots = Array.isArray(source.slots)
     ? source.slots
         .filter((slot) => slot && typeof slot === "object")
-        .map((slot) => ({
-          id: String(slot.id || "").trim(),
+        .map((slot, index) => ({
+          // ✅ Ensure slot.id is valid (t1-t6), otherwise assign based on index
+          id: VALID_SLOT_IDS.includes(String(slot.id || "").trim()) 
+            ? String(slot.id).trim() 
+            : VALID_SLOT_IDS[index] || `t${index + 1}`,
           type: slot.type === "break" ? "break" : "lecture",
           label: String(slot.label || "").trim(),
           startTime: String(slot.startTime || "").trim(),
@@ -112,7 +117,8 @@ async function resolveTeacherScope(req) {
   }
 
   // ✅ SECOND: Try to fetch from database if not in token
-  const teacherId = req.teacher?._id || req.teacher?.id || user._id || user.id;
+  // JWT token contains 'userId', not '_id'
+  const teacherId = user.userId;
 
   if (!teacherId) {
     console.warn("⚠️ No teacher ID found in request");
@@ -219,11 +225,11 @@ const CLASS_TEACHER_YEAR_MAP = {
 
 // ─── Middleware: only the class teacher of the target year+division may mutate ─
 // Reads year & division from req.body (PUT/POST/DELETE routes).
-// Must be used AFTER auth middleware so req.teacher is populated.
+// Must be used AFTER auth middleware so req.user is populated.
 async function classTeacherGuard(req, res, next) {
   try {
-    const teacher = req.teacher; // set by auth middleware
-    if (!teacher) {
+    const user = req.user; // set by auth middleware
+    if (!user) {
       return res.status(401).json({ success: false, message: "Unauthorised – please log in" });
     }
 
@@ -232,8 +238,9 @@ async function classTeacherGuard(req, res, next) {
     // If no year/division in body we can't check – let the route handler reject it
     if (!year || !division) return next();
 
-    // Fetch fresh teacher doc (req.teacher may be a partial token payload)
-    const teacherDoc = await Teacher.findById(teacher._id || teacher.id, "classTeacher").lean();
+    // Fetch fresh teacher doc (req.user may be a partial token payload)
+    // JWT token contains 'userId', not '_id'
+    const teacherDoc = await Teacher.findById(user.userId, "classTeacher").lean();
     if (!teacherDoc) {
       return res.status(401).json({ success: false, message: "Teacher account not found" });
     }
@@ -603,7 +610,19 @@ router.get("/teacher/:teacherId", async (req, res) => {
   try {
     const { teacherId } = req.params;
 
-    const allTimetables = await Timetable.find({}).lean();
+    // ✅ Get teacher's scope info
+    const teacher = await Teacher.findById(teacherId, "instituteId departmentCode").lean();
+    
+    // Build filter for timetables scoped to teacher's institute/department
+    const timetableFilter = {};
+    if (teacher && teacher.instituteId) {
+      timetableFilter.instituteId = teacher.instituteId;
+    }
+    if (teacher && teacher.departmentCode) {
+      timetableFilter.departmentCode = teacher.departmentCode;
+    }
+
+    const allTimetables = await Timetable.find(timetableFilter).lean();
 
     const DAYS  = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
     const SLOTS = ["t1","t2","t3","t4","t5","t6"];
@@ -702,22 +721,35 @@ router.get("/parent/:parentId", async (req, res) => {
 
     // ── 5. Optionally resolve student name via PRN ────────────────────────────
     let studentName = parent.name; // fallback to parent name
+    let studentInstituteId = null;
+    let studentDepartmentCode = null;
+    
     if (parent.prn) {
-      const student = await Student.findOne({ prn: parent.prn }, "name").lean();
-      if (student) studentName = student.name;
+      const student = await Student.findOne({ prn: parent.prn }, "name instituteId departmentCode").lean();
+      if (student) {
+        studentName = student.name;
+        studentInstituteId = student.instituteId;
+        studentDepartmentCode = student.departmentCode;
+      }
     }
 
     // ── 6. Look up timetable ──────────────────────────────────════════════════
-    console.log(`🔎 Looking for timetable: year=${year} division=${division} batch=${batch}`);
+    console.log(`🔎 Looking for timetable: year=${year} division=${division} batch=${batch} instituteId=${studentInstituteId}`);
 
-    const timetable = await Timetable.findOne({
+    // ✅ Build query filter with scope if available
+    const timetableFilter = {
       year,
       division: division.toUpperCase(),
       batch:    batch.toUpperCase(),
-    }).lean();
+    };
+
+    if (studentInstituteId) timetableFilter.instituteId = studentInstituteId;
+    if (studentDepartmentCode) timetableFilter.departmentCode = studentDepartmentCode;
+
+    const timetable = await Timetable.findOne(timetableFilter).lean();
 
     if (!timetable) {
-      const existing = await Timetable.find({}, "year division batch").lean();
+      const existing = await Timetable.find({}, "year division batch instituteId departmentCode").lean();
       console.log("📚 Timetables in DB:", JSON.stringify(existing, null, 2));
 
       return res.status(404).json({
@@ -768,7 +800,7 @@ router.get("/debug/all", async (req, res) => {
 
 router.get("/", async (req, res) => {
   try {
-    const { year, division, batch } = req.query;
+    const { year, division, batch, instituteId, departmentCode } = req.query;
 
     if (!year || !division || !batch) {
       return res.status(400).json({
@@ -777,11 +809,18 @@ router.get("/", async (req, res) => {
       });
     }
 
-    const timetable = await Timetable.findOne({
+    // ✅ Build query filter with optional scope
+    const filter = {
       year,
       division: division.toUpperCase(),
       batch:    batch.toUpperCase(),
-    }).lean();
+    };
+
+    // Add scope if provided
+    if (instituteId) filter.instituteId = instituteId;
+    if (departmentCode) filter.departmentCode = departmentCode;
+
+    const timetable = await Timetable.findOne(filter).lean();
 
     if (!timetable) {
       return res.status(200).json({
@@ -815,7 +854,18 @@ router.post("/", auth, classTeacherGuard, async (req, res) => {
       });
     }
 
+    // ✅ Get scope from teacher
+    const scope = await resolveTeacherScope(req);
+    if (!scope) {
+      return res.status(403).json({
+        success: false,
+        message: "Unable to determine institute/department scope for timetable",
+      });
+    }
+
     const existing = await Timetable.findOne({
+      instituteId: scope.instituteId,
+      departmentCode: scope.departmentCode,
       year,
       division: division.toUpperCase(),
       batch:    batch.toUpperCase(),
@@ -830,6 +880,10 @@ router.post("/", auth, classTeacherGuard, async (req, res) => {
     }
 
     const timetable = await Timetable.create({
+      instituteId: scope.instituteId,
+      instituteName: scope.instituteName,
+      departmentCode: scope.departmentCode,
+      departmentName: scope.departmentName,
       year,
       division:     division.toUpperCase(),
       batch:        batch.toUpperCase(),
@@ -863,6 +917,15 @@ router.put("/slot", auth, classTeacherGuard, async (req, res) => {
     if (!isValidDay(day))     return res.status(400).json({ success: false, message: `Invalid day: ${day}` });
     if (!isValidSlot(slotId)) return res.status(400).json({ success: false, message: `Invalid slotId: ${slotId}` });
 
+    // ✅ Get scope from teacher
+    const scope = await resolveTeacherScope(req);
+    if (!scope) {
+      return res.status(403).json({
+        success: false,
+        message: "Unable to determine institute/department scope for timetable",
+      });
+    }
+
     const teacher = await Teacher.findById(teacherId, "name").lean();
     if (!teacher) return res.status(404).json({ success: false, message: "Teacher not found" });
 
@@ -877,13 +940,74 @@ router.put("/slot", auth, classTeacherGuard, async (req, res) => {
     };
 
     const timetable = await Timetable.findOneAndUpdate(
-      { year, division: division.toUpperCase(), batch: batch.toUpperCase() },
+      { 
+        instituteId: scope.instituteId,
+        departmentCode: scope.departmentCode,
+        year, 
+        division: division.toUpperCase(), 
+        batch: batch.toUpperCase() 
+      },
       {
         $set:         { [updatePath]: slotData },
-        $setOnInsert: { year, division: division.toUpperCase(), batch: batch.toUpperCase() },
+        $setOnInsert: { 
+          instituteId: scope.instituteId,
+          instituteName: scope.instituteName,
+          departmentCode: scope.departmentCode,
+          departmentName: scope.departmentName,
+          year, 
+          division: division.toUpperCase(), 
+          batch: batch.toUpperCase() 
+        },
       },
       { new: true, upsert: true, runValidators: true }
     );
+
+    // ✅ Update teacher's subject assignments
+    // Check if assignment already exists for this year/division/batch
+    const normalizedSubject = subject.trim().toUpperCase();
+    const existingAssignment = await Teacher.findOne(
+      {
+        _id: teacherId,
+        "subjectAssignments.year": String(year),
+        "subjectAssignments.division": division.toUpperCase(),
+        "subjectAssignments.batch": batch.toUpperCase(),
+      },
+      { "subjectAssignments.$": 1 }
+    ).lean();
+
+    if (existingAssignment && existingAssignment.subjectAssignments?.length > 0) {
+      // Update existing assignment - add subject if not already there
+      await Teacher.updateOne(
+        {
+          _id: teacherId,
+          "subjectAssignments.year": String(year),
+          "subjectAssignments.division": division.toUpperCase(),
+          "subjectAssignments.batch": batch.toUpperCase(),
+        },
+        {
+          $addToSet: { "subjectAssignments.$.subjects": normalizedSubject },
+          $set: { "subjectAssignments.$.assignedAt": new Date() }
+        }
+      );
+      console.log(`✅ Updated subject assignment for teacher ${teacherId}: year=${year}, division=${division}, batch=${batch}, subject=${normalizedSubject}`);
+    } else {
+      // Create new assignment
+      await Teacher.updateOne(
+        { _id: teacherId },
+        {
+          $push: {
+            subjectAssignments: {
+              year: String(year),
+              division: division.toUpperCase(),
+              batch: batch.toUpperCase(),
+              subjects: [normalizedSubject],
+              assignedAt: new Date(),
+            }
+          }
+        }
+      );
+      console.log(`✅ Created new subject assignment for teacher ${teacherId}: year=${year}, division=${division}, batch=${batch}, subject=${normalizedSubject}`);
+    }
 
     res.status(200).json({ success: true, message: `Slot ${day} / ${slotId} updated`, data: timetable });
   } catch (err) {
@@ -912,15 +1036,87 @@ router.delete("/slot", auth, classTeacherGuard, async (req, res) => {
     if (!isValidDay(day))     return res.status(400).json({ success: false, message: `Invalid day: ${day}` });
     if (!isValidSlot(slotId)) return res.status(400).json({ success: false, message: `Invalid slotId: ${slotId}` });
 
+    // ✅ Get scope from teacher
+    const scope = await resolveTeacherScope(req);
+    if (!scope) {
+      return res.status(403).json({
+        success: false,
+        message: "Unable to determine institute/department scope for timetable",
+      });
+    }
+
+    // ✅ FIRST: Get the current timetable to find what teacher/subject is in this slot
+    const currentTimetable = await Timetable.findOne({ 
+      instituteId: scope.instituteId,
+      departmentCode: scope.departmentCode,
+      year, 
+      division: division.toUpperCase(), 
+      batch: batch.toUpperCase() 
+    }).lean();
+
+    let teacherToUpdate = null;
+    let subjectToRemove = null;
+
+    if (currentTimetable && currentTimetable[day]?.[slotId]) {
+      const slot = currentTimetable[day][slotId];
+      if (slot && slot.teacherId && slot.subject) {
+        teacherToUpdate = slot.teacherId;
+        subjectToRemove = slot.subject.toUpperCase();
+      }
+    }
+
     const updatePath = `${day}.${slotId}`;
 
+    // ✅ SECOND: Delete the slot from timetable
     const timetable = await Timetable.findOneAndUpdate(
-      { year, division: division.toUpperCase(), batch: batch.toUpperCase() },
+      { 
+        instituteId: scope.instituteId,
+        departmentCode: scope.departmentCode,
+        year, 
+        division: division.toUpperCase(), 
+        batch: batch.toUpperCase() 
+      },
       { $unset: { [updatePath]: "" } },
       { new: true }
     );
 
     if (!timetable) return res.status(404).json({ success: false, message: "Timetable not found" });
+
+    // ✅ THIRD: Remove subject assignment from teacher if found
+    if (teacherToUpdate && subjectToRemove) {
+      // Check if this subject is still used in other slots by the same teacher for this year/division/batch
+      const otherSlots = await Timetable.countDocuments({
+        instituteId: scope.instituteId,
+        departmentCode: scope.departmentCode,
+        year,
+        division: division.toUpperCase(),
+        batch: batch.toUpperCase(),
+        $or: [
+          { "Monday": { $exists: true } },
+          { "Tuesday": { $exists: true } },
+          { "Wednesday": { $exists: true } },
+          { "Thursday": { $exists: true } },
+          { "Friday": { $exists: true } },
+          { "Saturday": { $exists: true } },
+        ],
+      });
+
+      // For simplicity, just remove the subject from the teacher's assignment
+      // In a more complex system, we'd check if the subject is used elsewhere
+      await Teacher.updateOne(
+        {
+          _id: teacherToUpdate,
+          "subjectAssignments.year": String(year),
+          "subjectAssignments.division": division.toUpperCase(),
+          "subjectAssignments.batch": batch.toUpperCase(),
+        },
+        {
+          $pull: { "subjectAssignments.$.subjects": subjectToRemove }
+        }
+      );
+
+      console.log(`✅ Removed subject assignment for teacher ${teacherToUpdate}: subject=${subjectToRemove}`);
+    }
 
     res.status(200).json({ success: true, message: `Slot ${day} / ${slotId} cleared`, data: timetable });
   } catch (err) {
@@ -946,15 +1142,82 @@ router.delete("/", auth, classTeacherGuard, async (req, res) => {
       });
     }
 
-    const result = await Timetable.findOneAndDelete({
+    // ✅ Get scope from teacher
+    const scope = await resolveTeacherScope(req);
+    if (!scope) {
+      return res.status(403).json({
+        success: false,
+        message: "Unable to determine institute/department scope for timetable",
+      });
+    }
+
+    // ✅ FIRST: Get the timetable before deleting to extract teacher assignments
+    const timetableToDelete = await Timetable.findOne({
+      instituteId: scope.instituteId,
+      departmentCode: scope.departmentCode,
       year,
       division: division.toUpperCase(),
-      batch:    batch.toUpperCase(),
+      batch: batch.toUpperCase(),
+    }).lean();
+
+    if (!timetableToDelete) {
+      return res.status(404).json({ success: false, message: "Timetable not found" });
+    }
+
+    // Extract all unique teachers and subjects from the timetable
+    const teacherAssignments = new Map(); // teacherId -> Set of subjects
+    const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const slots = ["t1", "t2", "t3", "t4", "t5", "t6"];
+
+    days.forEach(day => {
+      if (timetableToDelete[day]) {
+        slots.forEach(slot => {
+          const slotData = timetableToDelete[day][slot];
+          if (slotData && slotData.teacherId && slotData.subject) {
+            const teacherId = String(slotData.teacherId);
+            const subject = slotData.subject.toUpperCase();
+            if (!teacherAssignments.has(teacherId)) {
+              teacherAssignments.set(teacherId, new Set());
+            }
+            teacherAssignments.get(teacherId).add(subject);
+          }
+        });
+      }
     });
 
-    if (!result) return res.status(404).json({ success: false, message: "Timetable not found" });
+    // ✅ SECOND: Delete the timetable
+    const result = await Timetable.findOneAndDelete({
+      instituteId: scope.instituteId,
+      departmentCode: scope.departmentCode,
+      year,
+      division: division.toUpperCase(),
+      batch: batch.toUpperCase(),
+    });
 
-    res.status(200).json({ success: true, message: "Timetable deleted" });
+    // ✅ THIRD: Clean up subject assignments for all affected teachers
+    for (const [teacherId, subjects] of teacherAssignments.entries()) {
+      await Teacher.updateOne(
+        {
+          _id: teacherId,
+          "subjectAssignments.year": String(year),
+          "subjectAssignments.division": division.toUpperCase(),
+          "subjectAssignments.batch": batch.toUpperCase(),
+        },
+        {
+          $unset: { "subjectAssignments.$": "" }
+        }
+      );
+      
+      // Remove empty assignment entries
+      await Teacher.updateOne(
+        { _id: teacherId },
+        { $pull: { subjectAssignments: null } }
+      );
+
+      console.log(`✅ Cleaned up subject assignments for teacher ${teacherId}`);
+    }
+
+    res.status(200).json({ success: true, message: "Timetable deleted and subject assignments cleaned up" });
   } catch (err) {
     console.error("DELETE / error:", err);
     res.status(500).json({ success: false, message: err.message });
@@ -1423,8 +1686,22 @@ router.put('/update-timetable', auth, classTeacherGuard, async (req, res) => {
   try {
     const { year, division, changes } = req.body;
     
-    // Update timetable (existing code)
-    // ...
+    // ✅ Get scope from teacher
+    const scope = await resolveTeacherScope(req);
+    if (!scope) {
+      return res.status(403).json({
+        success: false,
+        message: "Unable to determine institute/department scope for timetable",
+      });
+    }
+    
+    // Update timetable with scope
+    const filter = {
+      instituteId: scope.instituteId,
+      departmentCode: scope.departmentCode,
+      year,
+      division: division.toUpperCase()
+    };
 
     // Send notification to all students in the class
     const notificationData = {
